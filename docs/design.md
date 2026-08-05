@@ -73,15 +73,19 @@ Debug output always shows the effective scope.
 
 ## Capture flow
 
-Capture begins only after a successful `agent_settled` event.
+Capture is scheduled after Pi emits `agent_settled`. This event means Pi has finished the
+agent run and will not automatically continue through retries, compaction retries, or queued
+follow-ups. It does not itself mean the work succeeded, so the extension must inspect the final
+assistant message and skip capture when its stop reason is error or aborted.
 
 1. Read only conversation messages added since the last capture watermark.
 2. Ask the selected Pi model for zero to three atomic, evidenced candidates.
-3. Reject secrets, credentials, payroll data, unnecessary PII, guesses, and transient output.
-4. Query Forgetful for overlap before every create operation.
-5. Create only novel, high-confidence memories.
-6. Never update or obsolete an existing memory automatically.
-7. If overlap indicates contradiction or incompleteness, skip the write.
+3. Apply deterministic structural and sensitive-data validation to its response.
+4. Query Forgetful for overlap for each accepted candidate.
+5. Give the candidate and overlapping memories to the selected model for `create` or `skip`.
+6. Execute the model's validated decision through the Forgetful API.
+7. Never update or obsolete an existing memory automatically.
+8. If the decision is malformed or uncertain, skip the write.
 
 The first implementation uses automatic capture immediately, as agreed. Debug tooling must
 still expose each candidate and create/skip reason.
@@ -181,18 +185,37 @@ local service startup can be considered separately after the basic HTTP path is 
 
 Each slice remains vertically usable and covered by regression tests.
 
-## Proposed test seams
+## Confirmed test seams
 
-Before implementation, confirm these public seams:
+The automated boundary starts after a model has made a structured decision. Tests do not claim
+to prove that a real model classifies, splits, or judges novelty correctly.
 
-1. **Pi prompt seam**: a normal user prompt receives recalled context in the same agent turn.
-2. **Agent tool seam**: the main agent can follow a memory lead through bounded read-only recall.
-3. **Capture seam**: settled successful work creates only a novel, atomic memory.
-4. **Configuration seam**: toggles, model selection, prompt overlays, and scope take effect.
-5. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
-6. **Privacy seam**: temporary context is not added as a visible or persistent session message.
-7. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
+1. **Planner input seam**: the planner receives the expected user prompt, session context,
+   project identity, scope, and composed classification policy.
+2. **Recall mechanism seam**: given a structured search decision and seeded Forgetful data,
+   the correct bounded context and leads reach the same main-agent turn.
+3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
+   scoped Forgetful data to the main agent.
+4. **Capture input seam**: the capture model receives only the completed turn delta and the
+   composed capture policy.
+5. **Capture mechanism seam**: given structured candidate and create/skip decisions, the
+   extension performs the expected Forgetful search and write, with correct fields and scope.
+6. **Configuration seam**: toggles, model selection, prompt overlays, and scope take effect.
+7. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
+8. **Privacy seam**: temporary context is not added as a visible or persistent session message.
+9. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
 
-Testing should use Pi's faux model for deterministic behavior, a throwaway Forgetful SQLite
-service, and black-box Pi runs in isolated tmux sessions. Real configured models are used only
-for the latency and quality benchmark matrix.
+A black-box test can use Pi's faux model to supply predetermined decisions and a real throwaway
+Forgetful SQLite service. This tests the complete mechanism without pretending to test model
+intelligence. For example:
+
+- seed a memory, return a planner decision that queries it, and assert the main model receives
+  that memory in its temporary system prompt;
+- return a capture candidate and `create`, then assert the expected memory exists through the
+  Forgetful API;
+- pre-seed an overlapping memory, return `skip`, and assert the memory count is unchanged;
+- emit the same settled turn twice and assert the capture watermark prevents repeat work.
+
+Semantic classification, semantic atomicity, and novelty quality remain model behavior. They
+can be explored with real-model evaluation scenarios, but are not deterministic regression
+claims.
