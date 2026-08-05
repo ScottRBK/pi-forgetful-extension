@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en" data-theme="business">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seamless Forgetful memory in Pi</title>
+  <link rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script
+    src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js">
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :where(.grid, .flex) > * { min-width: 0; }
+    :where(p, h1, h2, h3, li, td, th, code, .badge) {
+      overflow-wrap: anywhere;
+    }
+    .mermaid { overflow-x: auto; }
+  </style>
+</head>
+<body class="min-h-screen bg-base-200 text-base-content">
+  <main class="mx-auto max-w-7xl p-4 sm:p-6 lg:p-10">
+    <section class="hero rounded-box border border-base-300 bg-base-100 shadow-xl">
+      <div class="hero-content w-full py-10 text-left">
+        <div class="w-full">
+          <div class="mb-4 flex flex-wrap gap-2">
+            <span class="badge badge-success badge-soft">Feasible in Pi 0.83</span>
+            <span class="badge badge-primary badge-soft">Zero-command default</span>
+            <span class="badge badge-info badge-soft">User-selected Pi model</span>
+          </div>
+          <h1 class="max-w-5xl text-3xl font-bold sm:text-5xl">
+            Memory should feel like part of Pi, not another workflow
+          </h1>
+          <p class="mt-5 max-w-4xl text-lg opacity-80">
+            A Pi extension can quietly inspect each meaningful prompt, reuse the user's
+            configured Pi model, retrieve relevant Forgetful context, and add it only to the
+            current model turn. The user keeps typing normally.
+          </p>
+          <div class="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="stat rounded-box bg-base-200">
+              <div class="stat-title">Normal commands</div>
+              <div class="stat-value text-success">0</div>
+              <div class="stat-desc">No manual recall or save commands</div>
+            </div>
+            <div class="stat rounded-box bg-base-200">
+              <div class="stat-title">Extra model</div>
+              <div class="stat-value text-primary">1</div>
+              <div class="stat-desc">Small focused preflight call</div>
+            </div>
+            <div class="stat rounded-box bg-base-200">
+              <div class="stat-title">Default visibility</div>
+              <div class="stat-value text-secondary">Silent</div>
+              <div class="stat-desc">Details only in debug mode</div>
+            </div>
+            <div class="stat rounded-box bg-base-200">
+              <div class="stat-title">Failure policy</div>
+              <div class="stat-value text-warning">Open</div>
+              <div class="stat-desc">Memory never blocks the task</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 grid gap-6 lg:grid-cols-[1.45fr_1fr]">
+      <article class="card card-border bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-2xl">The seamless recall path</h2>
+          <p class="opacity-75">
+            It is invisible, but not literally asynchronous: useful memory must arrive before
+            Pi sends the main model request. A strict timeout keeps this preflight small.
+          </p>
+          <div class="mermaid mt-4">
+sequenceDiagram
+  participant U as User
+  participant P as Pi extension
+  participant M as Selected Pi model
+  participant F as Forgetful service
+  participant A as Main Pi agent
+  U->>P: Normal prompt
+  P->>P: Skip trivial or repeated prompts
+  alt planning is needed
+    P->>M: Small JSON search-planning request
+    M-->>P: topic, intent, optional entities
+  else fast path
+    P->>P: prompt + cached session topic
+  end
+  P->>F: Project-scoped semantic search
+  F-->>P: Bounded memory pack
+  P->>A: Temporary context + deeper-search leads
+  opt Agent needs more detail
+    A->>P: forgetful_recall tool
+    P->>F: Focused follow-up search
+    F-->>A: Deeper bounded context
+  end
+  A-->>U: Normal answer
+          </div>
+          <div class="alert alert-info alert-soft mt-4">
+            <span>
+              Pi explicitly supports this: <code>before_agent_start</code> can modify the
+              system prompt for the current turn, while <code>modelRegistry</code> resolves
+              existing models and credentials.
+            </span>
+          </div>
+          <div class="mt-4 rounded-box border border-primary/30 bg-primary/10 p-5">
+            <h3 class="font-bold">Leave the main agent useful “nuggets”</h3>
+            <p class="mt-2 text-sm">
+              The preflight should inject only the strongest context plus short leads such as
+              memory IDs, entity names, and related topics. The extension can also register a
+              compact <code>forgetful_recall</code> tool so the main agent can decide to dig
+              deeper during the same turn without asking the user to run anything.
+            </p>
+          </div>
+        </div>
+      </article>
+
+      <article class="card card-border bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-2xl">What “background” means</h2>
+          <div class="space-y-4">
+            <div class="rounded-box bg-base-200 p-4">
+              <div class="font-bold text-success">Recall: invisible preflight</div>
+              <p class="mt-1 text-sm opacity-80">
+                It briefly waits before the main agent starts, because late context cannot
+                affect the first model request safely.
+              </p>
+            </div>
+            <div class="rounded-box bg-base-200 p-4">
+              <div class="font-bold text-primary">Capture: true background work</div>
+              <p class="mt-1 text-sm opacity-80">
+                After <code>agent_settled</code>, a conservative model pass can extract and
+                save durable decisions while the user reads the answer.
+              </p>
+            </div>
+            <div class="rounded-box bg-base-200 p-4">
+              <div class="font-bold text-warning">Timeout: continue without memory</div>
+              <p class="mt-1 text-sm opacity-80">
+                If either the model or Forgetful is slow, Pi continues normally and a circuit
+                breaker avoids repeated delays.
+              </p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Recommended architecture</h2>
+        <div class="mermaid mt-3">
+flowchart TD
+  I["Pi input event"] --> R{"Selected Pi model\nadaptive memory planner"}
+  R -- "search: false" --> A["Main Pi agent"]
+  R -- "search: true\nqueries + entities" --> Q["Validated JSON search plan"]
+  Q --> H["Warm Forgetful HTTP service\nREST search via fetch"]
+  H --> B{"Relevant bounded results?"}
+  B -- "No" --> A
+  B -- "Yes" --> S["Append untrusted memory block\nto this turn's system prompt"]
+  S --> A
+  A -- "needs more context" --> T["forgetful_recall tool\nfocused deeper query"]
+  T --> H
+  A --> C["agent_settled"]
+  C --> X["Optional conservative capture\ncreate-only, query-before-create"]
+        </div>
+        <div class="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
+            <h3 class="font-bold">Pi extension</h3>
+            <p class="mt-2 text-sm">
+              Owns timing, model selection, timeouts, caching, debug UI, and temporary
+              injection. It contains no memory business rules beyond safety limits.
+            </p>
+          </div>
+          <div class="rounded-box bg-secondary/10 p-5 ring-1 ring-secondary">
+            <h3 class="font-bold">Direct model call</h3>
+            <p class="mt-2 text-sm">
+              Use Pi's bundled <code>complete()</code> API and resolved auth. A separate
+              subprocess agent is unnecessary and would add startup and tool overhead.
+            </p>
+          </div>
+          <div class="rounded-box bg-accent/10 p-5 ring-1 ring-accent">
+            <h3 class="font-bold">Warm Forgetful service</h3>
+            <p class="mt-2 text-sm">
+              Use the REST search endpoint over localhost or a configured server. Do not
+              rebuild the local Python runtime and embedding model for every prompt.
+            </p>
+          </div>
+          <div class="rounded-box bg-info/10 p-5 ring-1 ring-info">
+            <h3 class="font-bold">Agent recall tool</h3>
+            <p class="mt-2 text-sm">
+              Register one bounded read-only tool for deeper exploration. Render it as a
+              compact “memory lookup” line and cap calls/results to avoid tool-loop noise.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">The adaptive planner is the Pi model</h2>
+        <p class="opacity-75">
+          Application code should not guess whether “do it”, “what about Sarah?”, or an error
+          string needs memory. Every normal user prompt goes to the configured Pi model, which
+          returns a small validated search plan.
+        </p>
+        <div class="mt-5 grid gap-4 md:grid-cols-3">
+          <div class="rounded-box bg-success/10 p-5 ring-1 ring-success">
+            <h3 class="font-bold">Do not call the planner in process-only cases</h3>
+            <p class="mt-2 text-sm">
+              These checks know nothing about the meaning of the user's words. They only
+              prevent recursion or duplicate work.
+            </p>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>The user explicitly switched Forgetful off.</li>
+              <li>The message was generated by this extension, not typed by the user.</li>
+              <li>Pi retried the exact same input and its plan is already cached.</li>
+            </ul>
+          </div>
+          <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
+            <h3 class="font-bold">Model decides</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Whether any search is useful.</li>
+              <li>One or two topic queries and the task intent.</li>
+              <li>Named entities and whether deeper graph lookup may help.</li>
+            </ul>
+          </div>
+          <div class="rounded-box bg-warning/10 p-5 ring-1 ring-warning">
+            <h3 class="font-bold">Code validates</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Strict JSON shape and bounded field lengths.</li>
+              <li>Maximum query/entity counts and project scope.</li>
+              <li>Timeout, cancellation, caching, and failure-open behavior.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="alert alert-info alert-soft mt-5">
+          <span>
+            In other words: every new user prompt is judged by the selected Pi model. Code
+            skips only messages that are not new user work, then validates the model's output
+            and enforces safety limits.
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Configurable prompt policy, protected contracts</h2>
+        <p class="opacity-75">
+          The extension should let users and trusted projects shape memory judgment without
+          allowing an override to break JSON parsing, scope limits, or safety rules.
+        </p>
+        <div class="mermaid mt-4">
+flowchart LR
+  D["Built-in core contract\nschema + safety + bounds"] --> C["Prompt compiler"]
+  U["Optional global policy\n~/.pi/agent/forgetful/prompts"] --> C
+  P["Optional trusted project policy\n.pi/forgetful/prompts"] --> C
+  C --> M["Selected Pi model"]
+        </div>
+        <div class="mt-5 overflow-x-auto rounded-box border border-base-300">
+          <table class="table table-zebra table-sm">
+            <thead>
+              <tr>
+                <th>Prompt slot</th>
+                <th>What users can shape</th>
+                <th>What stays protected</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>classification.md</code></td>
+                <td>
+                  Domain relevance, topic/entity guidance, what deserves a search, and
+                  project-specific vocabulary.
+                </td>
+                <td>
+                  Output schema: <code>search</code>, bounded queries, intent, entities, and
+                  scope hint.
+                </td>
+              </tr>
+              <tr>
+                <td><code>recall.md</code></td>
+                <td>
+                  How retrieved memories and deeper-search nuggets are explained to the main
+                  agent.
+                </td>
+                <td>
+                  Untrusted-content warning, token budget, citations, and user scope ceiling.
+                </td>
+              </tr>
+              <tr>
+                <td><code>capture.md</code></td>
+                <td>
+                  What counts as durable knowledge, domain exclusions, importance guidance,
+                  and examples.
+                </td>
+                <td>
+                  Zero-to-three candidate schema, secret/PII exclusions, create-only policy,
+                  and query-before-create.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">Simple layering</h3>
+            <p class="mt-2 text-sm">
+              Built-in core + optional global policy + optional trusted project policy.
+              Policies append to the core rather than replacing it, so upgrades can preserve
+              the extension's contract.
+            </p>
+          </div>
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">Small management surface</h3>
+            <p class="mt-2 text-sm">
+              <code>/forgetful prompts</code> shows active sources and hashes;
+              <code>/forgetful prompt edit capture</code> opens the selected policy file;
+              <code>/forgetful prompt test classification</code> runs a debug-only dry run.
+            </p>
+          </div>
+        </div>
+        <div class="alert alert-info alert-soft mt-5">
+          <span>
+            The recall prompt is an injection template, not another model call. Adding a
+            second relevance model after search would improve filtering but work against the
+            latency goal; the main agent can judge the bounded results and follow nuggets.
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Speed strategy</h2>
+        <div class="mt-3 grid gap-4 lg:grid-cols-3">
+          <article class="card bg-primary/10 ring-2 ring-primary">
+            <div class="card-body">
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="card-title">Always use selected Pi planner</h3>
+                <span class="badge badge-primary">Recommended</span>
+              </div>
+              <p>
+                Every normal prompt gets one small, tool-free model call. The model returns
+                <code>search: false</code> or a bounded search plan.
+              </p>
+              <div class="mt-2 text-sm opacity-75">
+                Semantically consistent; speed depends mainly on the user's model choice.
+              </div>
+            </div>
+          </article>
+          <article class="card bg-base-200">
+            <div class="card-body">
+              <h3 class="card-title">Planner with short-lived cache</h3>
+              <p>
+                Still model-led, but identical or repeated prompts reuse a recent validated
+                plan rather than paying twice.
+              </p>
+              <div class="mt-2 text-sm opacity-75">
+                Safe mechanical optimization without replacing model judgment.
+              </div>
+            </div>
+          </article>
+          <article class="card bg-base-200">
+            <div class="card-body">
+              <h3 class="card-title">Planner unavailable</h3>
+              <p>
+                Do not replace model judgment with keyword rules. If the configured model is
+                unavailable or times out, skip automatic recall for that turn.
+              </p>
+              <div class="mt-2 text-sm opacity-75">
+                Failure-open keeps Pi responsive and preserves predictable behavior.
+              </div>
+            </div>
+          </article>
+        </div>
+        <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="stat rounded-box bg-base-200">
+            <div class="stat-title">Planner output</div>
+            <div class="stat-value text-lg">≤ 150 tokens</div>
+            <div class="stat-desc">JSON only, no tools</div>
+          </div>
+          <div class="stat rounded-box bg-base-200">
+            <div class="stat-title">Queries</div>
+            <div class="stat-value text-lg">1–2</div>
+            <div class="stat-desc">Run in parallel when two</div>
+          </div>
+          <div class="stat rounded-box bg-base-200">
+            <div class="stat-title">Injected pack</div>
+            <div class="stat-value text-lg">≤ 1,500</div>
+            <div class="stat-desc">Token budget, deduplicated</div>
+          </div>
+          <div class="stat rounded-box bg-base-200">
+            <div class="stat-title">Preflight budget</div>
+            <div class="stat-value text-lg">~1.5 s</div>
+            <div class="stat-desc">Fail open when exceeded</div>
+          </div>
+        </div>
+        <p class="mt-4 text-sm opacity-70">
+          These are target budgets to validate, not measured guarantees. Actual latency
+          depends on the chosen provider/model, network, and embedding/reranking setup.
+        </p>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Latency is an acceptance criterion</h2>
+        <p class="opacity-75">
+          We should not call the integration seamless until we measure the delay users
+          actually feel: time from pressing Enter to the main agent's first token.
+        </p>
+        <div class="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="font-bold">Planner time</div>
+            <p class="mt-1 text-sm opacity-75">Pi model request to validated plan.</p>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="font-bold">Search time</div>
+            <p class="mt-1 text-sm opacity-75">Forgetful query, rerank, and response.</p>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="font-bold">Preflight total</div>
+            <p class="mt-1 text-sm opacity-75">Planner plus all retrieval work.</p>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="font-bold">First-token delta</div>
+            <p class="mt-1 text-sm opacity-75">Extension on versus identical prompt off.</p>
+          </div>
+        </div>
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
+          <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
+            <h3 class="font-bold">Candidate SLO to validate</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Warm preflight: p50 below 700 ms.</li>
+              <li>Warm preflight: p95 below 1.5 seconds.</li>
+              <li>Hard timeout around 2 seconds, then fail open.</li>
+              <li>No cumulative delay after the circuit breaker opens.</li>
+            </ul>
+          </div>
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">Benchmark matrix</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Each candidate planner model the user can select.</li>
+              <li>Warm and cold Forgetful service.</li>
+              <li>Search false, search hit, search miss, and two-query plan.</li>
+              <li>Local service and remote service when supported.</li>
+            </ul>
+          </div>
+        </div>
+        <p class="mt-4 text-sm opacity-70">
+          Store aggregate timings only. Prompt text and retrieved memory content remain out
+          of telemetry unless the user explicitly enables debug capture.
+        </p>
+      </div>
+    </section>
+
+    <section class="mt-8 grid gap-6 lg:grid-cols-2">
+      <article class="card card-border bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-2xl">Default experience</h2>
+          <div class="mockup-code mt-3 text-sm">
+            <pre data-prefix=">"><code>fix the authentication timeout bug</code></pre>
+            <pre data-prefix=""><code>memory preflight runs silently</code></pre>
+            <pre data-prefix=""><code>normal Pi response appears</code></pre>
+          </div>
+          <ul class="mt-4 list-disc space-y-2 pl-5">
+            <li>No commands to remember.</li>
+            <li>No memory messages added to the transcript.</li>
+            <li>The agent may follow memory leads itself through one compact recall tool.</li>
+            <li>No popup when retrieval succeeds or finds nothing.</li>
+            <li>A tiny transient footer status is optional.</li>
+            <li>Repeated failures are suppressed by a circuit breaker.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="card card-border bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-2xl">Debug experience</h2>
+          <div class="mockup-code mt-3 text-sm">
+            <pre data-prefix="$"><code>/forgetful debug on</code></pre>
+            <pre data-prefix="1"><code>planner  github-copilot/gpt-5-mini  420 ms</code></pre>
+            <pre data-prefix="2"><code>query    auth timeout refresh token</code></pre>
+            <pre data-prefix="3"><code>search   3 hits  186 ms  project=forgetful</code></pre>
+            <pre data-prefix="4"><code>inject   #42 #77  612 tokens</code></pre>
+          </div>
+          <ul class="mt-4 list-disc space-y-2 pl-5">
+            <li>Debug is opt-in and off by default.</li>
+            <li>Show planner input/output, timings, and memory IDs.</li>
+            <li>Do not persist prompts or memory content by default.</li>
+            <li>
+              Expose model, status, retry, and project/global scope controls without making
+              them part of the normal workflow.
+            </li>
+          </ul>
+        </div>
+      </article>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Automatic capture after the answer</h2>
+        <div class="alert alert-warning alert-soft mt-3">
+          <span>
+            Capture is feasible, but it is the riskier half. It should be conservative,
+            create-only, governed by the active project/global scope, and unable to update
+            or obsolete existing memory.
+          </span>
+        </div>
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold text-success">Store automatically</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Confirmed decisions and user preferences.</li>
+              <li>Root cause plus validated solution.</li>
+              <li>Project conventions likely to matter again.</li>
+              <li>Useful constraints with evidence from the completed turn.</li>
+            </ul>
+          </div>
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold text-error">Never store automatically</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Raw transcripts or routine tool output.</li>
+              <li>Unverified guesses and abandoned approaches.</li>
+              <li>Secrets, credentials, payroll data, or unnecessary PII.</li>
+              <li>Entities, updates, or obsolescence in the first version.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="divider">Capture lifecycle</div>
+        <ol class="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+          <li class="rounded-box bg-base-200 p-4 text-sm">
+            <strong>1. Wait for success</strong><br>
+            Run only after <code>agent_settled</code>; skip aborted or failed work.
+          </li>
+          <li class="rounded-box bg-base-200 p-4 text-sm">
+            <strong>2. Read the delta</strong><br>
+            Review only messages since the last capture watermark.
+          </li>
+          <li class="rounded-box bg-base-200 p-4 text-sm">
+            <strong>3. Extract candidates</strong><br>
+            Selected Pi model returns zero to three atomic, evidenced candidates.
+          </li>
+          <li class="rounded-box bg-base-200 p-4 text-sm">
+            <strong>4. Check overlap</strong><br>
+            Query Forgetful for each candidate before any create operation.
+          </li>
+          <li class="rounded-box bg-base-200 p-4 text-sm">
+            <strong>5. Create or skip</strong><br>
+            Create only novel high-confidence facts; never rewrite history silently.
+          </li>
+        </ol>
+        <div class="mt-5 grid gap-4 md:grid-cols-3">
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">Off</h3>
+            <p class="mt-2 text-sm">Recall still works; no capture model or writes run.</p>
+          </div>
+          <div class="rounded-box bg-warning/10 p-5 ring-1 ring-warning">
+            <h3 class="font-bold">Observe</h3>
+            <p class="mt-2 text-sm">
+              Generate and score candidates, show them only in debug, but write nothing.
+              Use this while tuning the capture prompt and thresholds.
+            </p>
+          </div>
+          <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
+            <h3 class="font-bold">Auto</h3>
+            <p class="mt-2 text-sm">
+              Seamless target mode after observe-mode acceptance. Save quietly and show only
+              a small count in status/debug.
+            </p>
+          </div>
+        </div>
+        <div class="alert alert-info alert-soft mt-5">
+          <span>
+            Project/global scope applies to both recall and capture. If overlap suggests an
+            existing memory is incomplete or contradicted, auto mode skips it; updates and
+            obsolescence remain explicit user-controlled actions.
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Safety and failure boundaries</h2>
+        <div class="overflow-x-auto rounded-box border border-base-300">
+          <table class="table table-zebra table-sm">
+            <thead>
+              <tr>
+                <th>Risk</th>
+                <th>Boundary</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Memory prompt injection</td>
+                <td>Label retrieval as untrusted historical context, never instructions.</td>
+              </tr>
+              <tr>
+                <td>Cross-project leakage</td>
+                <td>
+                  Default to strict repository scope, but expose a session/global toggle:
+                  <code>/forgetful scope project</code> or
+                  <code>/forgetful scope global</code>. Debug mode always shows the scope.
+                </td>
+              </tr>
+              <tr>
+                <td>Slow or unavailable service</td>
+                <td>Hard timeout, fail open, and circuit-break repeated failures.</td>
+              </tr>
+              <tr>
+                <td>Conversation clutter</td>
+                <td>
+                  Modify only the per-turn system prompt; render deeper agent lookups as one
+                  collapsed line rather than exposing raw retrieval output.
+                </td>
+              </tr>
+              <tr>
+                <td>Runaway memory exploration</td>
+                <td>Read-only tool, strict project scope, bounded depth, and per-turn call cap.</td>
+              </tr>
+              <tr>
+                <td>Duplicate or noisy capture</td>
+                <td>Query-before-create, high confidence, create-only, bounded candidates.</td>
+              </tr>
+              <tr>
+                <td>Unexpected model cost</td>
+                <td>User-selected model, adaptive invocation, visible usage in debug mode.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-2xl">Recommended delivery slices</h2>
+        <ul class="steps steps-vertical mt-4 lg:steps-horizontal">
+          <li class="step step-primary">Planner + recall + nuggets</li>
+          <li class="step step-primary">Conservative auto-capture</li>
+          <li class="step">Prompt policy overlays</li>
+          <li class="step">Debug + scope controls</li>
+          <li class="step">Latency and quality tuning</li>
+        </ul>
+        <div class="mt-6 grid gap-4 md:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">Slice 1 acceptance checks</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Normal prompt requires no memory command.</li>
+              <li>Relevant memory reaches the same main-agent turn.</li>
+              <li>The agent can follow a lead with the bounded recall tool.</li>
+              <li>No custom memory message is written to session history.</li>
+              <li>Timeout or service failure never blocks the task.</li>
+              <li>Measured first-token overhead meets the agreed p50/p95 SLO.</li>
+              <li>Off, on, debug, project, and global modes work without restarting Pi.</li>
+            </ul>
+          </div>
+          <div class="rounded-box bg-base-200 p-5">
+            <h3 class="font-bold">How to test it</h3>
+            <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+              <li>Pi faux model for deterministic planner output.</li>
+              <li>Throwaway Forgetful SQLite service.</li>
+              <li>Black-box Pi tests in isolated tmux sessions.</li>
+              <li>Real-provider latency matrix for each supported planner model.</li>
+              <li>Timeout, circuit-break, warm/cold, hit/miss, and first-token benchmarks.</li>
+              <li>Fresh-session test proving remembered context returns.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 card card-border bg-primary/10 shadow-sm ring-1 ring-primary">
+      <div class="card-body">
+        <div class="badge badge-primary">Direction agreed</div>
+        <h2 class="card-title text-2xl">First slice includes recall and auto-capture</h2>
+        <p>
+          The first vertical slice will deliver model-planned silent recall, agent-followable
+          nuggets, and conservative automatic capture together. Capture starts in auto mode,
+          while tests and debug tooling still expose every candidate and decision.
+        </p>
+        <div class="mt-3 grid gap-3 md:grid-cols-3">
+          <div class="rounded-box bg-base-100 p-4">
+            <strong>Recall</strong>
+            <p class="mt-1 text-sm">Selected Pi model plans every new user prompt.</p>
+          </div>
+          <div class="rounded-box bg-base-100 p-4">
+            <strong>Explore</strong>
+            <p class="mt-1 text-sm">Main agent can follow bounded memory nuggets itself.</p>
+          </div>
+          <div class="rounded-box bg-base-100 p-4">
+            <strong>Capture</strong>
+            <p class="mt-1 text-sm">Create-only, overlap-checked, quiet automatic writes.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mt-8 rounded-box bg-base-300 p-5 text-sm opacity-80">
+      <p>
+        Verified against installed Pi 0.83.0 documentation and examples:
+        <code>before_agent_start</code>, <code>agent_settled</code>,
+        <code>ctx.modelRegistry</code>, scoped model selection, resolved auth, direct
+        <code>complete()</code> calls, and <code>pi.exec</code> are available.
+      </p>
+      <p class="mt-2">
+        Context7 was queried for Pi extension documentation but returned no matching page;
+        the version-specific conclusions therefore use the installed Pi docs and source.
+      </p>
+      <p class="mt-2">
+        Visual design source: this backend repository has no application design system, so
+        the report uses the Lavish-recommended DaisyUI and Tailwind fallback.
+      </p>
+    </footer>
+  </main>
+
+  <script type="module">
+    import mermaid from
+      "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+
+    const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const paint = document.createElement("canvas").getContext("2d");
+
+    function toRgba(color) {
+      paint.clearRect(0, 0, 1, 1);
+      paint.fillStyle = "#000";
+      paint.fillStyle = color;
+      paint.fillRect(0, 0, 1, 1);
+      return paint.getImageData(0, 0, 1, 1).data;
+    }
+
+    function composite(foreground, background) {
+      const fa = foreground[3] / 255;
+      const ba = background[3] / 255;
+      const alpha = fa + ba * (1 - fa);
+      if (alpha === 0) return [0, 0, 0, 0];
+      return [
+        (foreground[0] * fa + background[0] * ba * (1 - fa)) / alpha,
+        (foreground[1] * fa + background[1] * ba * (1 - fa)) / alpha,
+        (foreground[2] * fa + background[2] * ba * (1 - fa)) / alpha,
+        alpha * 255,
+      ];
+    }
+
+    function pageIsDark() {
+      const root = document.documentElement;
+      const rootBg = toRgba(getComputedStyle(root).backgroundColor);
+      const bodyBg = toRgba(getComputedStyle(document.body).backgroundColor);
+      const [r, g, b, a] = composite(bodyBg, rootBg);
+      if (a > 0) {
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+      }
+      return darkQuery.matches;
+    }
+
+    const diagrams = [...document.querySelectorAll(".mermaid")].map((el) => ({
+      el,
+      src: el.textContent,
+    }));
+    let applied;
+    let rendering = false;
+    let queued = false;
+
+    function queueRender() {
+      queued = true;
+      if (!rendering) void render();
+    }
+
+    async function render() {
+      rendering = true;
+      try {
+        while (queued) {
+          queued = false;
+          const theme = pageIsDark() ? "dark" : "default";
+          if (theme === applied) continue;
+          mermaid.initialize({
+            startOnLoad: false,
+            theme,
+            securityLevel: "strict",
+          });
+          for (const { el, src } of diagrams) {
+            el.removeAttribute("data-processed");
+            el.textContent = src;
+          }
+          await mermaid.run({ nodes: diagrams.map((diagram) => diagram.el) });
+          applied = theme;
+        }
+      } finally {
+        rendering = false;
+        if (queued) queueRender();
+      }
+    }
+
+    if (document.readyState === "complete") queueRender();
+    else window.addEventListener("load", queueRender, { once: true });
+    darkQuery.addEventListener("change", queueRender);
+  </script>
+</body>
+</html>
