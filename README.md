@@ -1,18 +1,16 @@
 # Pi Forgetful
+An extension for the [Pi Coding](https://pi.dev/) agent that enables connects the agent to the
+[forgetful](https://github.com/ScottRBK/forgetful)knowledge base and agentic memory layer
 
-A seamless persistent-memory extension for the Pi coding agent.
+Currently WIP. 
 
-The intended experience requires no memory commands during normal work:
+However the intended experience requires no memory commands during normal work:
 
-- a user-selected Pi model decides whether each prompt needs memory;
+- a separately configured memory model decides whether each prompt needs memory;
 - relevant Forgetful context is injected into the same agent turn;
 - the main agent receives bounded leads it can explore through a read-only recall tool;
-- durable knowledge is captured quietly after successful work settles;
-- debug, scope, model, prompt, and enablement controls remain available on demand.
+  normal Pi tool-result persistence is accepted and documented;
+- durable knowledge is captured quietly after successful work settles through a durable queue;
+- debug, scope, capture-mode, model, prompt, and enablement controls remain available on demand.
 
-See [the approved design](docs/design.md) and the
-[visual architecture review](docs/architecture-review.html).
 
-## Status
-
-Design approved. Implementation has not started.

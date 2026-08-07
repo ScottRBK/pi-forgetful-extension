@@ -26,17 +26,17 @@
       <div class="hero-content w-full py-10 text-left">
         <div class="w-full">
           <div class="mb-4 flex flex-wrap gap-2">
-            <span class="badge badge-success badge-soft">Feasible in Pi 0.83</span>
+            <span class="badge badge-success badge-soft">Feasible in Pi 0.84.1</span>
             <span class="badge badge-primary badge-soft">Zero-command default</span>
-            <span class="badge badge-info badge-soft">User-selected Pi model</span>
+            <span class="badge badge-info badge-soft">Configurable memory model</span>
           </div>
           <h1 class="max-w-5xl text-3xl font-bold sm:text-5xl">
             Memory should feel like part of Pi, not another workflow
           </h1>
           <p class="mt-5 max-w-4xl text-lg opacity-80">
             A Pi extension can quietly inspect each meaningful prompt, reuse the user's
-            configured Pi model, retrieve relevant Forgetful context, and add it only to the
-            current model turn. The user keeps typing normally.
+            configured memory model, retrieve relevant Forgetful context, and add it only to
+            the current model turn. The user keeps typing normally.
           </p>
           <div class="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="stat rounded-box bg-base-200">
@@ -46,8 +46,8 @@
             </div>
             <div class="stat rounded-box bg-base-200">
               <div class="stat-title">Extra model</div>
-              <div class="stat-value text-primary">1</div>
-              <div class="stat-desc">Small focused preflight call</div>
+              <div class="stat-value text-primary">1+</div>
+              <div class="stat-desc">Recall preflight; capture adds model calls</div>
             </div>
             <div class="stat rounded-box bg-base-200">
               <div class="stat-title">Default visibility</div>
@@ -76,7 +76,7 @@
 sequenceDiagram
   participant U as User
   participant P as Pi extension
-  participant M as Selected Pi model
+  participant M as Memory planner model
   participant F as Forgetful service
   participant A as Main Pi agent
   U->>P: Normal prompt
@@ -128,10 +128,11 @@ sequenceDiagram
               </p>
             </div>
             <div class="rounded-box bg-base-200 p-4">
-              <div class="font-bold text-primary">Capture: true background work</div>
+              <div class="font-bold text-primary">Capture: queued post-settle work</div>
               <p class="mt-1 text-sm opacity-80">
-                After <code>agent_settled</code>, a conservative model pass can extract and
-                save durable decisions while the user reads the answer.
+                After <code>agent_settled</code>, the handler snapshots and durably queues a
+                conservative model pass, then returns. A worker records outcomes without
+                blocking the user's next task.
               </p>
             </div>
             <div class="rounded-box bg-base-200 p-4">
@@ -151,7 +152,7 @@ sequenceDiagram
         <h2 class="card-title text-2xl">Recommended architecture</h2>
         <div class="mermaid mt-3">
 flowchart TD
-  I["Pi input event"] --> R{"Selected Pi model\nadaptive memory planner"}
+  I["Pi input event"] --> R{"Configured memory model\nadaptive planner"}
   R -- "search: false" --> A["Main Pi agent"]
   R -- "search: true\nqueries + entities" --> Q["Validated JSON search plan"]
   Q --> H["Warm Forgetful HTTP service\nREST search via fetch"]
@@ -162,13 +163,13 @@ flowchart TD
   A -- "needs more context" --> T["forgetful_recall tool\nfocused deeper query"]
   T --> H
   A --> C["agent_settled"]
-  C --> X["Optional conservative capture\ncreate-only, query-before-create"]
+  C --> X["Durable capture queue\ncreate-only, query-before-create"]
         </div>
         <div class="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
             <h3 class="font-bold">Pi extension</h3>
             <p class="mt-2 text-sm">
-              Owns timing, model selection, timeouts, caching, debug UI, and temporary
+              Owns timing, memory-model selection, timeouts, caching, debug UI, and temporary
               injection. It contains no memory business rules beyond safety limits.
             </p>
           </div>
@@ -190,7 +191,8 @@ flowchart TD
             <h3 class="font-bold">Agent recall tool</h3>
             <p class="mt-2 text-sm">
               Register one bounded read-only tool for deeper exploration. Render it as a
-              compact “memory lookup” line and cap calls/results to avoid tool-loop noise.
+              compact “memory lookup” line, cap calls/results, and document that normal Pi tool
+              results may persist in session history.
             </p>
           </div>
         </div>
@@ -199,11 +201,11 @@ flowchart TD
 
     <section class="mt-8 card card-border bg-base-100 shadow-sm">
       <div class="card-body">
-        <h2 class="card-title text-2xl">The adaptive planner is the Pi model</h2>
+        <h2 class="card-title text-2xl">The adaptive planner is a separate memory model</h2>
         <p class="opacity-75">
           Application code should not guess whether “do it”, “what about Sarah?”, or an error
-          string needs memory. Every normal user prompt goes to the configured Pi model, which
-          returns a small validated search plan.
+          string needs memory. Every normal user prompt goes to the configured memory model,
+          separate from the active main-agent model, which returns a small validated search plan.
         </p>
         <div class="mt-5 grid gap-4 md:grid-cols-3">
           <div class="rounded-box bg-success/10 p-5 ring-1 ring-success">
@@ -237,9 +239,9 @@ flowchart TD
         </div>
         <div class="alert alert-info alert-soft mt-5">
           <span>
-            In other words: every new user prompt is judged by the selected Pi model. Code
-            skips only messages that are not new user work, then validates the model's output
-            and enforces safety limits.
+            In other words: every new user prompt is judged by the configured memory model.
+            Code skips only messages that are not new user work, then validates the model's
+            output and enforces safety limits.
           </span>
         </div>
       </div>
@@ -257,7 +259,7 @@ flowchart LR
   D["Built-in core contract\nschema + safety + bounds"] --> C["Prompt compiler"]
   U["Optional global policy\n~/.pi/agent/forgetful/prompts"] --> C
   P["Optional trusted project policy\n.pi/forgetful/prompts"] --> C
-  C --> M["Selected Pi model"]
+  C --> M["Configured memory model"]
         </div>
         <div class="mt-5 overflow-x-auto rounded-box border border-base-300">
           <table class="table table-zebra table-sm">
@@ -339,12 +341,13 @@ flowchart LR
           <article class="card bg-primary/10 ring-2 ring-primary">
             <div class="card-body">
               <div class="flex items-center justify-between gap-2">
-                <h3 class="card-title">Always use selected Pi planner</h3>
+                <h3 class="card-title">Always use configured memory planner</h3>
                 <span class="badge badge-primary">Recommended</span>
               </div>
               <p>
-                Every normal prompt gets one small, tool-free model call. The model returns
-                <code>search: false</code> or a bounded search plan.
+                Every normal prompt gets one small, tool-free memory-model call. The model
+                returns <code>search: false</code> or a bounded search plan. Capture is a
+                separate post-settle path.
               </p>
               <div class="mt-2 text-sm opacity-75">
                 Semantically consistent; speed depends mainly on the user's model choice.
@@ -380,7 +383,7 @@ flowchart LR
           <div class="stat rounded-box bg-base-200">
             <div class="stat-title">Planner output</div>
             <div class="stat-value text-lg">≤ 150 tokens</div>
-            <div class="stat-desc">JSON only, no tools</div>
+            <div class="stat-desc">Planner JSON only, no tools</div>
           </div>
           <div class="stat rounded-box bg-base-200">
             <div class="stat-title">Queries</div>
@@ -415,7 +418,7 @@ flowchart LR
         <div class="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div class="rounded-box bg-base-200 p-4">
             <div class="font-bold">Planner time</div>
-            <p class="mt-1 text-sm opacity-75">Pi model request to validated plan.</p>
+            <p class="mt-1 text-sm opacity-75">Memory-model request to validated plan.</p>
           </div>
           <div class="rounded-box bg-base-200 p-4">
             <div class="font-bold">Search time</div>
@@ -443,7 +446,7 @@ flowchart LR
           <div class="rounded-box bg-base-200 p-5">
             <h3 class="font-bold">Benchmark matrix</h3>
             <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
-              <li>Each candidate planner model the user can select.</li>
+              <li>Each candidate memory model the user can select.</li>
               <li>Warm and cold Forgetful service.</li>
               <li>Search false, search hit, search miss, and two-query plan.</li>
               <li>Local service and remote service when supported.</li>
@@ -468,8 +471,9 @@ flowchart LR
           </div>
           <ul class="mt-4 list-disc space-y-2 pl-5">
             <li>No commands to remember.</li>
-            <li>No memory messages added to the transcript.</li>
-            <li>The agent may follow memory leads itself through one compact recall tool.</li>
+            <li>No preflight memory message is added to the transcript.</li>
+            <li>The agent may follow memory leads through one compact recall tool; its normal
+              tool result may be stored in session history.</li>
             <li>No popup when retrieval succeeds or finds nothing.</li>
             <li>A tiny transient footer status is optional.</li>
             <li>Repeated failures are suppressed by a circuit breaker.</li>
@@ -490,7 +494,8 @@ flowchart LR
           <ul class="mt-4 list-disc space-y-2 pl-5">
             <li>Debug is opt-in and off by default.</li>
             <li>Show planner input/output, timings, and memory IDs.</li>
-            <li>Do not persist prompts or memory content by default.</li>
+            <li>Do not persist extra prompt or memory content in extension debug logs. Normal Pi
+              persistence of a recall tool result is expected.</li>
             <li>
               Expose model, status, retry, and project/global scope controls without making
               them part of the normal workflow.
@@ -505,9 +510,10 @@ flowchart LR
         <h2 class="card-title text-2xl">Automatic capture after the answer</h2>
         <div class="alert alert-warning alert-soft mt-3">
           <span>
-            Capture is feasible, but it is the riskier half. It should be conservative,
-            create-only, governed by the active project/global scope, and unable to update
-            or obsolete existing memory.
+            Capture is feasible, but it is the riskier half. It is conservative, create-only,
+            governed by the active project/global scope, and unable to update or obsolete
+            existing memory. Query-before-create is the only duplicate boundary in this slice;
+            race and retry risk are accepted and no Forgetful service change is assumed.
           </span>
         </div>
         <div class="mt-5 grid gap-4 md:grid-cols-2">
@@ -537,12 +543,13 @@ flowchart LR
             Run only after <code>agent_settled</code>; skip aborted or failed work.
           </li>
           <li class="rounded-box bg-base-200 p-4 text-sm">
-            <strong>2. Read the delta</strong><br>
-            Review only messages since the last capture watermark.
+            <strong>2. Read the snapshot</strong><br>
+            Process only the fixed turn snapshot after the last capture watermark.
           </li>
           <li class="rounded-box bg-base-200 p-4 text-sm">
             <strong>3. Extract candidates</strong><br>
-            Selected Pi model returns zero to three atomic, evidenced candidates.
+            Configured memory model returns zero to three atomic, evidenced candidates within
+            the bounded capture call budget.
           </li>
           <li class="rounded-box bg-base-200 p-4 text-sm">
             <strong>4. Check overlap</strong><br>
@@ -550,7 +557,8 @@ flowchart LR
           </li>
           <li class="rounded-box bg-base-200 p-4 text-sm">
             <strong>5. Create or skip</strong><br>
-            Create only novel high-confidence facts; never rewrite history silently.
+            Create only novel high-confidence facts through the existing API; earlier candidates
+            may remain written if a later request fails.
           </li>
         </ol>
         <div class="mt-5 grid gap-4 md:grid-cols-3">
@@ -568,8 +576,8 @@ flowchart LR
           <div class="rounded-box bg-primary/10 p-5 ring-1 ring-primary">
             <h3 class="font-bold">Auto</h3>
             <p class="mt-2 text-sm">
-              Seamless target mode after observe-mode acceptance. Save quietly and show only
-              a small count in status/debug.
+              Selected first-slice mode. Save quietly and show only a small count in
+              status/debug; `/forgetful capture off` and `observe` remain available.
             </p>
           </div>
         </div>
@@ -602,9 +610,10 @@ flowchart LR
               <tr>
                 <td>Cross-project leakage</td>
                 <td>
-                  Default to strict repository scope, but expose a session/global toggle:
+                  Use the agreed strict project scope through the existing Forgetful contract,
+                  with an explicit session/global toggle:
                   <code>/forgetful scope project</code> or
-                  <code>/forgetful scope global</code>. Debug mode always shows the scope.
+                  <code>/forgetful scope global</code>. Debug mode shows the selected scope.
                 </td>
               </tr>
               <tr>
@@ -614,8 +623,8 @@ flowchart LR
               <tr>
                 <td>Conversation clutter</td>
                 <td>
-                  Modify only the per-turn system prompt; render deeper agent lookups as one
-                  collapsed line rather than exposing raw retrieval output.
+                  Keep preflight recall in the per-turn system prompt; render deeper agent
+                  lookups as one collapsed line. The normal tool result remains session content.
                 </td>
               </tr>
               <tr>
@@ -624,11 +633,13 @@ flowchart LR
               </tr>
               <tr>
                 <td>Duplicate or noisy capture</td>
-                <td>Query-before-create, high confidence, create-only, bounded candidates.</td>
+                <td>Semantic query-before-create, high confidence, create-only, bounded candidates;
+                  accepted race and retry risk.</td>
               </tr>
               <tr>
                 <td>Unexpected model cost</td>
-                <td>User-selected model, adaptive invocation, visible usage in debug mode.</td>
+                <td>Separate configured memory model, adaptive invocation, visible usage in debug
+                  mode, and a bounded call budget.</td>
               </tr>
             </tbody>
           </table>
@@ -640,8 +651,8 @@ flowchart LR
       <div class="card-body">
         <h2 class="card-title text-2xl">Recommended delivery slices</h2>
         <ul class="steps steps-vertical mt-4 lg:steps-horizontal">
-          <li class="step step-primary">Planner + recall + nuggets</li>
-          <li class="step step-primary">Conservative auto-capture</li>
+          <li class="step step-primary">Memory model + project setup</li>
+          <li class="step step-primary">Recall + persisted tool + auto-capture</li>
           <li class="step">Prompt policy overlays</li>
           <li class="step">Debug + scope controls</li>
           <li class="step">Latency and quality tuning</li>
@@ -652,22 +663,25 @@ flowchart LR
             <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
               <li>Normal prompt requires no memory command.</li>
               <li>Relevant memory reaches the same main-agent turn.</li>
-              <li>The agent can follow a lead with the bounded recall tool.</li>
-              <li>No custom memory message is written to session history.</li>
+              <li>The agent can follow a lead with the bounded recall tool and its persisted
+                result is documented.</li>
+              <li>Automatic capture creates only through query-before-create and records each
+                candidate outcome.</li>
               <li>Timeout or service failure never blocks the task.</li>
               <li>Measured first-token overhead meets the agreed p50/p95 SLO.</li>
-              <li>Off, on, debug, project, and global modes work without restarting Pi.</li>
+              <li>Memory-model selection, project setup, capture modes, debug, project, and
+                global modes work without restarting Pi.</li>
             </ul>
           </div>
           <div class="rounded-box bg-base-200 p-5">
             <h3 class="font-bold">How to test it</h3>
             <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
-              <li>Pi faux model for deterministic planner output.</li>
-              <li>Throwaway Forgetful SQLite service.</li>
+              <li>Pi faux model for deterministic planner and capture output.</li>
+              <li>Existing Forgetful SQLite service; no Forgetful API change assumed.</li>
               <li>Black-box Pi tests in isolated tmux sessions.</li>
-              <li>Real-provider latency matrix for each supported planner model.</li>
+              <li>Real-provider latency matrix for each supported memory model.</li>
               <li>Timeout, circuit-break, warm/cold, hit/miss, and first-token benchmarks.</li>
-              <li>Fresh-session test proving remembered context returns.</li>
+              <li>Fresh-session test proving remembered context and persisted tool results.</li>
             </ul>
           </div>
         </div>
@@ -679,22 +693,24 @@ flowchart LR
         <div class="badge badge-primary">Direction agreed</div>
         <h2 class="card-title text-2xl">First slice includes recall and auto-capture</h2>
         <p>
-          The first vertical slice will deliver model-planned silent recall, agent-followable
-          nuggets, and conservative automatic capture together. Capture starts in auto mode,
-          while tests and debug tooling still expose every candidate and decision.
+          The first vertical slice will deliver a separately configured memory model, explicit
+          project setup, model-planned silent recall, agent-followable nuggets, and automatic
+          capture together. Capture uses the existing query-before-create path and accepts its
+          race/retry limitation, while tests and debug tooling expose every candidate and
+          decision.
         </p>
         <div class="mt-3 grid gap-3 md:grid-cols-3">
           <div class="rounded-box bg-base-100 p-4">
             <strong>Recall</strong>
-            <p class="mt-1 text-sm">Selected Pi model plans every new user prompt.</p>
+            <p class="mt-1 text-sm">Separate configured memory model plans every new user prompt.</p>
           </div>
           <div class="rounded-box bg-base-100 p-4">
             <strong>Explore</strong>
-            <p class="mt-1 text-sm">Main agent can follow bounded memory nuggets itself.</p>
+            <p class="mt-1 text-sm">Main agent can follow bounded memory nuggets; tool results persist normally.</p>
           </div>
           <div class="rounded-box bg-base-100 p-4">
             <strong>Capture</strong>
-            <p class="mt-1 text-sm">Create-only, overlap-checked, quiet automatic writes.</p>
+            <p class="mt-1 text-sm">Create-only, overlap-checked, quiet writes through the existing API.</p>
           </div>
         </div>
       </div>
@@ -702,7 +718,7 @@ flowchart LR
 
     <footer class="mt-8 rounded-box bg-base-300 p-5 text-sm opacity-80">
       <p>
-        Verified against installed Pi 0.83.0 documentation and examples:
+        Verified against installed Pi 0.84.1 documentation and examples:
         <code>before_agent_start</code>, <code>agent_settled</code>,
         <code>ctx.modelRegistry</code>, scoped model selection, resolved auth, direct
         <code>complete()</code> calls, and <code>pi.exec</code> are available.
