@@ -17,7 +17,22 @@ npm install
 pi -e ./index.ts
 ```
 
-Inside Pi, choose an authenticated memory model:
+Inside Pi, connect to Forgetful:
+
+```text
+/forgetful setup
+```
+
+The wizard asks for the REST endpoint and whether it needs a bearer token. Pi has no masked input,
+so bearer authentication asks for an environment variable name and never asks for or stores the
+token itself. The wizard checks the endpoint and authentication with `GET /projects` before saving
+anything.
+
+If you do not have a running endpoint, ask your coding agent to read the
+[Forgetful setup skill][forgetful-setup-skill], or follow the
+[Docker deployment instructions][forgetful-docker] manually.
+
+Then choose an authenticated memory model:
 
 ```text
 /forgetful model
@@ -26,9 +41,9 @@ Inside Pi, choose an authenticated memory model:
 You can also use `/forgetful model provider/model-id`. The memory model is selected separately
 from the main agent; memory processing skips with setup guidance until one is configured.
 
-The default service is `http://localhost:8020/api/v1`. Connection settings belong in
-`~/.pi/agent/forgetful/settings.json`, or the corresponding directory when Pi uses a custom
-agent directory:
+The default endpoint is `http://localhost:8020/api/v1`. The wizard writes connection settings to
+`~/.pi/agent/forgetful/settings.json`, or the corresponding directory when Pi uses a custom agent
+directory. You can also edit that file manually:
 
 ```json
 {
@@ -43,7 +58,8 @@ agent directory:
 
 Omit `token_env` for a local service that does not require authentication. If it is configured,
 the environment variable must be set. Remote services require HTTPS. The extension does not
-start Forgetful or change its API.
+start Forgetful or change its API. First-time connection setup does not create, select, or map a
+Forgetful project; project association remains a per-repository concern.
 
 ## Normal use and controls
 
@@ -53,6 +69,7 @@ capture destinations skip with setup guidance; the extension never silently crea
 
 | Command | Effect |
 | --- | --- |
+| `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |
 | `/forgetful status` | Show effective settings and memory status. |
 | `/forgetful on` / `/forgetful off` | Enable or disable memory processing. |
 | `/forgetful capture auto` | Automatically capture evidenced knowledge. |
@@ -111,3 +128,8 @@ verify the mechanism; real-model recall quality, contradiction judgment, and lat
 separate acceptance checks with the selected model.
 
 See [the design](docs/design.md).
+
+[forgetful-setup-skill]:
+  https://github.com/ScottRBK/forgetful/tree/main/skills/forgetful-mcp-setup
+[forgetful-docker]:
+  https://github.com/ScottRBK/forgetful#option-3-docker-deployment-productionscale

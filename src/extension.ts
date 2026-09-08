@@ -22,8 +22,10 @@ import { ApiForgetfulClient } from "./http.ts";
 import { CaptureService } from "./capture.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
+  DEFAULT_FORGETFUL_BASE_URL,
   loadForgetfulConfig,
   modelToString,
+  updateForgetfulConnection,
   updateUserSettings,
   writeProjectScope,
   type ForgetfulConfig,
@@ -74,6 +76,104 @@ const POLICY_CONTRACTS = {
     "sourceEntryIds, and a same-fact reason. Use escalate when evidence is uncertain.",
   ].join(" "),
 } as const;
+
+const FORGETFUL_SETUP_GUIDANCE = [
+  "Need a running Forgetful endpoint?",
+  "Ask your coding agent to read the Forgetful setup skill:",
+  "https://github.com/ScottRBK/forgetful/tree/main/skills/forgetful-mcp-setup",
+  "or manually follow Docker deployment (production/scale):",
+  "https://github.com/ScottRBK/forgetful#option-3-docker-deployment-productionscale",
+].join("\n");
+
+const FORGETFUL_AUTH_OPTIONS = [
+  "Unauthenticated",
+  "Bearer token from environment variable",
+] as const;
+const ENVIRONMENT_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function setupEndpointSuggestion(value: string): string {
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      return DEFAULT_FORGETFUL_BASE_URL;
+    }
+    return value.trim();
+  } catch {
+    return DEFAULT_FORGETFUL_BASE_URL;
+  }
+}
+
+async function promptSetupEndpoint(
+  ctx: ExtensionContext,
+  config: ForgetfulConfig,
+): Promise<string | undefined> {
+  const suggested = setupEndpointSuggestion(config.instance.baseUrl);
+  const input = await ctx.ui.input(
+    `Forgetful endpoint (leave blank to use ${suggested})`,
+    suggested,
+  );
+  if (input === undefined) {
+    notify(ctx, "Forgetful setup cancelled.");
+    return undefined;
+  }
+  return input.trim() || suggested;
+}
+
+interface SetupAuthentication {
+  tokenEnv?: string;
+  token?: string;
+}
+
+async function promptSetupAuthentication(
+  ctx: ExtensionContext,
+): Promise<SetupAuthentication | undefined> {
+  const auth = await ctx.ui.select(
+    "Forgetful authentication",
+    [...FORGETFUL_AUTH_OPTIONS],
+  );
+  if (auth === undefined) {
+    notify(ctx, "Forgetful setup cancelled.");
+    return undefined;
+  }
+  if (auth === "Unauthenticated") return {};
+  if (auth !== "Bearer token from environment variable") {
+    notify(ctx, "Forgetful setup cancelled.", "error");
+    return undefined;
+  }
+  const input = await ctx.ui.input(
+    "Bearer token environment variable (for example, FORGETFUL_TOKEN)",
+    "FORGETFUL_TOKEN",
+  );
+  if (input === undefined) {
+    notify(ctx, "Forgetful setup cancelled.");
+    return undefined;
+  }
+  const tokenEnv = input.trim();
+  if (!ENVIRONMENT_VARIABLE_NAME.test(tokenEnv)) {
+    notify(
+      ctx,
+      "Enter an environment variable name, such as FORGETFUL_TOKEN.",
+      "error",
+    );
+    return undefined;
+  }
+  const token = process.env[tokenEnv];
+  if (!token) {
+    notify(
+      ctx,
+      `Environment variable ${tokenEnv} is not set; settings were not changed.`,
+      "error",
+    );
+    return undefined;
+  }
+  return { tokenEnv, token };
+}
 
 type PolicyName = keyof typeof POLICY_CONTRACTS;
 
@@ -130,6 +230,11 @@ export interface ExtensionWorkContext extends WorkContext {
 
 export interface ForgetfulExtensionDependencies {
   client?: ForgetfulClient;
+  createClient?: (options: {
+    baseUrl: string;
+    token?: string;
+    timeoutMs: number;
+  }) => ForgetfulClient;
   recall?: RecallServicePort;
   capture?: CaptureServicePort;
   createRecall?: (
@@ -995,6 +1100,15 @@ export function createForgetfulExtension(
       if (state.runtime === runtime) state.runtime = undefined;
     };
 
+    const invalidateRuntime = async (ctx: ExtensionContext): Promise<void> => {
+      if (state.runtime) {
+        await resetRuntime(ctx, state.runtime);
+        return;
+      }
+      state.generation += 1;
+      state.loading = undefined;
+    };
+
     const advanceSettledRange = async (
       runtime: Runtime,
       ctx: ExtensionContext,
@@ -1691,11 +1805,81 @@ export function createForgetfulExtension(
       notify(ctx, `Forgetful memory model set to ${modelLabel(selection)}.`);
     };
 
+    const handleSetupCommand = async (
+      ctx: ExtensionContext,
+    ): Promise<void> => {
+      if (!ctx.hasUI) {
+        notify(
+          ctx,
+          "Forgetful setup requires an interactive Pi session.",
+          "error",
+        );
+        return;
+      }
+      const current = await loadForgetfulConfig({
+        agentDir,
+        cwd: ctx.cwd,
+        trusted: ctx.isProjectTrusted(),
+        ...options.config,
+      });
+      const baseUrl = await promptSetupEndpoint(ctx, current);
+      if (!baseUrl) return;
+      const authentication = await promptSetupAuthentication(ctx);
+      if (!authentication) return;
+
+      try {
+        const client = dependencies.createClient
+          ? dependencies.createClient({
+              baseUrl,
+              token: authentication.token,
+              timeoutMs: current.instance.timeoutMs,
+            })
+          : new ApiForgetfulClient({
+              baseUrl,
+              token: authentication.token,
+              timeoutMs: current.instance.timeoutMs,
+            });
+        await client.listProjects();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "request failed";
+        notify(
+          ctx,
+          `Forgetful connection failed: ${reason}. Settings were not changed.`,
+          "error",
+        );
+        notify(ctx, FORGETFUL_SETUP_GUIDANCE, "warning");
+        return;
+      }
+
+      try {
+        await updateForgetfulConnection(current.paths.userSettings, {
+          baseUrl,
+          tokenEnv: authentication.tokenEnv,
+        });
+      } catch {
+        notify(
+          ctx,
+          "Forgetful connection validated, but settings could not be saved; " +
+            "settings were not changed.",
+          "error",
+        );
+        return;
+      }
+      await invalidateRuntime(ctx);
+      notify(ctx, "Forgetful connection saved.");
+      if (!current.model)
+        notify(ctx, "Choose a memory model next with /forgetful model.");
+    };
+
     pi.registerCommand("forgetful", {
       description: "Configure automatic Forgetful recall and capture",
       handler: async (args, ctx) => {
         const parts = args.trim().split(/\s+/).filter(Boolean);
         const action = parts[0] ?? "status";
+        if (action === "setup") {
+          await handleSetupCommand(ctx);
+          return;
+        }
         const runtime = await loadRuntime(ctx);
         switch (action) {
           case "status":
@@ -1720,7 +1904,7 @@ export function createForgetfulExtension(
           default:
             notify(
               ctx,
-              "Usage: /forgetful status|scope|capture|on|off|debug|model",
+              "Usage: /forgetful setup|status|scope|capture|on|off|debug|model",
               "error",
             );
         }

@@ -375,6 +375,25 @@ export async function updateUserSettings(
   await writeJson(path, { ...settings, ...update });
 }
 
+export async function updateForgetfulConnection(
+  path: string,
+  connection: { baseUrl: string; tokenEnv?: string },
+): Promise<void> {
+  const current = await readJson(path);
+  if (
+    current.malformed ||
+    (current.exists && !isRecord(current.value))
+  ) {
+    throw new TypeError("Forgetful user settings must be a valid JSON object");
+  }
+  const settings = isRecord(current.value) ? { ...current.value } : {};
+  settings.base_url = connection.baseUrl;
+  delete settings.token;
+  if (connection.tokenEnv) settings.token_env = connection.tokenEnv;
+  else delete settings.token_env;
+  await writeJson(path, settings);
+}
+
 export function modelToString(
   model: ModelSelection | undefined,
 ): string | undefined {

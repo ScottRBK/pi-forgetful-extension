@@ -9,8 +9,10 @@ import {
   type CaptureServicePort,
   type RecallServicePort,
 } from "../src/extension.ts";
+import { ApiForgetfulClient } from "../src/http.ts";
 import type {
   CaptureSnapshot,
+  ForgetfulClient,
   Project,
   WorkContext,
 } from "../src/contracts.ts";
@@ -64,6 +66,13 @@ async function harness(
   options: {
     conflicts?: unknown[];
     userSettings?: Record<string, unknown>;
+    uiInputs?: Array<string | undefined>;
+    uiSelections?: Array<string | undefined>;
+    createClient?: (options: {
+      baseUrl: string;
+      token?: string;
+      timeoutMs: number;
+    }) => ForgetfulClient;
     workContextGate?: Promise<void>;
     onWorkContext?: () => void;
   } = {},
@@ -162,7 +171,10 @@ async function harness(
         notifications.push(message);
       },
       confirm: async () => true,
-      select: async (_title: string, values: string[]) => values[0],
+      select: async (_title: string, values: string[]) =>
+        options.uiSelections ? options.uiSelections.shift() : values[0],
+      input: async (_title: string, placeholder?: string) =>
+        options.uiInputs ? options.uiInputs.shift() : placeholder,
     },
     modelRegistry: {
       find: () => model,
@@ -207,6 +219,9 @@ async function harness(
     dependencies: {
       recall,
       capture,
+      ...(options.createClient
+        ? { createClient: options.createClient }
+        : {}),
       resolveWorkContext: async () => {
         options.onWorkContext?.();
         await options.workContextGate;
@@ -240,6 +255,347 @@ async function harness(
     cleanup: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+test("setup validates the real endpoint before saving user connection settings", async () => {
+  const endpoint = "http://localhost:8020/api/v1";
+  const fixture = await harness({
+    userSettings: {
+      model: undefined,
+      custom_setting: "keep",
+      token: "legacy-secret",
+      token_env: "OLD_FORGETFUL_TOKEN",
+    },
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (input, init) => {
+          assert.equal(String(input), `${endpoint}/projects`);
+          assert.equal(init?.method, "GET");
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            null,
+          );
+          return new Response(JSON.stringify({ projects: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+  });
+  try {
+    fixture.ctx.ui.input = async () => "";
+    fixture.ctx.ui.select = async () => "Unauthenticated";
+
+    await fixture.command("setup");
+
+    const user = JSON.parse(
+      await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    assert.equal(user.base_url, endpoint);
+    assert.equal(user.custom_setting, "keep");
+    assert.equal(user.token, undefined);
+    assert.equal(user.token_env, undefined);
+    assert.equal(
+      fixture.notifications.some((message) =>
+        message.includes("legacy-secret"),
+      ),
+      false,
+    );
+    assert.ok(
+      fixture.notifications.some((message) =>
+        message.includes("/forgetful model"),
+      ),
+    );
+    await assert.rejects(
+      readFile(join(fixture.root, ".pi", "forgetful", "settings.json")),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup keeps the current endpoint when its input is left blank", async () => {
+  const endpoint = "https://memory.example/api/v1";
+  let validatedEndpoint: string | undefined;
+  const fixture = await harness({
+    userSettings: { base_url: endpoint },
+    uiInputs: [""],
+    uiSelections: ["Unauthenticated"],
+    createClient: (options) => {
+      validatedEndpoint = options.baseUrl;
+      return new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ projects: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+    },
+  });
+  try {
+    await fixture.command("setup");
+
+    assert.equal(validatedEndpoint, endpoint);
+    assert.ok(
+      fixture.notifications.some((message) => message.includes("saved")),
+    );
+    const settings = JSON.parse(
+      await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    assert.equal(settings.base_url, endpoint);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup never displays credentials from a saved endpoint", async () => {
+  const password = "saved-password";
+  const fixture = await harness({
+    userSettings: {
+      base_url: `https://user:${password}@memory.example/api/v1`,
+    },
+  });
+  try {
+    const displayed: string[] = [];
+    fixture.ctx.ui.input = async (title: string, placeholder?: string) => {
+      displayed.push(title, placeholder ?? "");
+      return undefined;
+    };
+
+    await fixture.command("setup");
+
+    assert.doesNotMatch(displayed.join("\n"), new RegExp(password));
+    assert.match(displayed.join("\n"), /http:\/\/localhost:8020\/api\/v1/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup sends a bearer token from the selected environment variable", async () => {
+  const endpoint = "http://localhost:8020/api/v1";
+  const tokenEnv = "FORGETFUL_SETUP_TEST_TOKEN";
+  const token = "setup-bearer-secret";
+  process.env[tokenEnv] = token;
+  const fixture = await harness({
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (input, init) => {
+          assert.equal(String(input), `${endpoint}/projects`);
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            `Bearer ${token}`,
+          );
+          return new Response(JSON.stringify({ projects: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+  });
+  try {
+    fixture.ctx.ui.input = async (title: string) =>
+      title.includes("environment") ? tokenEnv : "";
+    fixture.ctx.ui.select = async () =>
+      "Bearer token from environment variable";
+
+    await fixture.command("setup");
+
+    const user = JSON.parse(
+      await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    assert.equal(user.token_env, tokenEnv);
+    assert.equal(user.token, undefined);
+    assert.equal(
+      fixture.notifications.some((message) => message.includes(token)),
+      false,
+    );
+  } finally {
+    delete process.env[tokenEnv];
+    await fixture.cleanup();
+  }
+});
+
+test("setup rejects an unsafe token environment name without echoing it", async () => {
+  const fixture = await harness();
+  try {
+    const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+    const before = await readFile(settingsPath, "utf8");
+    const pastedToken = "raw token with spaces";
+    fixture.ctx.ui.input = async (title: string) =>
+      title.includes("environment") ? pastedToken : "";
+    fixture.ctx.ui.select = async () =>
+      "Bearer token from environment variable";
+
+    await fixture.command("setup");
+
+    assert.equal(await readFile(settingsPath, "utf8"), before);
+    assert.equal(
+      fixture.notifications.some((message) => message.includes(pastedToken)),
+      false,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup cancellation at each prompt leaves settings unchanged", async () => {
+  const cases = [
+    { inputs: [undefined], selections: [] },
+    { inputs: ["https://memory.example/api/v1"], selections: [undefined] },
+    {
+      inputs: ["https://memory.example/api/v1", undefined],
+      selections: ["Bearer token from environment variable"],
+    },
+  ];
+  for (const value of cases) {
+    const fixture = await harness({
+      uiInputs: value.inputs,
+      uiSelections: value.selections,
+      createClient: () => {
+        throw new Error("cancelled setup must not validate");
+      },
+    });
+    try {
+      const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+      const before = await readFile(settingsPath, "utf8");
+
+      await fixture.command("setup");
+
+      assert.equal(await readFile(settingsPath, "utf8"), before);
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
+test("setup failure keeps settings and shows endpoint installation guidance", async () => {
+  const fixture = await harness({
+    uiInputs: ["http://remote.example/api/v1"],
+    uiSelections: ["Unauthenticated"],
+  });
+  try {
+    const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+    const before = await readFile(settingsPath, "utf8");
+
+    await fixture.command("setup");
+
+    assert.equal(await readFile(settingsPath, "utf8"), before);
+    const messages = fixture.notifications.join("\n");
+    assert.match(
+      messages,
+      /github\.com\/ScottRBK\/forgetful\/tree\/main\/skills\/forgetful-mcp-setup/,
+    );
+    assert.match(
+      messages,
+      /github\.com\/ScottRBK\/forgetful#option-3-docker-deployment-productionscale/,
+    );
+    assert.match(messages, /TLS is required/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup does not replace malformed user settings", async () => {
+  const fixture = await harness({
+    uiInputs: [""],
+    uiSelections: ["Unauthenticated"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ projects: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+  });
+  try {
+    const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+    const malformed = "{ keep this for manual recovery";
+    await writeFile(settingsPath, malformed);
+
+    await assert.doesNotReject(fixture.command("setup"));
+
+    assert.equal(await readFile(settingsPath, "utf8"), malformed);
+    assert.ok(
+      fixture.notifications.some((message) =>
+        message.includes("settings were not changed"),
+      ),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("setup invalidates an in-flight runtime built from old settings", async () => {
+  let releaseWorkContext!: () => void;
+  const workContextGate = new Promise<void>((resolve) => {
+    releaseWorkContext = resolve;
+  });
+  let reportWorkContextStarted!: () => void;
+  const workContextStarted = new Promise<void>((resolve) => {
+    reportWorkContextStarted = resolve;
+  });
+  const fixture = await harness({
+    workContextGate,
+    onWorkContext: reportWorkContextStarted,
+    uiInputs: [""],
+    uiSelections: ["Unauthenticated"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ projects: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+  });
+  try {
+    const oldLoad = fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    await workContextStarted;
+
+    await fixture.command("setup");
+    releaseWorkContext();
+
+    await assert.rejects(oldLoad, /runtime superseded/);
+  } finally {
+    releaseWorkContext();
+    await fixture.cleanup();
+  }
+});
+
+test("setup requires interactive UI and does not change settings", async () => {
+  const fixture = await harness();
+  try {
+    const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+    const before = await readFile(settingsPath, "utf8");
+    fixture.ctx.hasUI = false;
+
+    await fixture.command("setup");
+
+    assert.equal(await readFile(settingsPath, "utf8"), before);
+    assert.ok(
+      fixture.notifications.some((message) => message.includes("interactive")),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
 
 test("controls persist capture, enablement, debug, and project scope safely", async () => {
   const fixture = await harness();
