@@ -162,6 +162,7 @@ async function harness(
   };
   const ctx: any = {
     cwd: root,
+    mode: "tui",
     sessionManager,
     signal: undefined,
     hasUI: true,
@@ -173,6 +174,7 @@ async function harness(
       confirm: async () => true,
       select: async (_title: string, values: string[]) =>
         options.uiSelections ? options.uiSelections.shift() : values[0],
+      custom: async () => undefined,
       input: async (_title: string, placeholder?: string) =>
         options.uiInputs ? options.uiInputs.shift() : placeholder,
     },
@@ -591,6 +593,64 @@ test("setup requires interactive UI and does not change settings", async () => {
     assert.equal(await readFile(settingsPath, "utf8"), before);
     assert.ok(
       fixture.notifications.some((message) => message.includes("interactive")),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("missing model warning directs the user to setup", async () => {
+  const fixture = await harness({ userSettings: { model: undefined } });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+
+    assert.ok(
+      fixture.notifications.includes(
+        "Forgetful memory model is not configured; recall and capture are paused. " +
+          "Run /forgetful setup in Pi to configure Forgetful.",
+      ),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("model command uses Pi's searchable picker for a large model catalogue", async () => {
+  const fixture = await harness();
+  try {
+    const selected = {
+      provider: "openrouter",
+      id: "anthropic/claude-sonnet-4",
+    };
+    fixture.ctx.modelRegistry.getAvailable = () =>
+      [
+        selected,
+        ...Array.from({ length: 149 }, (_, index) => ({
+          provider: "openrouter",
+          id: `provider/model-${index}`,
+        })),
+      ];
+    fixture.ctx.ui.select = async () => {
+      throw new Error("flat model selector must not be used");
+    };
+    fixture.ctx.ui.custom = async () => selected;
+
+    await fixture.command("model");
+
+    const settings = JSON.parse(
+      await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(settings.model, "openrouter/anthropic/claude-sonnet-4");
+    assert.ok(
+      fixture.notifications.includes(
+        "Forgetful memory model set to openrouter/anthropic/claude-sonnet-4.",
+      ),
     );
   } finally {
     await fixture.cleanup();

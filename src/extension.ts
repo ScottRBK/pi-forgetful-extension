@@ -7,8 +7,11 @@ import type {
   ExtensionFactory,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { UserMessage } from "@earendil-works/pi-ai";
+import {
+  getAgentDir,
+  ModelSelectorComponent,
+} from "@earendil-works/pi-coding-agent";
+import type { Model, UserMessage } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type {
   CaptureSnapshot,
@@ -36,6 +39,7 @@ import {
   PiMemoryModel,
   availableMemoryModels,
   modelLabel,
+  modelSelectionFromModel,
   resolveMemoryModel,
 } from "./model.ts";
 import { isMemoryOperation, sanitizeText } from "./privacy.ts";
@@ -546,6 +550,44 @@ function parseSelection(value: string): ModelSelection | undefined {
   };
 }
 
+async function pickMemoryModel(
+  ctx: ExtensionContext,
+  currentModel: Model<any> | undefined,
+): Promise<Model<any> | undefined> {
+  if (ctx.mode !== "tui") {
+    const selected = await ctx.ui.select(
+      "Forgetful memory model",
+      availableMemoryModels(ctx).map((model) => modelLabel(modelSelectionFromModel(model))),
+    );
+    if (!selected) return undefined;
+    const selection = parseSelection(selected);
+    return selection
+      ? ctx.modelRegistry.find(selection.provider, selection.id)
+      : undefined;
+  }
+
+  // Pi exports the selector against its runtime while extensions receive this registry facade.
+  const modelRuntime = {
+    getAvailableSnapshot: () => ctx.modelRegistry.getAvailable(),
+    getModel: (provider: string, id: string) =>
+      ctx.modelRegistry.find(provider, id),
+    getError: () => ctx.modelRegistry.getError(),
+    refresh: (options: Parameters<typeof ctx.modelRegistry.refresh>[0]) =>
+      ctx.modelRegistry.refresh(options),
+  } as unknown as ConstructorParameters<typeof ModelSelectorComponent>[2];
+
+  return ctx.ui.custom<Model<any> | undefined>((tui, _theme, _keybindings, done) =>
+    new ModelSelectorComponent(
+      tui,
+      currentModel,
+      modelRuntime,
+      ctx.scopedModels,
+      (model) => done(model),
+      () => done(undefined),
+    ),
+  );
+}
+
 function notify(
   ctx: ExtensionContext,
   message: string,
@@ -834,7 +876,8 @@ export function createForgetfulExtension(
         showWarningOnce(
           ctx,
           "missing-memory-model",
-          "Forgetful memory model is not configured; recall and capture are paused.",
+          "Forgetful memory model is not configured; recall and capture are paused. " +
+            "Run /forgetful setup in Pi to configure Forgetful.",
         );
       }
       return config;
@@ -1787,12 +1830,13 @@ export function createForgetfulExtension(
           notify(ctx, "No configured memory models are available.", "error");
           return;
         }
-        const selected = await ctx.ui.select(
-          "Forgetful memory model",
-          models.map((model) => `${model.provider}/${model.id}`),
-        );
+        const configured = runtime.config.model;
+        const currentModel = configured
+          ? ctx.modelRegistry.find(configured.provider, configured.id)
+          : undefined;
+        const selected = await pickMemoryModel(ctx, currentModel);
         if (!selected) return;
-        selection = parseSelection(selected);
+        selection = modelSelectionFromModel(selected);
       }
       if (!selection) {
         notify(ctx, "Usage: /forgetful model provider/model-id", "error");
