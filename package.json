@@ -1,0 +1,28 @@
+{
+  "name": "pi-forgetful-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Automatic Forgetful recall and capture for Pi",
+  "pi": { "extensions": ["./index.ts"] },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "@types/node": "22.19.19",
+    "tsx": "4.20.6",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3"
+  }
+}

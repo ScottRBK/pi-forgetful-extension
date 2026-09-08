@@ -15,26 +15,34 @@ The following choices are intentional for the first implementation:
 - Capture starts in `auto` mode in the first slice, with `off` and `observe` controls retained.
 - The `forgetful_recall` tool is enabled, and its normal Pi tool results may persist in session
   history. Compact rendering changes presentation, not persistence.
-- Global scope remains the default. Users can opt into strict project scope explicitly; scope
-  enforcement in either mode is treated as an existing Forgetful contract rather than a new
-  cross-project feature in this extension.
+- Recall defaults to global scope. Users can opt into strict project recall explicitly; scope
+  enforcement uses the existing Forgetful search contract.
+- Capture associates each new memory with the current project by default. The agent may select
+  another existing project when the completed work concerns it, without a separate user prompt.
+  This per-candidate destination does not change the repository's persisted recall scope.
+- Capture checks both duplication and contradiction against existing memories. A contradiction
+  is a distinct outcome with evidence, not an ordinary duplicate to discard. Clear, evidenced
+  changes automatically supersede the old memory while preserving its history. Uncertain
+  conflicts are escalated to the main model through the bounded handoff described below.
 - Query-before-create is the only duplicate boundary. Race and retry risk are accepted for this
   slice; no stronger Forgetful write contract is proposed without explicit approval.
 - The planner uses a separately configurable authenticated Pi model, distinct from the active
   main-agent model.
-- Repository/project mapping is resolved by the agent from the active project context only when
-  project scope is selected; it is not managed through a Forgetful project command. If an
-  existing Forgetful project cannot be resolved, project-scoped recall and capture skip and the
-  user is given setup guidance.
-- The effective scope defaults to global. An explicit scope choice is persisted per repository
+- Repository/project mapping is resolved by the agent from active work context for capture and
+  when project recall is selected; it is not managed through a Forgetful project command. If an
+  existing target project cannot be resolved, the affected capture or project recall skips and
+  the user is given setup guidance. Global recall can still run without a project mapping.
+- The effective recall scope defaults to global. An explicit choice is persisted per repository
   in `.pi/forgetful/settings.json` and is reloaded whenever the project is revisited.
-- The planner may request a scope different from the persisted setting, but the extension must
+- The recall planner may request a scope different from the persisted setting. The extension must
   obtain explicit user authorization before applying that override. Authorization is for the
   current operation unless the user separately changes the persisted setting.
 - HTTP is the only Forgetful transport in the MVP. Application services depend on a
   transport-neutral `ForgetfulClient` port so a CLI adapter can be added later without changing
   the core services or policies.
 - Any proposal to change Forgetful itself must be escalated to the user with justification.
+- Completion of capture after Pi exits is deferred beyond MVP. Keep the durable queue, but do
+  not add an external worker, daemon, or shutdown-completion requirement for this slice.
 
 ## User experience
 
@@ -49,17 +57,21 @@ The extension:
 5. leaves memory IDs, entity names, and topic leads for deeper exploration;
 6. exposes one bounded, read-only recall tool to the main agent;
 7. evaluates completed work for durable knowledge after `agent_settled`;
-8. checks for overlap, then quietly creates only novel, high-confidence memories through the
-   existing query-before-create API path.
+8. assigns each candidate to its relevant project, checks for duplicates and contradictions, and
+   quietly creates novel, high-confidence memories through the existing query-before-create path;
+9. automatically supersedes clearly outdated facts and retains uncertain conflicts with memory
+   IDs and supporting evidence for escalation.
 
 Memory failure must never block the user's task. A preflight system-prompt injection is
 transient; a `forgetful_recall` result follows normal Pi tool-result persistence.
 
 ## Pi feasibility
 
-Pi 0.84.1 provides the required extension seams:
+The implementation targets Pi 0.85.1 and uses these extension seams:
 
 - `before_agent_start` can modify the system prompt for the current turn;
+- `input` and `context` cover queued prompts that bypass `before_agent_start`, using transient
+  context messages without adding recall to stored session history;
 - `agent_settled` runs after retries, compaction, and queued continuation have stopped;
 - `ctx.modelRegistry` exposes configured models and resolved authentication;
 - `ctx.scopedModels` supports a model picker consistent with the user's Pi configuration;
@@ -94,20 +106,21 @@ smaller failure surface.
 
 Retrieved memory is untrusted historical context, never executable instruction.
 
-## Scope
+## Recall scope and capture destination
 
-Global scope is the default. If `.pi/forgetful/settings.json` contains an explicit scope
+Global recall is the default. If `.pi/forgetful/settings.json` contains an explicit scope
 override, load and validate it before planning the request. Resolve the canonical repository
-identity to an existing numeric Forgetful project ID through explicit setup only when project
-scope is selected; never create a project silently.
+identity to an existing numeric Forgetful project ID when project recall is selected or capture
+needs a destination. Resolve the mapping from the active work context; never create a project
+silently. Missing or ambiguous mappings require setup guidance rather than a guessed ID.
 
-In global mode, omit project filtering and send `strict_project_filter: false`. In project mode,
-every search request must send the resolved numeric project ID with
-`strict_project_filter: true`. Forgetful owns project filtering and the scope of returned
-memories; the extension does not revalidate project IDs in response memories.
+For global recall, omit project filtering and send `strict_project_filter: false`. In project
+recall, every search request must send the resolved numeric project ID with
+`strict_project_filter: true`. Forgetful owns search filtering and the scope of returned
+search results; the extension does not revalidate their project IDs. Resolution separately
+checks a selected memory's current state before mutation, as described in the adapter contract.
 
-Project-scoped recall and capture are opt-in through the scope command or the persistent
-per-project setting:
+Project-scoped recall is opt-in through the scope command or the persistent per-project setting:
 
 ```text
 /forgetful scope
@@ -122,9 +135,23 @@ override, surface configuration guidance, and use the global default; never inte
 data as project scope. A planner-requested override does not update this file unless the user
 explicitly chooses to persist the new scope.
 
-If project setup is missing or invalid, project-scoped recall and capture skip and provide setup
-guidance. They must never silently fall back to global search. Debug output always shows the
-effective scope and resolved project ID.
+If project setup is missing or invalid, project-scoped recall skips and provides setup guidance.
+It must never silently fall back to global search. Debug output shows the effective recall scope
+and resolved project ID.
+
+Capture destination is independent of recall scope. Each candidate defaults to the current
+project, even when recall searched globally. The agent can override that destination to another
+existing project when supported by the completed work. For example, a fix to Forgetful made while
+working on this extension belongs to the Forgetful project. The capture model may use the main
+agent's project context as evidence and returns a target project and rationale per candidate.
+
+Resolve and validate the destination before overlap checks. Query for duplicates and
+contradictions using that project's ID and `strict_project_filter: true`, then use the same
+`project_ids` on create. A validated per-candidate project override needs no additional user
+approval and cannot alter persisted recall settings, the service endpoint, or credentials.
+If the intended destination cannot be resolved, skip that candidate with setup guidance instead
+of silently writing to the current project or without a project. Global recall does not imply
+project-free capture; personal facts that do not belong to a project need a separate policy.
 
 Scope enforcement uses the existing Forgetful service contract. The extension adds only local
 persistence for the user's per-project scope preference; it does not add a new cross-project API
@@ -153,18 +180,25 @@ Application services depend on the transport-neutral `ForgetfulClient` port. The
 request and response shapes:
 
 - search: `POST /memories/search` with `query`, `query_context`, optional numeric `project_ids`
-  when project scope is selected, and the explicit `strict_project_filter` value; Forgetful owns
-  project filtering and returned-memory scope validation;
+  for project recall or the capture destination, and the explicit `strict_project_filter` value;
+  Forgetful owns search filtering and returned-memory scope validation;
+- project lookup: `GET /projects` with `repo_name` when available, resolving an existing numeric
+  project ID from the candidate's work context; missing or ambiguous matches do not create one;
 - create: `POST /memories` with the required `title`, `content`, `context`, `keywords`, and
-  `tags` fields;
+  `tags` fields, plus the resolved capture destination in `project_ids`;
+- read for resolution: `GET /memories/{id}` for an existing conflict's selected memory, checking
+  that its content, project associations, and obsolescence state still match the decision;
+- supersede: first create the replacement, then `DELETE /memories/{id}` with `reason` and
+  `superseded_by` set to the confirmed replacement ID. This route marks the old memory obsolete
+  and preserves its history; the operation is not a hard delete;
 - validate HTTP status codes and response schemas before returning data to recall or capture;
 - use configured authentication, never log credentials, and require TLS for non-local endpoints;
 - apply bounded per-request timeouts and abort signals to every network call.
 
-The current create route has no idempotency key. Query-before-create is therefore the only
-server-side duplicate boundary in the first slice; the adapter must not describe it as atomic or
-idempotent. Any proposed Forgetful API or persistence change is escalated rather than hidden in
-the extension.
+The current create route has no idempotency key. Query-before-create remains the duplicate
+boundary in this slice. Create-then-obsolete is also not an atomic transaction, and the read
+before resolution is not a compare-and-swap guarantee. The adapter must not claim otherwise.
+Any proposed Forgetful API or persistence change is escalated rather than hidden in the extension.
 
 ## Capture lifecycle and durability
 
@@ -177,19 +211,29 @@ The extension-owned capture queue must be durable before automatic mode is enabl
 
 1. Snapshot the completed turn using stable session/branch entry IDs and the final assistant
    status. Do not reread a mutable session later and assume it is the same run.
-2. Persist the fixed snapshot, project/scope, capture mode, run identity, and prompt/model
-   versions as one queue record.
+2. Persist the fixed snapshot, current project context, recall scope, capture mode, run identity,
+   and prompt/model versions as one queue record. Record each candidate's resolved destination
+   with its outcome before writing, so retries do not reroute it from a changed working directory.
 3. Advance the capture watermark with the durable enqueue. A stable session/branch plus final
    entry identity (and snapshot hash where needed) prevents the same settled turn being queued
    twice after retries, compaction, or restart.
-4. Run one locked worker per session/branch. Recover pending records after restart, and retain
-   per-candidate outcomes for retry and debug inspection.
+4. Run one locked worker per session/branch, with serialized queue-file mutations. Recover
+   pending records after restart, and retain per-candidate outcomes for retry and debug inspection.
 5. Remove or mark a queue record complete only after all candidate outcomes are recorded.
 
 The worker is not awaited by `agent_settled`, so automatic capture cannot delay the user's next
 turn. An in-memory queue or a timestamp-only watermark is not sufficient. The queue prevents
 extension-level replay, but query-before-create remains the only Forgetful duplicate boundary;
 it cannot prevent two independent clients from racing to create the same memory.
+
+The MVP worker runs inside the live Pi process. Durable pending records can be recovered on a
+later normal start, but capture completion after Pi exits is not an MVP guarantee. External
+workers and shutdown draining are deferred until MVP usage demonstrates a need; this does not
+remove the existing snapshot, watermark, and retry requirements.
+
+Queue files live under the user's Pi agent directory, in `forgetful/queues/`. The directory key
+separates repository and service/account identity. Repository-controlled settings cannot redirect
+the queue or select service credentials.
 
 ## Capture flow
 
@@ -200,14 +244,77 @@ assistant message and skip capture when its stop reason is error or aborted. The
 is then processed by the durable worker described above.
 
 1. Read only the conversation messages in the fixed snapshot after the last capture watermark.
-2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, using the
-   bounded capture call budget.
-3. Apply deterministic structural and sensitive-data validation to its response.
-4. Query Forgetful for semantic overlap for each accepted candidate.
-5. Give the candidate and overlapping memories to the memory model for `create` or `skip`.
-6. Execute the model's validated decision through the existing Forgetful API.
-7. Never update or obsolete an existing memory automatically.
-8. If the decision is malformed or uncertain, skip the write.
+2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
+   a target project and rationale, using the bounded capture call budget.
+3. Apply deterministic structural and sensitive-data validation and resolve each destination.
+4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
+5. Give the candidate, its evidence, and overlapping memories to the memory model for a bounded
+   `create`, `skip`, `supersede`, or `escalate` decision. This extends the existing overlap
+   judgment; it does not require a separate contradiction service or an extra model call per
+   candidate. Use `supersede` for a clearly evidenced change and `escalate` for unresolved conflict.
+6. Validate the decision. A contradiction must identify conflicting memories from that query,
+   the incompatible claims, source entries in the eligible snapshot, and why they concern the
+   same fact.
+7. Execute `create` or automatic `supersede` through the existing Forgetful API using the shared
+   resolution path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
+   neither an ordinary duplicate nor permission to create a competing fact.
+8. If a decision is malformed, reject the write and record the reason. Retain a valid uncertain
+   conflict for escalation. An arbitrary confidence score alone does not authorize supersession.
+
+A contradiction means incompatible claims about the same subject and applicable context.
+Different projects using different databases is not a contradiction. A current user decision
+or evidenced change can challenge an old memory; an assistant suggestion or repetition of
+recalled text alone is not independent evidence. Similarity alone does not establish conflict.
+
+Automatic resolution is agreed for clear changes. For example, an explicit decision that the
+project has switched to SQLite can supersede the old PostgreSQL decision; a suggestion to
+consider SQLite cannot. Retain the superseded memory as history, linked to its replacement.
+
+The capture service applies supersession in this order:
+
+1. Re-read the selected old memory and validate the recorded content and project associations.
+   If it changed or was already superseded, refresh the decision instead of applying a stale one.
+2. Create the validated replacement and durably record its returned ID before obsoleting the
+   old memory. Preserve applicable project associations and provenance. If the proposed change
+   invalidates only part of a shared memory, escalate rather than discard still-valid claims.
+3. Mark the old memory obsolete with the reason and replacement ID, then record completion.
+   Retry a failed obsolescence step using the recorded replacement, not another create.
+
+If creation fails or its outcome is unknown, do not obsolete the old memory. If obsolescence
+fails, the replacement may already exist alongside it; preserve that partial outcome for retry.
+Other clients can still race between validation and mutation because the existing API has no
+conditional write contract. This limitation remains explicit; no service change is assumed.
+
+### Escalation to the active session
+
+The main model can resolve a pending conflict through an extension tool. The current
+`forgetful_recall` tool remains read-only; a separate, bounded `forgetful_resolve` tool accepts
+a pending conflict ID, a decision, and evidence entry IDs or a reason. The extension reads the
+actual session evidence. The tool cannot name arbitrary memories or supply an unvalidated
+replacement. Conflicts involving partial or shared claims remain deferred or can be skipped
+when the bounded replacement cannot safely preserve the old memory's remaining meaning.
+
+1. Persist a pending conflict with its originating session/branch, destination project, old
+   claim, proposed replacement, memory IDs, and source evidence in the existing queue store.
+2. Deliver a bounded custom message to that same live session using `pi.sendMessage()` with
+   `deliverAs: "nextTurn"`. The main model sees it with the next user prompt; this handoff
+   does not interrupt current work or start an extra model turn. A compact status can show
+   that a conflict is pending. The durable record, not Pi's in-memory delivery queue, owns it.
+3. The main model uses the session context to resolve the conflict. If the missing information
+   is a user preference or an unconfirmed fact, it asks the user normally. It can then call
+   `forgetful_resolve` to supersede the old fact, retain it and reject the candidate, or defer.
+4. The tool validates the conflict identity, current enablement, project, evidence, and observed
+   memory state, then delegates to the same capture-service write path used automatically.
+   A later user clarification can supply new evidence; repeating the escalation alone cannot.
+
+Escalation messages and resolution tool results follow normal Pi session persistence. Exclude
+these messages, memory-operation results, and mere acknowledgements from new capture evidence
+to avoid repeated conflict loops. Do not deliver a worker's conflict into a replacement session
+or another branch. Pending conflicts remain available for later recovery, subject to the
+existing MVP boundary on exit. `capture off` blocks resolution writes as well as new capture.
+
+The MVP handoff does not request `triggerTurn` or launch a separate conversation. A user
+clarification stays in the existing session and can support a later resolution call.
 
 Query-before-create is the only duplicate boundary for this slice. Race and retry risk are
 accepted, so the extension must record per-candidate outcomes and must explicitly allow
@@ -215,7 +322,7 @@ partial writes when a later candidate or retry fails. No change to the Forgetful
 assumed.
 
 The first implementation uses automatic capture immediately, as agreed. Debug tooling must
-still expose each candidate and create/skip reason.
+still expose each candidate's destination, decision, and contradiction evidence or skip reason.
 
 ## Configurable prompts
 
@@ -223,7 +330,8 @@ Memory judgment is split into three prompt slots:
 
 - `classification.md`: whether and how to search, including topics and entities;
 - `recall.md`: how retrieved memories and deeper-search leads are presented to the main agent;
-- `capture.md`: what completed knowledge deserves durable storage.
+- `capture.md`: what completed knowledge deserves durable storage, its destination project, and
+  how existing memories should be checked for duplication and contradiction.
 
 Each prompt is composed from:
 
@@ -274,10 +382,11 @@ Debug mode may show:
 - selected memory model;
 - prompt-policy sources and hashes;
 - planner input and validated output;
-- effective project/global scope;
+- effective project/global recall scope and each candidate's destination project;
 - Forgetful queries and timings;
 - injected memory IDs and token count;
-- capture candidates and create/skip reasons.
+- capture candidates and create/skip/supersede/escalate reasons with supporting source identities;
+- supersession replacement IDs, per-step outcomes, and pending escalations.
 
 Prompt and memory content is not persisted in extension debug logs unless the user explicitly opts
 in. This does not override normal Pi persistence of a `forgetful_recall` tool result.
@@ -302,7 +411,8 @@ The benchmark matrix covers every supported memory planner model, warm and cold 
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the recall preflight path. The
 implementation also bounds recall to one planner call per prompt and bounds capture extraction
-and create/skip decisions with an explicit per-run call budget; debug shows aggregate usage.
+and overlap decisions, including contradiction detection, with an explicit per-run call budget;
+debug shows aggregate usage.
 
 ## Transport
 
@@ -329,6 +439,13 @@ application services, scope policy, prompt policy, or capture queue.
   earlier candidate may already have been written and query-before-create does not eliminate
   race or retry duplicates;
 - project cannot be resolved in project mode: skip rather than search globally.
+- capture destination cannot be resolved: skip that candidate with setup guidance; global recall
+  remains usable, and a failed override never falls back to another write destination;
+- clear contradiction: automatically supersede with a recorded replacement and reason;
+- uncertain contradiction or changed source memory: retain for escalation or renewed judgment;
+- partial supersession: preserve the replacement ID and retry only the unfinished step;
+- Pi exits with capture pending: preserve durable work for later recovery; post-exit completion
+  is deferred beyond MVP;
 - persisted scope setting is absent: use global scope;
 - persisted scope setting is malformed: reject the override, surface configuration guidance, and
   use global scope.
@@ -337,8 +454,9 @@ application services, scope policy, prompt policy, or capture queue.
 
 ## Delivery slices
 
-1. Separately configurable memory model, global-by-default scope with optional project setup,
-   silent recall injection, persisted agent-followable recall tool, and automatic capture.
+1. Separately configurable memory model, global-by-default recall with optional project scope,
+   silent recall injection, persisted agent-followable recall tool, and automatic capture with
+   project association, agent-selected destinations, and automatic contradiction resolution.
 2. Global and trusted-project prompt policy overlays.
 3. Debug, capture mode, enablement, and scope controls.
 4. Real-provider latency and capture-quality tuning.
@@ -357,16 +475,19 @@ to prove that a real model classifies, splits, or judges novelty correctly.
 3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
    scoped Forgetful data to the main agent.
 4. **Capture input seam**: the capture model receives only the completed turn delta and the
-   composed capture policy.
-5. **Capture mechanism seam**: given structured candidate and create/skip decisions, the
-   extension performs the expected Forgetful search and write, with correct fields and scope.
+   composed capture policy, including the current project and evidence for another destination.
+5. **Capture mechanism seam**: given structured create/skip/supersede/escalate decisions, the
+   extension searches the destination project, applies validated creates or ordered supersession,
+   and retains uncertain conflicts. A stale decision never knowingly changes a newer memory.
 6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
    and project choices are loaded per repository; planner-requested overrides require explicit
    authorization; project requests set `strict_project_filter: true` and use the resolved
    numeric project ID, while returned-memory filtering remains a Forgetful responsibility.
+   Capture defaults to the current project independently of recall scope; an agent-selected
+   existing destination needs no separate approval and does not change persisted recall scope.
 7. **Capture lifecycle seam**: `agent_settled` snapshots and durably enqueues quickly; watermark,
    locking, restart recovery, compaction, fork, retry, and queued-follow-up behaviour are
-   covered without duplicate extension work.
+   covered without duplicate extension work. Completion after process exit is not an MVP claim.
 8. **Configuration seam**: memory-model selection, Forgetful instance settings, toggles, prompt
    overlays, project setup, and scope take effect; instance settings remain user-level while
    scope persists under `.pi/forgetful/settings.json`.
@@ -386,6 +507,19 @@ intelligence. For example:
 - return a capture candidate and `create`, then assert the expected memory exists through the
   existing Forgetful API;
 - pre-seed an overlapping memory, return `skip`, and assert the memory count is unchanged;
+- pre-seed an incompatible decision, return `supersede` with valid source identities, and assert
+  the replacement is created before the old memory is marked obsolete and linked to it;
+- return `escalate` and assert the conflicting IDs and evidence persist without a write;
+- reject a resolution referencing memory IDs outside the candidate's overlap results;
+- fail replacement creation and assert the old memory remains active; fail obsolescence after
+  creation and assert retry uses the recorded replacement ID without creating another memory;
+- change the old memory before resolution and assert the stale decision is rejected;
+- with global recall enabled, create a candidate without an override and assert it belongs to
+  the current project;
+- while working in this extension, return an evidenced Forgetful-project destination and assert
+  overlap search and create both use Forgetful's project ID, without a permission prompt or a
+  change to persisted recall scope;
+- return an unknown target project and assert no write occurs in either project;
 - emit the same settled turn twice and assert the durable capture watermark prevents repeat work;
 - restart with a pending capture record and assert recovery processes the fixed snapshot once;
 - open a fresh repository and assert global scope is used, then change the scope and revisit the
@@ -394,9 +528,14 @@ intelligence. For example:
   leaves the persisted scope unchanged;
 - document, rather than deny, the accepted race/retry behaviour of query-before-create.
 
-Semantic classification, semantic atomicity, novelty quality, and duplicate prevention remain
-model or service behaviour. They can be explored with real-model evaluation scenarios, but are
-not deterministic regression claims.
+For the session handoff, verify that an escalation reaches the originating session at
+the next user prompt without starting a turn itself; resolving a pending conflict uses the same
+validated write path; unrelated conflict IDs and writes while capture is off are rejected; and
+resolution messages do not recursively become new capture candidates.
+
+Semantic classification, semantic atomicity, novelty quality, contradiction accuracy, project
+assignment quality, and duplicate prevention remain model or service behaviour. They can be
+explored with real-model evaluation scenarios, but are not deterministic regression claims.
 
 ## Accepted trade-offs
 
@@ -409,6 +548,13 @@ not deterministic regression claims.
   all-or-nothing behaviour.
 - Deep recall is intentionally useful to the main agent even though its normal Pi tool result
   may be persisted in session history.
-- Global scope is the default; project scope remains strict when explicitly selected. Scope
+- Global recall is the default; project recall remains strict when explicitly selected. Scope
   enforcement and returned-memory project filtering are treated as the existing Forgetful
   service contract rather than an extension-owned validation subsystem.
+- Capture destinations default to the current project and may be changed per candidate by the
+  agent based on the work; global recall does not make captured knowledge project-free.
+- Clear, evidenced contradictions are resolved automatically by supersession. Uncertain cases
+  use the main-model handoff and bounded resolver tool described above.
+- Supersession preserves history but is a multi-step operation on the existing REST API.
+  Partial outcomes and the remaining concurrent-write risk must stay visible in recorded state.
+- Post-exit capture completion is deferred beyond MVP; the durable queue remains in scope.

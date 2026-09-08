@@ -29,11 +29,13 @@ playwright-report/
 # Local environment and secrets
 .env
 .env.*
-!.env.example
 
 # Local Pi and review-tool state
 .pi/
 .lavish/
+
+# SonarQube local metadata and generated state
+.sonarqube/
 
 # Logs
 *.log

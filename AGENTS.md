@@ -9,10 +9,17 @@ The intended experience requires no memory commands during normal work:
 - the main agent receives bounded leads it can explore through a read-only recall tool;
   normal Pi tool-result persistence is accepted and documented;
 - durable knowledge is captured quietly after successful work settles through a durable queue;
+- capture resolves clear contradictions and defaults each memory to the current project, with
+  agent-selected destinations for knowledge about another existing project;
 - debug, scope, capture-mode, model, prompt, and enablement controls remain available on demand.
 
-See [the approved design](docs/design.md) and the
-[visual architecture review](docs/architecture-review.html).
+Recall defaults to global search independently of capture's project association. Clear changes
+automatically supersede old memories while preserving history. Uncertain conflicts go to the
+originating session's next prompt; `forgetful_resolve` accepts only a pending conflict ID and
+validated evidence from that session.
+Post-exit capture completion is deferred beyond MVP; the durable queue remains in scope.
+
+See [the approved design](docs/design.md).
 
 ## High-level architecture
 
@@ -25,20 +32,22 @@ not used by this extension.
 flowchart TB
   subgraph PI["Pi extension boundary"]
     E["ForgetfulExtension\nhooks, commands, tool registration"]
-    R["RecallHook\nbefore_agent_start"]
+    R["Recall hooks\nbefore_agent_start + queued input/context"]
     S["SettledHook\nagent_settled: snapshot and enqueue"]
     T["forgetful_recall\nbounded read-only tool"]
+    U["forgetful_resolve\nbounded pending-conflict tool"]
     E --> R
     E --> S
     E --> T
+    E --> U
   end
 
   subgraph CORE["Application services"]
-    C["ForgetfulCoordinator\nconfig, limits, failure-open"]
+    C["Extension coordination\nconfig, limits, failure-open"]
     RS["RecallService\nplan, search, inject"]
-    CS["CaptureService\ncandidates, create or skip"]
-    SP["ScopePolicy\nproject/global and authorized overrides"]
-    PP["PromptPolicy\nschemas and trusted overlays"]
+    CS["CaptureService\ncreate, supersede, escalate"]
+    SP["Scope validation\nrecall scope and capture destination"]
+    PP["Prompt contracts\nschemas and trusted overlays"]
     C --> RS
     C --> CS
     RS --> SP
@@ -51,20 +60,21 @@ flowchart TB
     MM["MemoryModelClient"]
     FM["ForgetfulClient\ntransport-neutral port (HTTP MVP)"]
     QS["CaptureQueueStore"]
-    SR["SessionSnapshotReader"]
+    SR["SnapshotSessionReader"]
   end
 
   subgraph ADAPTERS["Adapters"]
-    PM["PiModelAdapter\nmodelRegistry.complete() and auth"]
+    PM["PiMemoryModel\nmodelRegistry.complete() and auth"]
     API["ApiForgetfulClient\nfetch, schemas, timeout"]
     CLI["CliForgetfulClient\nfuture transport: spawn forgetful call --json"]
     DS["DurableQueueStore\nsnapshot, watermark, lock, retry"]
-    PS["PiSessionAdapter\nentry IDs and branch identity"]
+    PS["buildCaptureSnapshot\nentry IDs and branch identity"]
   end
 
   R --> C
   S --> C
   T --> RS
+  U --> CS
   RS --> MM
   RS --> FM
   CS --> MM
@@ -89,4 +99,7 @@ An editable Excalidraw version of this architecture is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).
 
 ## Status
-Design approved. Implementation has not started.
+MVP implemented for Pi 0.85.1, with TDD, parent review, and 104 passing regression/integration
+tests, including the real Pi SDK and Forgetful REST routes against an isolated database.
+Real-model judgment quality and latency remain separate acceptance checks.
+See [setup and controls](README.md).
