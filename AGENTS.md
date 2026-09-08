@@ -16,10 +16,10 @@ See [the approved design](docs/design.md) and the
 
 ## High-level architecture
 
-The extension keeps Pi lifecycle code separate from memory policy and transport details. The
-Forgetful transport is configurable: `api` uses a warm REST service, while `cli` starts the
-installed Forgetful CLI on demand. Forgetful MCP transport is deliberately not used by this
-extension.
+The extension keeps Pi lifecycle code separate from memory policy and transport details. The MVP
+uses a warm HTTP REST service behind a transport-neutral Forgetful client port; a CLI adapter can
+be added later without changing the application services. Forgetful MCP transport is deliberately
+not used by this extension.
 
 ```mermaid
 flowchart TB
@@ -37,7 +37,7 @@ flowchart TB
     C["ForgetfulCoordinator\nconfig, limits, failure-open"]
     RS["RecallService\nplan, search, inject"]
     CS["CaptureService\ncandidates, create or skip"]
-    SP["ScopePolicy\nproject/global and result validation"]
+    SP["ScopePolicy\nproject/global and authorized overrides"]
     PP["PromptPolicy\nschemas and trusted overlays"]
     C --> RS
     C --> CS
@@ -49,7 +49,7 @@ flowchart TB
 
   subgraph PORTS["Ports / interfaces"]
     MM["MemoryModelClient"]
-    FM["ForgetfulClient\nselected transport: api or cli"]
+    FM["ForgetfulClient\ntransport-neutral port (HTTP MVP)"]
     QS["CaptureQueueStore"]
     SR["SessionSnapshotReader"]
   end
@@ -57,7 +57,7 @@ flowchart TB
   subgraph ADAPTERS["Adapters"]
     PM["PiModelAdapter\nmodelRegistry.complete() and auth"]
     API["ApiForgetfulClient\nfetch, schemas, timeout"]
-    CLI["CliForgetfulClient\nspawn forgetful call --json"]
+    CLI["CliForgetfulClient\nfuture transport: spawn forgetful call --json"]
     DS["DurableQueueStore\nsnapshot, watermark, lock, retry"]
     PS["PiSessionAdapter\nentry IDs and branch identity"]
   end
@@ -80,10 +80,10 @@ flowchart TB
   CLI --> LOCAL["Forgetful local runtime\non demand, no background service"]
 ```
 
-The CLI path is simpler to operate but normally slower for recall because it starts the
-Forgetful runtime for each command. The API path amortises startup cost across prompts. Both
-paths must preserve strict project scope, bounded timeouts, schema validation, and fail-open
-behaviour.
+The HTTP path is the MVP and amortises startup cost across prompts by using a warm Forgetful
+service. A future CLI adapter could start the installed Forgetful runtime on demand, but it is
+not part of the first slice. Both paths must preserve strict project scope, bounded timeouts,
+schema validation, and fail-open behaviour.
 
 An editable Excalidraw version of this architecture is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).

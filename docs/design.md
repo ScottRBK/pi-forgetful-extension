@@ -15,14 +15,25 @@ The following choices are intentional for the first implementation:
 - Capture starts in `auto` mode in the first slice, with `off` and `observe` controls retained.
 - The `forgetful_recall` tool is enabled, and its normal Pi tool results may persist in session
   history. Compact rendering changes presentation, not persistence.
-- Strict project scope remains the default. Scope enforcement is treated as an existing
-  Forgetful contract rather than a new cross-project feature in this extension.
+- Global scope remains the default. Users can opt into strict project scope explicitly; scope
+  enforcement in either mode is treated as an existing Forgetful contract rather than a new
+  cross-project feature in this extension.
 - Query-before-create is the only duplicate boundary. Race and retry risk are accepted for this
   slice; no stronger Forgetful write contract is proposed without explicit approval.
 - The planner uses a separately configurable authenticated Pi model, distinct from the active
   main-agent model.
-- Repository/project mapping is explicit. If an existing Forgetful project cannot be resolved,
-  project-scoped recall and capture skip and the user is given setup guidance.
+- Repository/project mapping is resolved by the agent from the active project context only when
+  project scope is selected; it is not managed through a Forgetful project command. If an
+  existing Forgetful project cannot be resolved, project-scoped recall and capture skip and the
+  user is given setup guidance.
+- The effective scope defaults to global. An explicit scope choice is persisted per repository
+  in `.pi/forgetful/settings.json` and is reloaded whenever the project is revisited.
+- The planner may request a scope different from the persisted setting, but the extension must
+  obtain explicit user authorization before applying that override. Authorization is for the
+  current operation unless the user separately changes the persisted setting.
+- HTTP is the only Forgetful transport in the MVP. Application services depend on a
+  transport-neutral `ForgetfulClient` port so a CLI adapter can be added later without changing
+  the core services or policies.
 - Any proposal to change Forgetful itself must be escalated to the user with justification.
 
 ## User experience
@@ -72,8 +83,10 @@ smaller failure surface.
    - one or two topic queries;
    - query intent;
    - zero or more entity names;
-   - a project/global scope hint.
-4. Apply the user's configured project/global scope through the existing Forgetful contract.
+   - an optional project/global scope override request and rationale.
+4. Resolve the effective scope from the persisted project setting. If the planner requests a
+   different scope, ask the user for explicit authorization before applying it. A declined
+   request uses the persisted setting, and the planner must never change that setting directly.
 5. Search a warm Forgetful HTTP service.
 6. Inject only the strongest results and short deeper-search leads.
 7. Let the main agent call a read-only `forgetful_recall` tool when it needs more detail. Its
@@ -83,36 +96,65 @@ Retrieved memory is untrusted historical context, never executable instruction.
 
 ## Scope
 
-Strict repository project scope is the default. Resolve the canonical repository identity to an
-existing numeric Forgetful project ID through explicit setup; never create a project silently.
-In project mode, every search request must send that ID with `strict_project_filter: true`.
-The extension must also validate the project IDs in both `primary_memories` and
-`linked_memories`; an out-of-scope result is rejected rather than injected or written around.
+Global scope is the default. If `.pi/forgetful/settings.json` contains an explicit scope
+override, load and validate it before planning the request. Resolve the canonical repository
+identity to an existing numeric Forgetful project ID through explicit setup only when project
+scope is selected; never create a project silently.
 
-Cross-project recall and capture are available only through an explicit session or persistent
-user choice:
+In global mode, omit project filtering and send `strict_project_filter: false`. In project mode,
+every search request must send the resolved numeric project ID with
+`strict_project_filter: true`. Forgetful owns project filtering and the scope of returned
+memories; the extension does not revalidate project IDs in response memories.
+
+Project-scoped recall and capture are opt-in through the scope command or the persistent
+per-project setting:
 
 ```text
-/forgetful project
-/forgetful project set <id>
+/forgetful scope
 /forgetful scope project
 /forgetful scope global
 ```
+
+`/forgetful scope` reports the effective scope and its source. The scope commands update
+`.pi/forgetful/settings.json` so the choice is retained when the project is revisited. If the
+settings file is absent, global scope is used. If the scope setting is malformed, reject the
+override, surface configuration guidance, and use the global default; never interpret malformed
+data as project scope. A planner-requested override does not update this file unless the user
+explicitly chooses to persist the new scope.
 
 If project setup is missing or invalid, project-scoped recall and capture skip and provide setup
 guidance. They must never silently fall back to global search. Debug output always shows the
 effective scope and resolved project ID.
 
-Scope enforcement uses the existing Forgetful service contract. The extension does not add a
-new cross-project API or persistence mechanism.
+Scope enforcement uses the existing Forgetful service contract. The extension adds only local
+persistence for the user's per-project scope preference; it does not add a new cross-project API
+or memory persistence mechanism.
+
+## Forgetful instance configuration
+
+The MVP connects to a user-configured, already-running Forgetful HTTP service. Instance
+connection settings are user-level and live under `~/.pi/agent/forgetful/settings.json` (or the
+equivalent user settings mechanism), separate from the project-local scope setting:
+
+- `base_url`, defaulting to `http://localhost:8020/api/v1`;
+- the configured authentication reference, resolved from user-owned environment or credential
+  settings rather than committed project files;
+- the bounded request timeout.
+
+The project-local `.pi/forgetful/settings.json` stores the repository's scope preference only; it
+must not select the Forgetful endpoint or contain credentials. The service must be reachable
+before recall or capture runs. The extension does not start or manage the Forgetful process in the
+MVP.
 
 ## Forgetful adapter contract
 
-The adapter is the only code that knows the Forgetful REST request and response shapes:
+Application services depend on the transport-neutral `ForgetfulClient` port. The MVP
+`ApiForgetfulClient` is the only adapter and is the only code that knows the Forgetful REST
+request and response shapes:
 
-- default base URL: `http://localhost:8020/api/v1`;
-- search: `POST /memories/search` with `query`, `query_context`, numeric `project_ids`, and
-  the explicit `strict_project_filter` value;
+- search: `POST /memories/search` with `query`, `query_context`, optional numeric `project_ids`
+  when project scope is selected, and the explicit `strict_project_filter` value; Forgetful owns
+  project filtering and returned-memory scope validation;
 - create: `POST /memories` with the required `title`, `content`, `context`, `keywords`, and
   `tags` fields;
 - validate HTTP status codes and response schemas before returning data to recall or capture;
@@ -189,25 +231,22 @@ Each prompt is composed from:
 2. an optional global policy under `~/.pi/agent/forgetful/prompts/`;
 3. an optional trusted project policy under `.pi/forgetful/prompts/`.
 
-Policy files append to the built-in contract. They cannot replace protected schemas, safety
-rules, bounds, or scope ceilings.
+Prompt policy is configured through these settings files, not Forgetful commands. The trusted
+project settings file `.pi/forgetful/settings.json` is separate from prompt policy files and
+stores only project-local extension preferences such as the effective memory scope. Policy files
+append to the built-in contract. They cannot replace protected schemas, safety rules, bounds, or
+scope ceilings.
 
-Proposed management commands:
+Proposed Forgetful commands:
 
 ```text
-/forgetful project
-/forgetful project set <id>
+/forgetful scope
 /forgetful scope project
 /forgetful scope global
 /forgetful capture off
 /forgetful capture observe
 /forgetful capture auto
 /forgetful capture skip
-/forgetful prompts
-/forgetful prompt edit classification
-/forgetful prompt edit recall
-/forgetful prompt edit capture
-/forgetful prompt test classification
 ```
 
 `capture auto` is the first-slice default. `off` disables candidate extraction and writes;
@@ -267,14 +306,18 @@ and create/skip decisions with an explicit per-run call budget; debug shows aggr
 
 ## Transport
 
-Use a warm Forgetful HTTP service and its REST search endpoint. Calling the local CLI for every
-prompt rebuilds the Python runtime and embedding model, which is unsuitable for this latency
-budget.
+Use a warm Forgetful HTTP service and its REST search endpoint for the MVP. Transport selection
+is not user-configurable in this slice: `ApiForgetfulClient` is selected directly behind the
+`ForgetfulClient` port.
 
 The extension should use Node's built-in `fetch`, avoiding a new runtime dependency. Managed
 local service startup can be considered separately after the basic HTTP path is proven. The
 adapter owns authentication headers, TLS checks for remote endpoints, request timeouts, abort
 signals, and response validation.
+
+A future `CliForgetfulClient` can implement the same port by invoking the installed Forgetful
+CLI. That adapter is intentionally deferred; adding it should not require changes to the
+application services, scope policy, prompt policy, or capture queue.
 
 ## Failure behavior
 
@@ -286,11 +329,16 @@ signals, and response validation.
   earlier candidate may already have been written and query-before-create does not eliminate
   race or retry duplicates;
 - project cannot be resolved in project mode: skip rather than search globally.
+- persisted scope setting is absent: use global scope;
+- persisted scope setting is malformed: reject the override, surface configuration guidance, and
+  use global scope.
+- planner requests a scope override: ask for authorization; if declined, continue with the
+  persisted scope without changing it.
 
 ## Delivery slices
 
-1. Separately configurable memory model, explicit project setup, silent recall injection,
-   persisted agent-followable recall tool, and automatic capture.
+1. Separately configurable memory model, global-by-default scope with optional project setup,
+   silent recall injection, persisted agent-followable recall tool, and automatic capture.
 2. Global and trusted-project prompt policy overlays.
 3. Debug, capture mode, enablement, and scope controls.
 4. Real-provider latency and capture-quality tuning.
@@ -312,13 +360,16 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    composed capture policy.
 5. **Capture mechanism seam**: given structured candidate and create/skip decisions, the
    extension performs the expected Forgetful search and write, with correct fields and scope.
-6. **Scope seam**: project requests set `strict_project_filter: true`, use the resolved numeric
-   project ID, and reject out-of-scope primary or linked results without global fallback.
+6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
+   and project choices are loaded per repository; planner-requested overrides require explicit
+   authorization; project requests set `strict_project_filter: true` and use the resolved
+   numeric project ID, while returned-memory filtering remains a Forgetful responsibility.
 7. **Capture lifecycle seam**: `agent_settled` snapshots and durably enqueues quickly; watermark,
    locking, restart recovery, compaction, fork, retry, and queued-follow-up behaviour are
    covered without duplicate extension work.
-8. **Configuration seam**: memory-model selection, toggles, prompt overlays, project setup,
-   and scope take effect.
+8. **Configuration seam**: memory-model selection, Forgetful instance settings, toggles, prompt
+   overlays, project setup, and scope take effect; instance settings remain user-level while
+   scope persists under `.pi/forgetful/settings.json`.
 9. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
 10. **Privacy seam**: preflight context is not added as a custom visible session message; normal
     `forgetful_recall` tool results are explicitly allowed to persist in Pi session history.
@@ -337,7 +388,10 @@ intelligence. For example:
 - pre-seed an overlapping memory, return `skip`, and assert the memory count is unchanged;
 - emit the same settled turn twice and assert the durable capture watermark prevents repeat work;
 - restart with a pending capture record and assert recovery processes the fixed snapshot once;
-- return an out-of-scope linked memory and assert project mode rejects it without global fallback;
+- open a fresh repository and assert global scope is used, then change the scope and revisit the
+  repository to assert `.pi/forgetful/settings.json` restores the choice;
+- request a scope override, assert authorization is required, and verify a declined request
+  leaves the persisted scope unchanged;
 - document, rather than deny, the accepted race/retry behaviour of query-before-create.
 
 Semantic classification, semantic atomicity, novelty quality, and duplicate prevention remain
@@ -348,10 +402,13 @@ not deterministic regression claims.
 
 - No Forgetful service change is part of this implementation. Any proposal to change its API or
   persistence behaviour must be escalated and justified first.
+- HTTP is the only MVP transport. The transport-neutral client port leaves room for a future CLI
+  adapter without committing the first slice to CLI startup and runtime costs.
 - Query-before-create reduces obvious duplicates but does not provide atomic or idempotent
   writes. Automatic capture accepts that limitation and records outcomes rather than promising
   all-or-nothing behaviour.
 - Deep recall is intentionally useful to the main agent even though its normal Pi tool result
   may be persisted in session history.
-- Project scope remains strict by default, but scope enforcement is treated as the existing
-  Forgetful service contract rather than a new extension-owned security subsystem.
+- Global scope is the default; project scope remains strict when explicitly selected. Scope
+  enforcement and returned-memory project filtering are treated as the existing Forgetful
+  service contract rather than an extension-owned validation subsystem.
