@@ -8,6 +8,37 @@ remaining silent, configurable, bounded, and failure-open.
 The first vertical slice includes both recall and automatic capture. The extension uses the
 existing Forgetful REST API; changes to the Forgetful service are not assumed.
 
+## Knowledge expansion
+
+The extension also works with entities and their relationships, documents, code artifacts and
+stored files. The original memory lifecycle below remains the basis for evidence, project scope,
+automatic contradiction resolution and uncertain-conflict escalation.
+
+- Automatic recall uses memories and entities as entry points. It follows a bounded number of
+  relevant relationships and document/code references within the existing deadline and context
+  budget. Optional record failures must not discard useful memory results.
+- `forgetful_knowledge_read` lets the active agent inspect individual records and supporting
+  material. Project scope is enforced on each record and both ends of a relationship. Stored
+  text and image files can be opened explicitly; file support depends on the server feature flag.
+- Automatic capture can store documents and reusable code and link memories to entities and
+  relationships. It excludes file uploads. Resource IDs and completed links are checkpointed so
+  an interrupted capture can continue. Query-before-create still cannot guarantee atomic
+  deduplication across simultaneous sessions or server-side races.
+- `forgetful_project_init` exposes repository initialisation to the active agent, with the same
+  trusted Git-origin mapping as the interactive wizard. Connection setup remains separate.
+- `/forgetful encode` starts a normal active-agent turn with the bundled repository encoding and
+  supporting workflows. It surveys source and the current commit, creates or refreshes project
+  knowledge, and reports coverage and gaps. It works without the background memory model.
+- Foreground knowledge writes are scoped to a verified project and source context. Clear memory
+  contradictions preserve old facts through supersession; uncertain cases require clarification
+  in the active session. No file-upload tool is exposed in this expansion.
+
+The shared `KnowledgeClient` capability extends the transport-neutral client. Its HTTP adapter
+uses the existing entity, document, code-artifact and file routes, preserving authentication,
+timeouts and schema validation. Memory links include `document_ids`, `code_artifact_ids` and
+`file_ids`. Stored file reads have a separate bounded response allowance for binary payloads;
+a configured response limit still applies.
+
 ## Architecture
 
 ![Pi Forgetful architecture](assets/architecture.png)

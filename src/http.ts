@@ -6,6 +6,7 @@ import type {
   ProjectInput,
   SearchRequest,
 } from "./contracts.ts";
+import { ApiKnowledgeClient, memoryMetadata } from "./http-knowledge.ts";
 
 const DEFAULT_TIMEOUT_MS = 1_500;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
@@ -169,6 +170,7 @@ function parseMemory(value: unknown, where: string): Memory {
     requiredInteger(value.superseded_by, `${where}.superseded_by`);
   }
   optionalString(value.updated_at, `${where}.updated_at`);
+  memoryMetadata(value);
 
   return {
     ...value,
@@ -358,10 +360,15 @@ function parseSearchPayload(payload: unknown): Memory[] {
 
 /** The sole HTTP-aware adapter for the transport-neutral ForgetfulClient port. */
 export class ApiForgetfulClient implements ForgetfulClient {
+  readonly knowledge = new ApiKnowledgeClient(
+    (...args) => this.request(...args),
+    (value) => parseMemory(value, "updateMemory"),
+  );
   private readonly baseUrl: URL;
   private readonly token?: string;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
+  private readonly maxFileResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: ApiForgetfulClientOptions) {
@@ -407,6 +414,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxResponseBytes =
       options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    this.maxFileResponseBytes = options.maxResponseBytes ?? 14_000_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -583,6 +591,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
       );
     }
     const body: Record<string, unknown> = {
+      ...memoryMetadata(input as unknown as Record<string, unknown>),
       title: input.title,
       content: input.content,
       context: input.context,
@@ -590,8 +599,10 @@ export class ApiForgetfulClient implements ForgetfulClient {
       tags: input.tags,
       project_ids: input.project_ids,
     };
-    for (const key of ["importance", "source_repo", "source_files"] as const) {
-      if (input[key] !== undefined) body[key] = input[key];
+    if (input.importance !== undefined) {
+      if (!Number.isInteger(input.importance) || input.importance < 1 || input.importance > 10)
+        throw new TypeError("Memory importance must be an integer from 1 to 10");
+      body.importance = input.importance;
     }
     return body;
   }
@@ -643,7 +654,9 @@ export class ApiForgetfulClient implements ForgetfulClient {
         signal: controller.signal,
         redirect: "error",
       });
-      const text = await this.readResponse(response, controller.signal);
+      const maxBytes = method === "GET" && /\/files\/[1-9][0-9]*$/.test(url.pathname)
+        ? this.maxFileResponseBytes : this.maxResponseBytes;
+      const text = await this.readResponse(response, controller.signal, maxBytes);
       if (!expectedStatuses.includes(response.status)) {
         throw new ForgetfulHttpError(
           `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}`,
@@ -674,11 +687,12 @@ export class ApiForgetfulClient implements ForgetfulClient {
   private async readResponse(
     response: Response,
     signal: AbortSignal,
+    maxBytes: number,
   ): Promise<string> {
     const contentLength = response.headers.get("content-length");
     if (
       contentLength !== null &&
-      Number(contentLength) > this.maxResponseBytes
+      Number(contentLength) > maxBytes
     ) {
       throw new ForgetfulSchemaError(
         "Forgetful response exceeded the configured size limit",
@@ -686,7 +700,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
     }
     if (!response.body) {
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > this.maxResponseBytes) {
+      if (bytes.byteLength > maxBytes) {
         throw new ForgetfulSchemaError(
           "Forgetful response exceeded the configured size limit",
         );
@@ -701,7 +715,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
         const next = await reader.read();
         if (next.done) break;
         size += next.value.byteLength;
-        if (size > this.maxResponseBytes) {
+        if (size > maxBytes) {
           await reader.cancel();
           throw new ForgetfulSchemaError(
             "Forgetful response exceeded the configured size limit",

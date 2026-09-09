@@ -26,6 +26,7 @@ export interface ModelPickerContext {
 }
 
 const MODEL_OUTPUT_LIMIT = 1_200;
+const CAPTURE_OUTPUT_LIMIT = 6_000;
 const INPUT_LIMIT = 32_000;
 const RESPONSE_LIMIT = 32_000;
 const DEFAULT_TIMEOUT_MS = 1_500;
@@ -172,6 +173,8 @@ export class PiMemoryModel implements MemoryModelClient {
       request.purpose === "classification"
         ? this.timeoutMs
         : Math.max(this.timeoutMs, CAPTURE_TIMEOUT_MS);
+    const outputLimit =
+      request.purpose === "capture" ? CAPTURE_OUTPUT_LIMIT : MODEL_OUTPUT_LIMIT;
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
@@ -207,7 +210,7 @@ export class PiMemoryModel implements MemoryModelClient {
           },
           {
             signal: controller.signal,
-            maxTokens: MODEL_OUTPUT_LIMIT,
+            maxTokens: outputLimit,
             cacheRetention: "none",
             sessionId: `forgetful-${request.purpose}`,
           },

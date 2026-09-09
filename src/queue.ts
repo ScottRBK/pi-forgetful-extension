@@ -177,6 +177,14 @@ function scrubDiagnostic(value: string): string {
   return sanitizeText(value).slice(0, 1_000);
 }
 
+function sanitizeOutcomeMap(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, outcome]) => [key, sanitizeValue(outcome)]),
+  );
+}
+
 function normaliseState(value: unknown): QueueState {
   if (!value || typeof value !== "object")
     throw new Error("Invalid queue state");
@@ -793,10 +801,7 @@ export class DurableQueueStore {
       if (patch.candidateOutcomes) {
         job.candidateOutcomes = {
           ...job.candidateOutcomes,
-          ...(sanitizeValue(clone(patch.candidateOutcomes)) as Record<
-            string,
-            unknown
-          >),
+          ...sanitizeOutcomeMap(clone(patch.candidateOutcomes)),
         };
       }
       if (patch.lastError !== undefined)

@@ -5,6 +5,12 @@ import { sanitizeText } from "./privacy.ts";
 /** Messages from this error are safe to display; transport errors are handled separately. */
 export class ProjectInitError extends Error {}
 
+export interface AgentProjectInitInput {
+  name?: string;
+  description?: string;
+  projectId?: number;
+}
+
 function existingMapping(
   projects: Project[],
   repoName: string,
@@ -16,6 +22,37 @@ function existingMapping(
     );
   }
   return matches[0];
+}
+
+function validateAgentProjectDetails(
+  repoName: string,
+  input: AgentProjectInitInput,
+): ProjectInput {
+  if (input.projectId !== undefined) {
+    if (!Number.isSafeInteger(input.projectId) || input.projectId <= 0) {
+      throw new ProjectInitError("The project ID must be a positive integer.");
+    }
+  }
+  const name = input.name?.trim();
+  const description = input.description?.trim();
+  if (input.projectId !== undefined) {
+    return {
+      name: name ?? "",
+      description: description ?? "",
+      repo_name: repoName,
+    };
+  }
+  if (!name || name.length > 500) {
+    throw new ProjectInitError(
+      "Project name must contain 1–500 characters when creating a project.",
+    );
+  }
+  if (!description || description.length > 5000) {
+    throw new ProjectInitError(
+      "Project description must contain 1–5000 characters when creating a project.",
+    );
+  }
+  return { name, description, repo_name: repoName };
 }
 
 async function promptNewProject(
@@ -153,6 +190,57 @@ export async function initialiseProject(
     throw new ProjectInitError(
       "The project was saved but its repository link could not be verified. " +
         "Run /forgetful project init again.",
+    );
+  }
+  return verified;
+}
+
+/** Project onboarding for an already-authorized agent tool call. */
+export async function initialiseProjectForAgent(
+  client: ForgetfulClient,
+  ctx: ExtensionContext,
+  repoName: string,
+  input: AgentProjectInitInput,
+  ensureCurrent: () => Promise<void>,
+): Promise<Project> {
+  const existing = existingMapping(
+    await client.listProjects(repoName, ctx.signal),
+    repoName,
+  );
+  if (existing) return existing;
+
+  const projectInput = validateAgentProjectDetails(repoName, input);
+  const projects = await client.listProjects(undefined, ctx.signal);
+  await ensureCurrent();
+  const mapped = existingMapping(projects, repoName);
+  if (mapped) return mapped;
+
+  let result: Project;
+  if (input.projectId !== undefined) {
+    const selected = projects.find((project) => project.id === input.projectId);
+    if (!selected || selected.repo_name) {
+      throw new ProjectInitError(
+        "The selected project is unavailable or already linked. Run init again.",
+      );
+    }
+    result = await client.linkProject(selected.id, repoName, ctx.signal);
+  } else {
+    result = await client.createProject(projectInput, ctx.signal);
+  }
+  await ensureCurrent();
+  if (result.repo_name !== repoName) {
+    throw new ProjectInitError(
+      "Forgetful returned a different project mapping. Run init again.",
+    );
+  }
+  const verified = existingMapping(
+    await client.listProjects(repoName, ctx.signal),
+    repoName,
+  );
+  if (!verified || verified.id !== result.id) {
+    throw new ProjectInitError(
+      "The project was saved but its repository link could not be verified. " +
+        "Run project init again.",
     );
   }
   return verified;

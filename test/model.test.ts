@@ -242,3 +242,23 @@ test("memory model gives capture requests a longer provider deadline", async () 
     model.complete({ purpose: "capture", policy: "policy", input: {} }),
   );
 });
+
+test("memory model gives rich capture enough output without enlarging overlap output", async () => {
+  const maxTokens: number[] = [];
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async (_model, _context, options) => {
+      maxTokens.push(options?.maxTokens ?? 0);
+      return response("{}");
+    },
+  };
+  const model = new PiMemoryModel(registry, {
+    provider: "fake",
+    id: "memory-model",
+  });
+
+  await model.complete({ purpose: "capture", policy: "policy", input: {} });
+  await model.complete({ purpose: "overlap", policy: "policy", input: {} });
+
+  assert.deepEqual(maxTokens, [6_000, 1_200]);
+});

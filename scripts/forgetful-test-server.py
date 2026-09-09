@@ -38,7 +38,7 @@ class FixedEmbeddings:
 async def main():
     import uvicorn
 
-    apps = fixture.build_sqlite_app(FixedEmbeddings(), None, enabled_features=set())
+    apps = fixture.build_sqlite_app(FixedEmbeddings(), None, enabled_features={"files"})
     app = await anext(apps)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))

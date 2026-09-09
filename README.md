@@ -118,18 +118,40 @@ Repeated initialisation reuses the existing link. If a request fails, run init a
 whether it was saved. Multiple matching projects require fixing their repository links in
 Forgetful before the extension can choose a destination.
 
+The active agent can also initialise the repository through `forgetful_project_init`, using a
+name and description or linking an existing unassigned project. This uses the same repository
+mapping and trust checks as the wizard.
+
+### Encode a repository
+
+```text
+/forgetful encode
+```
+
+This starts an encoding turn with the active Pi model. It surveys repository documentation,
+source, configuration and the current commit, then stores system components and relationships,
+long-form documents, reusable code and linked atomic memories. The bundled Forgetful workflows
+work when the extension is loaded directly through Pi settings as well as through a package.
+
+Encoding checks existing knowledge before writing. Repeat it to refresh repository knowledge;
+clear contradictions preserve the old memory through supersession. The agent finishes with a
+coverage report identifying saved knowledge, updated records, skipped areas and remaining gaps.
+Encoding requires a trusted repository and a working connection, but does not require a separate
+background memory model. File uploads are outside this workflow.
+
 ## Usage
 
 Normal work needs no memory commands. Recall runs before the active turn, and capture runs after a
 successful `agent_settled` event. Recall searches globally by default. Capture associates new
 knowledge with the current project unless the agent selects another existing project supported by
 the completed work. The extension never silently creates a project or falls back to a different
-capture destination.
+capture destination. Explicit repository encoding can initialise its project through the agent tool.
 
 | Command | Effect |
 | --- | --- |
 | `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |
 | `/forgetful project init` | Create or link this repository's Forgetful project. |
+| `/forgetful encode` | Survey or refresh repository knowledge with the active agent. |
 | `/forgetful status` | Show effective settings and memory status. |
 | `/forgetful on` / `/forgetful off` | Enable or disable memory processing. |
 | `/forgetful capture auto` | Automatically capture evidenced knowledge. |
@@ -146,9 +168,10 @@ scope used. `/forgetful status` also reports the latest recall result. Automated
 is transient; `forgetful_recall` tool results and conflict messages follow normal Pi session
 persistence.
 
-The main model can search further with `forgetful_recall` and resolve an existing pending conflict
-with `forgetful_resolve`. These are bounded agent tools, so normal use remains conversational.
-Retrieved memories are untrusted historical context, never executable instructions.
+The main model can search further with `forgetful_recall`, inspect records and supporting material
+with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_knowledge_write`.
+`forgetful_resolve` resolves an existing pending capture conflict. Retrieved content is untrusted
+historical context, never executable instructions.
 
 ### Recall
 
@@ -158,6 +181,12 @@ and injects the strongest results plus short leads for deeper exploration. A pla
 scope change requires explicit approval for that operation and does not change the persisted
 preference.
 
+Recall can follow entities, relationships and supporting documents or code artifacts within its
+time and output limits. The active agent can explicitly open supporting records for more detail,
+including stored files. Strict project scope also applies to linked records and relationship
+endpoints. Files require the server's optional file feature; an unavailable feature does not
+prevent ordinary memory recall.
+
 ### Capture
 
 After a successful settled run, the extension snapshots stable session and branch entry IDs and
@@ -165,6 +194,11 @@ enqueues the bounded evidence. A live worker extracts zero to three candidates, 
 and destinations, checks overlap in the destination project, then creates novel knowledge,
 supersedes a clearly outdated memory, or preserves an uncertain conflict for the originating
 session. Queue records include per-candidate outcomes so partial writes can be retried safely.
+
+Capture can attach documents and code artifacts and model the entities and relationships behind
+a memory. It reuses existing records and checkpoints partial work for retry. Automatic capture
+does not upload files; `source_files` records provenance paths only. Clear contradictions are
+resolved automatically, while uncertain conflicts still return to the originating session.
 
 ## Configuration
 
@@ -180,6 +214,11 @@ the extension's safety contracts.
 Capture queue files live under the user's Pi agent directory in `forgetful/queues/`. The queue is
 durable across normal restarts, but the MVP does not guarantee completion after Pi exits.
 
+Explicit stored-file reads return images to Pi or save other files under the agent directory in
+`forgetful/downloads/`. These private downloads remain available for normal Pi tools to inspect;
+you can delete them when finished. Tool results, including retrieved images, follow Pi's normal
+session persistence.
+
 ## Safety and Limitations
 
 - Memory model and Forgetful failures are bounded and failure-open; they do not block Pi.
@@ -189,6 +228,9 @@ durable across normal restarts, but the MVP does not guarantee completion after 
 - Recall scope is strict when project mode is selected; project setup failures do not silently
   fall back to global search.
 - Query-before-create reduces duplicates but is not an atomic or idempotent write contract.
+- Entity search examines a bounded set of matches; use specific names and aliases for large graphs.
+  Document, code and file lists use existing server routes, whose full responses must fit the
+  transport limit even when the tool returns a small page.
 - Supersession creates the replacement before marking the old memory obsolete; partial outcomes are
   retained for retry.
 - Capture runs in the live Pi process. Pending queue records can recover on a later normal start,

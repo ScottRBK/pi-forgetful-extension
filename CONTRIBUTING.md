@@ -30,13 +30,17 @@ SQLite repositories against an in-memory database with fixed test embeddings:
 
 ```bash
 FORGETFUL_TEST_SOURCE=/path/to/forgetful \
-  node --import tsx --test test/forgetful-integration.test.ts
+  npm run check
 ```
 
 That checkout needs its development `.venv`, including its test dependencies. The integration test
 does not open the production database or write production memories. Deterministic tests verify the
 mechanism; real-model recall quality, contradiction judgment, and latency require separate
 acceptance checks with the selected model.
+
+The integration suite also covers graph and artifact recall, interrupted rich capture, project
+scope, and repeated `/forgetful encode` runs through Pi's real command and tool boundaries.
+Stored-file fixtures are created only in the isolated server; the extension exposes no upload tool.
 
 ## Documentation and architecture
 

@@ -41,6 +41,7 @@ interface Harness {
   capture: FakeCapture;
   recallCalls: string[];
   sentMessages: Array<{ message: unknown; options: unknown }>;
+  sentUserMessages: Array<{ content: unknown; options: unknown }>;
   notifications: string[];
   tools: Map<string, any>;
   cleanup(): Promise<void>;
@@ -96,6 +97,7 @@ async function harness(
   const entries: any[] = [entry("root", null, "custom", "session root")];
   const recallCalls: string[] = [];
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
+  const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
   const notifications: string[] = [];
   const tools = new Map<string, any>();
   const handlers = new Map<string, Handler[]>();
@@ -218,6 +220,9 @@ async function harness(
     sendMessage(message: unknown, sendOptions: unknown) {
       sentMessages.push({ message, options: sendOptions });
     },
+    sendUserMessage(content: unknown, sendOptions: unknown) {
+      sentUserMessages.push({ content, options: sendOptions });
+    },
     exec: async () => ({
       code: options.gitRemote ? 0 : 1,
       stdout: options.gitRemote ?? "",
@@ -246,6 +251,7 @@ async function harness(
     capture,
     recallCalls,
     sentMessages,
+    sentUserMessages,
     notifications,
     tools,
     setLeaf(value) {
@@ -1820,6 +1826,92 @@ test("project init filters large project lists before opening the selector", asy
     // Assert: filtering reached the final review instead of failing the oversized selector.
     assert.doesNotMatch(fixture.notifications.join("\n"), /failed/);
     assert.deepEqual(confirmations, ["Link Project 149 (#150) to test/repo?"]);
+    assert.deepEqual(fixture.writes, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("encode dispatches the bundled repository workflow to the active agent", async () => {
+  // Arrange: the extension has a trusted repository context and a configured endpoint,
+  // but the workflow must not depend on a background memory model call.
+  const fixture = await harness({
+    gitRemote: "git@github.com:test/repo.git",
+    userSettings: { model: undefined },
+  });
+  try {
+    // Act.
+    await fixture.command("encode");
+
+    // Assert: Pi receives one follow-up containing the complete workflow contract.
+    assert.equal(fixture.sentUserMessages.length, 1);
+    const message = fixture.sentUserMessages[0];
+    assert.equal((message?.options as { deliverAs?: string }).deliverAs, "followUp");
+    assert.equal(typeof message?.content, "string");
+    assert.match(String(message?.content), /Encoding a repository/i);
+    assert.match(String(message?.content), /coverage report/i);
+    assert.match(String(message?.content), /forgetful_knowledge_read/);
+    assert.match(String(message?.content), /forgetful_knowledge_write/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("agent project init creates a trusted current repository mapping", async () => {
+  // Arrange: no project mapping exists and the background memory model is absent.
+  const fixture = await projectFixture();
+  await writeFile(
+    join(fixture.agentDir, "forgetful/settings.json"),
+    JSON.stringify({ enabled: true }),
+  );
+  const tool = fixture.tools.get("forgetful_project_init");
+  assert.ok(tool);
+  try {
+    // Act.
+    const result = await tool.execute(
+      "project-init-1",
+      { name: "Agent repository", description: "Repository knowledge" },
+      undefined,
+      undefined,
+      fixture.ctx,
+    );
+
+    // Assert: the tool writes only the canonical current repository mapping.
+    assert.deepEqual(fixture.writes, [
+      {
+        name: "Agent repository",
+        description: "Repository knowledge",
+        repo_name: "test/repo",
+        project_type: "development",
+      },
+    ]);
+    assert.match(String(result.content[0]?.text), /Agent repository/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("encode requires trust before starting a repository survey", async () => {
+  const fixture = await harness({ gitRemote: "git@github.com:test/repo.git" });
+  try {
+    fixture.ctx.isProjectTrusted = () => false;
+    await fixture.command("encode");
+    assert.equal(fixture.sentUserMessages.length, 0);
+    assert.match(fixture.notifications.join("\n"), /trust/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("agent project init reports rejected setup as a tool error", async () => {
+  const fixture = await projectFixture();
+  try {
+    fixture.ctx.isProjectTrusted = () => false;
+    const result = await fixture.tools.get("forgetful_project_init")!.execute(
+      "untrusted-init", { name: "API", description: "API project" },
+      undefined, undefined, fixture.ctx,
+    );
+    assert.equal(result.isError, true);
     assert.deepEqual(fixture.writes, []);
   } finally {
     await fixture.cleanup();
