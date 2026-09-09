@@ -8,6 +8,21 @@ remaining silent, configurable, bounded, and failure-open.
 The first vertical slice includes both recall and automatic capture. The extension uses the
 existing Forgetful REST API; changes to the Forgetful service are not assumed.
 
+## Architecture
+
+![Pi Forgetful architecture](assets/architecture.png)
+
+The extension boundary owns Pi lifecycle hooks, commands, bounded agent tools, and failure-open
+coordination. Recall uses a separately configured Pi model to plan bounded searches and inject
+context from the warm Forgetful REST service. Capture snapshots a settled session branch into a
+durable queue, then uses the same transport-neutral Forgetful client to create, supersede, or
+escalate candidate memories. The HTTP adapter is the MVP; a future CLI adapter can be added
+without changing the application services or policy contracts.
+
+The presentation source for this diagram is [architecture.svg](assets/architecture.svg). The
+expanded layer-by-layer version remains available in
+[code-architecture.excalidraw](code-architecture.excalidraw).
+
 ## Review decisions
 
 The following choices are intentional for the first implementation:

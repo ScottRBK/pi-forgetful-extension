@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024" viewBox="0 0 1536 1024" role="img" aria-labelledby="title description">
+  <title id="title">Pi Forgetful extension architecture</title>
+  <desc id="description">Pi Agent sends work through Pi hooks to a dedicated memory model and the Pi Forgetful orchestrator, which coordinates recall, capture, one Forgetful REST service, a durable queue, and agent tools and configuration.</desc>
+  <defs>
+    <linearGradient id="piBox" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b318c"/>
+      <stop offset="1" stop-color="#061746"/>
+    </linearGradient>
+    <linearGradient id="darkBox" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2c38"/>
+      <stop offset="1" stop-color="#0b141d"/>
+    </linearGradient>
+    <linearGradient id="greenBox" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#087a31"/>
+      <stop offset="1" stop-color="#033414"/>
+    </linearGradient>
+    <filter id="blueGlow" x="-50%" y="-70%" width="200%" height="240%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#245dff" flood-opacity="0.72"/>
+    </filter>
+    <filter id="greenGlow" x="-50%" y="-70%" width="200%" height="240%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#1cff5e" flood-opacity="0.56"/>
+    </filter>
+    <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="13" markerHeight="13" refX="10" refY="6.5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 12 6.5 L 0 13" fill="none" stroke="#f2fbff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- The reference diagram uses a transparent canvas and a double-line looping enclosure. -->
+  <g fill="none" stroke="#2b6476" stroke-width="2" opacity="0.64" filter="url(#lineGlow)">
+    <path d="M 77 570 V 350 C 77 294 119 251 176 251 H 788 C 885 251 924 201 997 135 C 1048 89 1073 77 1132 77 H 1373 C 1425 77 1463 117 1463 168 V 786 C 1463 836 1425 867 1373 867 H 1135 C 1077 867 1049 849 999 814 L 788 665 H 176 C 119 665 77 624 77 570 Z"/>
+    <path d="M 87 584 V 358 C 87 303 127 262 181 262 H 791 C 892 262 933 211 1005 145 C 1051 103 1080 88 1136 88 H 1368 C 1417 88 1452 123 1452 171 V 782 C 1452 829 1417 856 1368 856 H 1138 C 1084 856 1058 839 1008 805 L 791 676 H 181 C 127 676 87 637 87 584 Z"/>
+  </g>
+
+  <g fill="none" stroke="#eefaff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)">
+    <path d="M 325 453 H 374"/>
+    <path d="M 563 453 H 598"/>
+    <path d="M 772 453 H 808"/>
+
+    <path d="M 1009 453 C 1043 453 1053 395 1053 316 C 1053 224 1077 184 1165 184"/>
+    <path d="M 1009 453 C 1044 453 1053 406 1053 335 H 1165"/>
+    <path d="M 1009 453 C 1044 453 1058 431 1165 431"/>
+    <path d="M 1009 453 C 1044 453 1054 548 1165 548"/>
+    <path d="M 1009 453 C 1044 453 1054 659 1165 659"/>
+    <path d="M 1009 453 C 1044 453 1054 771 1165 771"/>
+  </g>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" text-anchor="middle" fill="#f6fbff">
+    <g filter="url(#blueGlow)">
+      <rect x="129" y="401" width="196" height="104" rx="22" fill="url(#piBox)" stroke="#8eabff" stroke-width="2"/>
+      <text x="227" y="462" font-size="29" font-weight="500">Pi Agent</text>
+    </g>
+
+    <g>
+      <rect x="374" y="401" width="189" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="468.5" y="440" font-size="25" font-weight="500">Pi Hooks</text>
+      <text x="468.5" y="470" font-size="16" fill="#cbdbe1">before turn · settled</text>
+    </g>
+
+    <g>
+      <rect x="598" y="401" width="174" height="104" rx="22" fill="url(#piBox)" stroke="#8eabff" stroke-width="2"/>
+      <text x="685" y="438" font-size="22" font-weight="500">Dedicated</text>
+      <text x="685" y="468" font-size="22" font-weight="500">Memory Model</text>
+    </g>
+
+    <g filter="url(#greenGlow)">
+      <rect x="808" y="401" width="201" height="104" rx="22" fill="url(#greenBox)" stroke="#78ffa8" stroke-width="2"/>
+      <text x="908.5" y="462" font-size="27" font-weight="500">Pi Forgetful</text>
+    </g>
+
+    <g>
+      <rect x="1166" y="135" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="176" font-size="25" font-weight="500">Recall Flow</text>
+      <text x="1279.5" y="207" font-size="16" fill="#cbdbe1">plan · search · inject</text>
+    </g>
+    <g>
+      <rect x="1166" y="265" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="306" font-size="25" font-weight="500">Capture Flow</text>
+      <text x="1279.5" y="337" font-size="16" fill="#cbdbe1">snapshot · decide · write</text>
+    </g>
+    <g>
+      <rect x="1166" y="384" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="425" font-size="25" font-weight="500">Forgetful REST</text>
+      <text x="1279.5" y="456" font-size="15" fill="#cbdbe1">search · create · supersede</text>
+    </g>
+    <g>
+      <rect x="1166" y="499" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="540" font-size="25" font-weight="500">Durable Queue</text>
+      <text x="1279.5" y="571" font-size="16" fill="#cbdbe1">local snapshot · retry</text>
+    </g>
+    <g>
+      <rect x="1166" y="611" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="652" font-size="25" font-weight="500">Agent Tools</text>
+      <text x="1279.5" y="683" font-size="15" fill="#cbdbe1">recall · resolve</text>
+    </g>
+    <g>
+      <rect x="1166" y="723" width="227" height="104" rx="22" fill="url(#darkBox)" stroke="#c3d6df" stroke-width="2"/>
+      <text x="1279.5" y="764" font-size="24" font-weight="500">Scope + Policy</text>
+      <text x="1279.5" y="795" font-size="15" fill="#cbdbe1">project · prompts · config</text>
+    </g>
+  </g>
+</svg>
