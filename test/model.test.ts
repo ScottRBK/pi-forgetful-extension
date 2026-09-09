@@ -103,6 +103,32 @@ test("memory model fails clearly when the configured model is unavailable", asyn
   );
 });
 
+test("memory model preserves a bounded, redacted provider error for diagnostics", async () => {
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async () => ({
+      ...response(""),
+      stopReason: "error",
+      errorMessage: `HTTP 429: rate limit; Bearer private-test-token ${"x".repeat(1_000)}`,
+    }),
+  };
+  const model = new PiMemoryModel(registry, { provider: "fake", id: "memory-model" });
+
+  await assert.rejects(
+    model.complete({ purpose: "classification", policy: "policy", input: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, "Memory model request failed");
+      assert.ok(error.cause instanceof Error);
+      assert.match(error.cause.message, /HTTP 429: rate limit/);
+      assert.match(error.cause.message, /\[redacted\]/);
+      assert.doesNotMatch(error.cause.message, /private-test-token/);
+      assert.ok(error.cause.message.length <= 550);
+      return true;
+    },
+  );
+});
+
 test("plain model output remains usable when it is not JSON", () => {
   assert.equal(
     parseModelResponse("No memory is relevant."),
@@ -261,4 +287,67 @@ test("memory model gives rich capture enough output without enlarging overlap ou
   await model.complete({ purpose: "overlap", policy: "policy", input: {} });
 
   assert.deepEqual(maxTokens, [6_000, 1_200]);
+});
+
+test("memory model keeps the capture deadline independent from classification", async () => {
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return response("{}");
+    },
+  };
+  const model = new PiMemoryModel(
+    registry,
+    { provider: "fake", id: "memory-model" },
+    { classificationTimeoutMs: 10 },
+  );
+
+  await assert.rejects(
+    model.complete({ purpose: "classification", policy: "policy", input: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, "Memory model request failed");
+      assert.ok(error.cause instanceof Error);
+      assert.equal(error.cause.message, "Memory model timeout");
+      return true;
+    },
+  );
+  await assert.doesNotReject(
+    model.complete({ purpose: "capture", policy: "policy", input: {} }),
+  );
+  await assert.doesNotReject(
+    model.complete({ purpose: "overlap", policy: "policy", input: {} }),
+  );
+});
+
+test("memory model passes the real session and public header transform to Pi", async () => {
+  let seenOptions: Parameters<NonNullable<ModelRegistryPort["complete"]>>[2];
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async (_model, _context, options) => {
+      seenOptions = options;
+      return response("{}");
+    },
+  };
+  const model = new PiMemoryModel(
+    registry,
+    { provider: "fake", id: "memory-model" },
+    {
+      sessionId: "pi-session-123",
+      transformHeaders: (headers) => ({
+        ...headers,
+        "x-test-hook": "applied",
+      }),
+    },
+  );
+
+  await model.complete({ purpose: "classification", policy: "policy", input: {} });
+
+  assert.equal(seenOptions?.sessionId, "pi-session-123");
+  assert.ok(seenOptions?.transformHeaders);
+  assert.deepEqual(
+    await seenOptions.transformHeaders({ authorization: "Bearer test" }),
+    { authorization: "Bearer test", "x-test-hook": "applied" },
+  );
 });

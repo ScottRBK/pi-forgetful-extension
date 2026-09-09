@@ -6,6 +6,7 @@ import type { CaptureMode, Scope } from "./contracts.ts";
 
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
 export const DEFAULT_FORGETFUL_TIMEOUT_MS = 2_000;
+export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 1_500;
 
 export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";
@@ -35,6 +36,7 @@ export interface ForgetfulConfig {
   scope: Scope;
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
+  recallModelTimeoutMs: number;
   model?: ModelSelection;
   prompts: PromptOverlays;
   warnings: string[];
@@ -64,6 +66,7 @@ export interface PersistedUserSettings {
   capture?: unknown;
   capture_mode?: unknown;
   debug?: unknown;
+  recall_model_timeout_ms?: unknown;
   model?: unknown;
 }
 
@@ -317,6 +320,10 @@ export async function loadForgetfulConfig(
     debug: asBoolean(user.debug, false),
     scope,
     scopeSource,
+    recallModelTimeoutMs: asPositiveInteger(
+      user.recall_model_timeout_ms,
+      DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
+    ),
     instance: {
       baseUrl: rawBaseUrl.replace(/\/$/, ""),
       token,
@@ -366,6 +373,7 @@ export async function updateUserSettings(
       | "enabled"
       | "capture_mode"
       | "debug"
+      | "recall_model_timeout_ms"
       | "model"
     >
   >,

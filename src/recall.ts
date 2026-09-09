@@ -34,6 +34,13 @@ const MAX_MEMORY_CONTEXT_CHARS = 300;
 const MAX_SEARCHES = 2;
 const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 3;
 const DEFAULT_CIRCUIT_COOLDOWN_MS = 5_000;
+const CROSS_PROJECT_PATTERNS = [
+  /\bcross[-\s]?(?:projects?|repos?|repositor(?:y|ies))\b/i,
+  /\b(?:other|different|multiple|several)\s+(?:projects?|repos?|repositor(?:y|ies))\b/i,
+  /\b(?:across|between)\s+(?:projects?|repos?|repositor(?:y|ies))\b/i,
+];
+const CURRENT_REPOSITORY_PATTERN =
+  /\b(?:this|current|active)\s+(?:repository|repo|project)\b/i;
 
 export interface RecallRequest {
   prompt: string;
@@ -63,6 +70,8 @@ export interface RecallResult {
   memoryIds: number[];
   scope: Scope;
   reason?: string;
+  /** Bounded exception detail for debug UI only; never inject into model context. */
+  diagnostic?: string;
   entityIds?: number[];
   relationshipIds?: number[];
   documentIds?: number[];
@@ -75,6 +84,8 @@ export interface RecallPlan {
   queries: string[];
   queryIntent: string;
   entities: string[];
+  /** Optional planner signal for repository-aware global query construction. */
+  repositorySpecific?: boolean;
   scope?: Scope;
   scopeReason?: string;
   projectId?: number;
@@ -109,6 +120,7 @@ interface PlannedScope {
 interface SearchOutcome {
   memories: Memory[];
   failed: boolean;
+  diagnostic?: string;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -158,10 +170,85 @@ function failureReason(
   return callerSignal?.aborted ? "aborted" : "recall-unavailable";
 }
 
+function exceptionDiagnostic(stage: string, error: unknown): string {
+  let detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  if (error instanceof Error && error.cause instanceof Error)
+    detail += `; caused by ${error.cause.name}: ${error.cause.message}`;
+  return `${stage}: ${sanitizeText(detail).slice(0, 500)}`;
+}
+
 function trim(value: string, max: number): string {
   return value.length <= max
     ? value
     : `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function isCrossProjectText(value: string): boolean {
+  return CROSS_PROJECT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function repositoryIdentity(context: WorkContext): string | undefined {
+  const value = context.repoName ?? context.project?.repo_name;
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  return sanitizeText(value).trim();
+}
+
+function referencesCurrentRepository(value: string, context: WorkContext): boolean {
+  const clean = sanitizeText(value).toLowerCase();
+  const identity = repositoryIdentity(context)?.toLowerCase();
+  return (
+    (identity !== undefined && clean.includes(identity)) ||
+    CURRENT_REPOSITORY_PATTERN.test(clean)
+  );
+}
+
+function plannerRequestsRepositoryContext(
+  plan: RecallPlan,
+  query: string,
+  context: WorkContext,
+  prompt?: string,
+): boolean {
+  if (plan.repositorySpecific !== undefined) return plan.repositorySpecific;
+  const texts = [prompt, plan.queryIntent, query, ...plan.entities].filter(
+    (value): value is string => typeof value === "string",
+  );
+  return texts.some((value) => {
+    return referencesCurrentRepository(value, context);
+  });
+}
+
+/**
+ * Keep global recall broad while giving Forgetful's semantic search the active
+ * repository identity for ordinary repository-specific questions.
+ */
+function repoAwareQuery(
+  query: string,
+  context: WorkContext,
+  repositorySpecific: boolean,
+  crossProject: boolean,
+): string {
+  const cleanQuery = sanitizeText(query).trim();
+  const identity = repositoryIdentity(context);
+  if (
+    !identity ||
+    !repositorySpecific ||
+    crossProject ||
+    isCrossProjectText(cleanQuery)
+  ) {
+    return trim(cleanQuery, MAX_QUERY_CHARS);
+  }
+  if (cleanQuery.toLowerCase().includes(identity.toLowerCase())) {
+    return trim(cleanQuery, MAX_QUERY_CHARS);
+  }
+  const identityLabel = " [repository: ";
+  const suffix = `${identityLabel}${identity}]`;
+  const suffixBudget = MAX_QUERY_CHARS - identityLabel.length - 2;
+  const boundedSuffix =
+    suffix.length <= MAX_QUERY_CHARS - 1
+      ? suffix
+      : `${identityLabel}${trim(identity, suffixBudget)}]`;
+  const queryBudget = Math.max(1, MAX_QUERY_CHARS - boundedSuffix.length);
+  return `${trim(cleanQuery, queryBudget)}${boundedSuffix}`;
 }
 
 function availableProjects(
@@ -281,11 +368,16 @@ function parsePlan(value: unknown, currentScope: Scope): RecallPlan {
     MAX_INTENT_CHARS,
   );
   const entities = parseEntities(value.entities);
+  const repositorySpecific = value.repositorySpecific;
+  if (repositorySpecific !== undefined && typeof repositorySpecific !== "boolean") {
+    throw new Error("Planner repositorySpecific must be a boolean");
+  }
   const plan: RecallPlan = {
     search: value.search,
     queries,
     queryIntent,
     entities,
+    ...(repositorySpecific === undefined ? {} : { repositorySpecific }),
   };
 
   const override = value.scopeOverride;
@@ -458,6 +550,7 @@ export class RecallService {
       return this.empty(request.scope, "invalid-deadline");
     }
     const deadline = createDeadlineSignal(request.signal, deadlineMs);
+    let stage = "planning";
     try {
       if (this.circuitOpen()) return this.empty(request.scope, "circuit-open");
       if (
@@ -474,8 +567,12 @@ export class RecallService {
           signal: deadline.signal,
         }),
         deadline.signal,
-      ).then((value) => parsePlan(value, request.scope));
+      ).then((value) => {
+        stage = "plan validation";
+        return parsePlan(value, request.scope);
+      });
       this.ensureLive(deadline);
+      stage = "scope resolution";
       const plannedScope = await this.applyScopeOverrides(
         request,
         deadline,
@@ -502,6 +599,7 @@ export class RecallService {
         this.recordSuccess();
         return this.empty(scope, resolution.reason);
       }
+      stage = "memory search";
       const search = await this.searchMemories(
         request,
         plan,
@@ -523,18 +621,25 @@ export class RecallService {
         deadline.signal,
       );
       if (valid.length === 0 && !expansion?.text) {
-        return this.empty(scope, reason ?? "no-matches");
+        return {
+          ...this.empty(scope, search.failed ? "recall-unavailable" : (reason ?? "no-matches")),
+          diagnostic: search.diagnostic,
+        };
       }
       const formatted = formatRecall(valid, plan.entities, request.recallPolicy, expansion);
       return this.resultWithKnowledge(
-        { text: formatted.text, memoryIds: formatted.ids, scope, reason },
+        { text: formatted.text, memoryIds: formatted.ids, scope, reason,
+          diagnostic: search.diagnostic },
         expansion,
         formatted.knowledgeText,
       );
-    } catch {
+    } catch (error) {
       // Recall is failure-open: convert planner/service failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
-      return this.empty(request.scope, failureReason(deadline, request.signal));
+      return {
+        ...this.empty(request.scope, failureReason(deadline, request.signal)),
+        diagnostic: exceptionDiagnostic(stage, error),
+      };
     } finally {
       deadline.finish();
     }
@@ -546,6 +651,7 @@ export class RecallService {
       return this.empty(request.scope, "invalid-deadline");
     }
     const deadline = createDeadlineSignal(request.signal, deadlineMs);
+    let stage = "scope resolution";
     try {
       if (this.circuitOpen()) return this.empty(request.scope, "circuit-open");
       if (
@@ -570,7 +676,13 @@ export class RecallService {
       if (resolution.reason)
         return this.empty(request.scope, resolution.reason);
       const search: SearchRequest = {
-        query,
+        query: repoAwareQuery(
+          query,
+          request.context,
+          request.scope === "global" &&
+            referencesCurrentRepository(query, request.context),
+          isCrossProjectText(query),
+        ),
         query_context: `Read-only deeper recall requested for ${sanitizeText(
           request.context.repoName ?? request.context.cwd,
         )}`,
@@ -581,6 +693,7 @@ export class RecallService {
       };
       if (request.scope === "project")
         search.project_ids = [resolution.projectId!];
+      stage = "memory search";
       const memories = await raceAbort(
         this.client.search(search, deadline.signal),
         deadline.signal,
@@ -606,10 +719,13 @@ export class RecallService {
         expansion,
         formatted.knowledgeText,
       );
-    } catch {
+    } catch (error) {
       // Recall is failure-open: convert search failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
-      return this.empty(request.scope, failureReason(deadline, request.signal));
+      return {
+        ...this.empty(request.scope, failureReason(deadline, request.signal)),
+        diagnostic: exceptionDiagnostic(stage, error),
+      };
     } finally {
       deadline.finish();
     }
@@ -795,7 +911,14 @@ export class RecallService {
       try {
         const found = await raceAbort(
           this.client.search(
-            this.searchRequest(query, plan, request.context, scope, resolution),
+            this.searchRequest(
+              query,
+              plan,
+              request.context,
+              scope,
+              resolution,
+              request.prompt,
+            ),
             deadline.signal,
           ),
           deadline.signal,
@@ -803,7 +926,7 @@ export class RecallService {
         memories.push(...found);
       } catch (error) {
         if (isAbort(error)) throw error;
-        return { memories, failed: true };
+        return { memories, failed: true, diagnostic: exceptionDiagnostic("memory search", error) };
       }
     }
     return { memories, failed: false };
@@ -815,9 +938,18 @@ export class RecallService {
     context: WorkContext,
     scope: Scope,
     resolution: ScopeResolution,
+    prompt?: string,
   ): SearchRequest {
     const search: SearchRequest = {
-      query: sanitizeText(query),
+      query: repoAwareQuery(
+        query,
+        context,
+        scope === "global" &&
+          plannerRequestsRepositoryContext(plan, query, context, prompt),
+        [prompt, plan.queryIntent, query].some(
+          (value) => typeof value === "string" && isCrossProjectText(value),
+        ),
+      ),
       query_context: this.queryContext(plan, context),
       strict_project_filter: scope === "project",
       k: 3,
@@ -830,7 +962,9 @@ export class RecallService {
 
   private queryContext(plan: RecallPlan, context: WorkContext): string {
     const entities =
-      plan.entities.length > 0 ? ` Entities: ${plan.entities.join(", ")}.` : "";
+      plan.entities.length > 0
+        ? ` Entities: ${plan.entities.map((item) => sanitizeText(item)).join(", ")}.`
+        : "";
     return trim(
       sanitizeText(
         `${plan.queryIntent}. Repository: ${context.repoName ?? context.cwd}.${entities}`,

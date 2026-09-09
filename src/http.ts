@@ -1,6 +1,8 @@
 import type {
   ForgetfulClient,
+  LinkedMemory,
   Memory,
+  MemorySearchResult,
   MemoryInput,
   Project,
   ProjectInput,
@@ -108,6 +110,15 @@ function requiredInteger(value: unknown, field: string): number {
   return value;
 }
 
+function nonNegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new ForgetfulSchemaError(
+      `Forgetful response field ${field} must be a non-negative integer`,
+    );
+  }
+  return value;
+}
+
 function integerArray(value: unknown, field: string): number[] {
   if (
     !Array.isArray(value) ||
@@ -168,6 +179,12 @@ function parseMemory(value: unknown, where: string): Memory {
   }
   if (value.superseded_by !== undefined && value.superseded_by !== null) {
     requiredInteger(value.superseded_by, `${where}.superseded_by`);
+  }
+  if (value.access_count !== undefined) {
+    nonNegativeInteger(value.access_count, `${where}.access_count`);
+  }
+  if (value.last_accessed_at !== undefined && value.last_accessed_at !== null) {
+    optionalString(value.last_accessed_at, `${where}.last_accessed_at`);
   }
   optionalString(value.updated_at, `${where}.updated_at`);
   memoryMetadata(value);
@@ -279,10 +296,11 @@ function validatedSearchOptions(request: SearchRequest): {
   if (!Number.isSafeInteger(k) || k < 1 || k > 20) {
     throw new TypeError("Forgetful search k must be an integer from 1 to 20");
   }
-  const maxLinks = request.max_links ?? 0;
+  const requestedMaxLinks = request.max_links_per_primary ?? request.max_links;
+  const maxLinks = requestedMaxLinks ?? 0;
   if (!Number.isSafeInteger(maxLinks) || maxLinks < 0 || maxLinks > 10) {
     throw new TypeError(
-      "Forgetful search max_links must be an integer from 0 to 10",
+      "Forgetful search max_links_per_primary must be an integer from 0 to 10",
     );
   }
   return { k, maxLinks };
@@ -329,32 +347,84 @@ function uniqueMemories(memories: Memory[]): Memory[] {
   return [...unique.values()];
 }
 
-function parseSearchPayload(payload: unknown): Memory[] {
-  if (!isObject(payload) || !Array.isArray(payload.primary_memories)) {
-    throw new ForgetfulSchemaError(
-      "Forgetful search response.primary_memories must be an array",
-    );
-  }
-  const memories = payload.primary_memories.map((item, index) =>
-    parseMemory(item, `search.primary_memories[${index}]`),
-  );
-  if (payload.linked_memories === undefined) return uniqueMemories(memories);
-  if (!Array.isArray(payload.linked_memories)) {
+function parseLinkedMemories(value: unknown): LinkedMemory[] {
+  const linkedMemories: LinkedMemory[] = [];
+  if (value !== undefined && !Array.isArray(value)) {
     throw new ForgetfulSchemaError(
       "Forgetful search response.linked_memories must be an array",
     );
   }
-  for (let index = 0; index < payload.linked_memories.length; index += 1) {
-    const link = payload.linked_memories[index];
+  const rawLinked: unknown[] = Array.isArray(value)
+    ? value
+    : [];
+  for (let index = 0; index < rawLinked.length; index += 1) {
+    const link = rawLinked[index];
     if (!isObject(link) || !isObject(link.memory)) {
       throw new ForgetfulSchemaError(
         `search.linked_memories[${index}] must contain a memory object`,
       );
     }
-    memories.push(
-      parseMemory(link.memory, `search.linked_memories[${index}].memory`),
+    linkedMemories.push({
+      memory: parseMemory(link.memory, `search.linked_memories[${index}].memory`),
+      link_source_id: requiredInteger(
+        link.link_source_id,
+        `search.linked_memories[${index}].link_source_id`,
+      ),
+    });
+  }
+  return linkedMemories;
+}
+
+function parseSearchPayload(
+  payload: unknown,
+  fallbackQuery?: string,
+  requireMetadata = false,
+): MemorySearchResult {
+  if (!isObject(payload) || !Array.isArray(payload.primary_memories)) {
+    throw new ForgetfulSchemaError(
+      "Forgetful search response.primary_memories must be an array",
     );
   }
+  const primaryMemories = payload.primary_memories.map((item, index) =>
+    parseMemory(item, `search.primary_memories[${index}]`),
+  );
+  const linkedMemories = parseLinkedMemories(payload.linked_memories);
+  if (requireMetadata && payload.query === undefined)
+    throw new ForgetfulSchemaError("Forgetful search response.query is required");
+  if (requireMetadata && payload.total_count === undefined)
+    throw new ForgetfulSchemaError("Forgetful search response.total_count is required");
+  if (requireMetadata && payload.token_count === undefined)
+    throw new ForgetfulSchemaError("Forgetful search response.token_count is required");
+  if (requireMetadata && payload.truncated === undefined)
+    throw new ForgetfulSchemaError("Forgetful search response.truncated is required");
+  const query = payload.query === undefined
+    ? (fallbackQuery ?? "")
+    : requiredString(payload.query, "search.query");
+  const totalCount = payload.total_count === undefined
+    ? primaryMemories.length + linkedMemories.length
+    : nonNegativeInteger(payload.total_count, "search.total_count");
+  const tokenCount = payload.token_count === undefined
+    ? 0
+    : nonNegativeInteger(payload.token_count, "search.token_count");
+  const truncated = payload.truncated === undefined ? false : payload.truncated;
+  if (typeof truncated !== "boolean") {
+    throw new ForgetfulSchemaError("Forgetful response field search.truncated must be boolean");
+  }
+  return {
+    query,
+    primary_memories: primaryMemories,
+    linked_memories: linkedMemories,
+    total_count: totalCount,
+    token_count: tokenCount,
+    truncated,
+  };
+}
+
+function flattenSearchResult(result: MemorySearchResult): Memory[] {
+  const memories = [
+    ...result.primary_memories,
+    ...result.linked_memories.map((item) => item.memory),
+  ];
   return uniqueMemories(memories);
 }
 
@@ -429,7 +499,26 @@ export class ApiForgetfulClient implements ForgetfulClient {
       signal,
       [200],
     );
-    return parseSearchPayload(payload);
+    return flattenSearchResult(parseSearchPayload(payload, request.query));
+  }
+
+  async queryMemory(
+    request: SearchRequest,
+    signal?: AbortSignal,
+  ): Promise<MemorySearchResult> {
+    const payload = await this.request(
+      "/memories/search",
+      "POST",
+      searchBody({
+        ...request,
+        k: request.k ?? 3,
+        include_links: request.include_links ?? true,
+        max_links_per_primary: request.max_links_per_primary ?? request.max_links ?? 5,
+      }),
+      signal,
+      [200],
+    );
+    return parseSearchPayload(payload, request.query, true);
   }
 
   async listProjects(

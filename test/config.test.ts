@@ -175,3 +175,38 @@ test("writing a scope creates only the project-local settings file", async () =>
     readFile(join(agentDir, "forgetful", "settings.json"), "utf8"),
   );
 });
+
+test("recall model timeout is independently configurable from the overall timeout", async () => {
+  const root = await tempDirectory();
+  await mkdir(join(root, "agent", "forgetful"), { recursive: true });
+  await writeFile(
+    join(root, "agent", "forgetful", "settings.json"),
+    JSON.stringify({ timeout_ms: 2_500, recall_model_timeout_ms: 3_500 }),
+  );
+
+  const config = await loadForgetfulConfig({
+    agentDir: join(root, "agent"),
+    cwd: join(root, "repo"),
+    trusted: true,
+  });
+
+  assert.equal(config.instance.timeoutMs, 2_500);
+  assert.equal(config.recallModelTimeoutMs, 3_500);
+});
+
+test("invalid recall model timeout retains its 1,500 ms default", async () => {
+  const root = await tempDirectory();
+  await mkdir(join(root, "agent", "forgetful"), { recursive: true });
+  await writeFile(
+    join(root, "agent", "forgetful", "settings.json"),
+    JSON.stringify({ recall_model_timeout_ms: 0 }),
+  );
+
+  const config = await loadForgetfulConfig({
+    agentDir: join(root, "agent"),
+    cwd: join(root, "repo"),
+    trusted: true,
+  });
+
+  assert.equal(config.recallModelTimeoutMs, 1_500);
+});

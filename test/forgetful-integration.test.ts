@@ -107,6 +107,12 @@ test(
       include_links: true,
       k: 10,
     });
+    const detailed = await client.queryMemory({
+      query: "database",
+      query_context: "Check the grouped project decision",
+      project_ids: [projectId],
+      strict_project_filter: true,
+    });
     const history = await client.get(old.id);
 
     // Assert: public API state proves project scope and non-destructive supersession.
@@ -116,6 +122,14 @@ test(
     );
     assert.ok(scoped.some((m) => m.id === replacement.id));
     assert.ok(scoped.every((m) => m.id !== other.id && m.id !== old.id));
+    assert.equal(detailed.query, "database");
+    assert.equal(
+      detailed.total_count,
+      detailed.primary_memories.length + detailed.linked_memories.length,
+    );
+    assert.ok(detailed.token_count >= 0);
+    assert.equal(typeof detailed.truncated, "boolean");
+    assert.ok(detailed.primary_memories.every((m) => m.content.length > 0));
     assert.equal(history.is_obsolete, true);
     assert.equal(history.superseded_by, replacement.id);
     assert.equal(history.content, "The project uses PostgreSQL.");

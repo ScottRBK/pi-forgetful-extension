@@ -11,6 +11,7 @@ import type {
   ForgetfulClient,
   KnowledgeClient,
   Memory,
+  MemorySearchResult,
   MemoryInput,
   Scope,
   StoredFile,
@@ -48,7 +49,11 @@ const operation = Type.Union([
   Type.Literal("get_code_artifact"),
   Type.Literal("list_files"),
   Type.Literal("get_file"),
-]);
+], {
+  description: "Read operation. Required inputs: search_memories=query; get_memory=memory_id; " +
+    "get_entity/get_entity_memories/get_relationships=entity_id; get_document=document_id; " +
+    "get_code_artifact=code_artifact_id; get_file=file_id.",
+});
 const writeOperation = Type.Union([
   Type.Literal("create_memory"),
   Type.Literal("update_memory"),
@@ -73,19 +78,62 @@ const MAX_LIST_RESULT_CHARS = 16_000;
 /** Keep this root schema as an object; some providers reject a root anyOf/oneOf. */
 export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
   operation,
-  repo_name: Type.Optional(Type.String({ maxLength: 300 })),
-  query: Type.Optional(Type.String({ minLength: 1, maxLength: 240 })),
-  query_context: Type.Optional(Type.String({ maxLength: 500 })),
-  project_id: Type.Optional(positiveId),
-  memory_id: Type.Optional(positiveId),
-  entity_id: Type.Optional(positiveId),
-  document_id: Type.Optional(positiveId),
-  code_artifact_id: Type.Optional(positiveId),
-  file_id: Type.Optional(positiveId),
-  k: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5_000 })),
-  offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10_000_000 })),
-  include_links: Type.Optional(Type.Boolean()),
+  repo_name: Type.Optional(Type.String({
+    maxLength: 300,
+    description: "Repository filter for list_projects; project scope restricts this to " +
+      "the current repository.",
+  })),
+  query: Type.Optional(Type.String({
+    minLength: 1, maxLength: 240,
+    description: "Required for search_memories and search_entities.",
+  })),
+  query_context: Type.Optional(Type.String({
+    maxLength: 500,
+    description: "Required for search_memories; explain why this foreground query is being made.",
+  })),
+  project_id: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Optional project filter for list/search operations; project scope only " +
+      "permits the current project.",
+  })),
+  memory_id: Type.Optional(Type.Integer({
+    minimum: 1, description: "Required for get_memory.",
+  })),
+  entity_id: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Required for get_entity, get_entity_memories, and get_relationships.",
+  })),
+  document_id: Type.Optional(Type.Integer({
+    minimum: 1, description: "Required for get_document.",
+  })),
+  code_artifact_id: Type.Optional(Type.Integer({
+    minimum: 1, description: "Required for get_code_artifact.",
+  })),
+  file_id: Type.Optional(Type.Integer({
+    minimum: 1, description: "Required for get_file.",
+  })),
+  k: Type.Optional(Type.Integer({
+    minimum: 1, maximum: 20,
+    description: "Primary memories for search_memories; defaults to 3 and is bounded from 1 to 20.",
+  })),
+  max_links_per_primary: Type.Optional(Type.Integer({
+    minimum: 0, maximum: 10,
+    description: "Linked memories per primary search_memories result; defaults to 5.",
+  })),
+  limit: Type.Optional(Type.Integer({
+    minimum: 1, maximum: 5_000,
+    description: "Page size: list_projects, entity-memory/relationship, document, " +
+      "code-artifact and " +
+      "file lists use a maximum of 100; document/code/file content uses a maximum of 5000; " +
+      "search_memories uses k instead.",
+  })),
+  offset: Type.Optional(Type.Integer({
+    minimum: 0, maximum: 10_000_000,
+    description: "Offset for list operations and readable content pages.",
+  })),
+  include_links: Type.Optional(Type.Boolean({
+    description: "Include linked memories for search_memories; defaults to true.",
+  })),
 });
 
 export const KNOWLEDGE_WRITE_PARAMETERS = Type.Object({
@@ -162,6 +210,8 @@ function optionalText(value: unknown, field: string, max: number): string | unde
 }
 
 function requiredId(value: unknown, field: string): number {
+  if (value === undefined)
+    throw new Error(`${field} is required.`);
   if (!Number.isSafeInteger(value) || Number(value) < 1)
     throw new Error(`${field} must be a positive integer.`);
   return Number(value);
@@ -176,6 +226,17 @@ function boundedId(value: unknown, field: string, maximum: number): number | und
   if (result !== undefined && result > maximum)
     throw new Error(`${field} must be at most ${maximum}.`);
   return result;
+}
+
+function boundedNonNegativeInteger(
+  value: unknown,
+  field: string,
+  maximum: number,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum)
+    throw new Error(`${field} must be an integer from 0 to ${maximum}.`);
+  return Number(value);
 }
 
 function requiredIds(value: unknown, field: string): number[] {
@@ -245,39 +306,63 @@ function need(input: Record<string, unknown>, fields: Array<[string, number]>): 
   for (const [field, max] of fields) requiredText(input[field], field, max);
 }
 
-/** Provider validation is intentionally repeated here for callers that bypass Pi's schema. */
-export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadRequest {
-  const input = record(value, "Knowledge read arguments");
-  const op = checkOperation(input.operation, READ_OPS);
-  if (op === "list_projects") optionalText(input.repo_name, "repo_name", 300);
-  if (op === "search_memories" || op === "search_entities") {
-    requiredText(input.query, "query", 240);
+function validateReadSearch(input: Record<string, unknown>, op: string): void {
+  if (op !== "search_memories" && op !== "search_entities") return;
+  requiredText(input.query, "query", 240);
+  optionalId(input.project_id, "project_id");
+  if (op === "search_entities") {
     optionalText(input.query_context, "query_context", 500);
-    optionalId(input.project_id, "project_id");
-    boundedId(input.k, "k", 20);
-    boundedId(input.limit, "limit", op === "search_entities" ? 100 : 20);
+    if (input.k !== undefined)
+      throw new Error("search_entities uses limit; k is not supported.");
+    boundedId(input.limit, "limit", 100);
+    return;
   }
+  requiredText(input.query_context, "query_context", 500);
+  boundedId(input.k, "k", 20);
+  boundedNonNegativeInteger(input.max_links_per_primary, "max_links_per_primary", 10);
+  if (input.limit !== undefined)
+    throw new Error("search_memories uses k; limit is not supported.");
+  if (input.offset !== undefined)
+    throw new Error("search_memories does not support offset pagination.");
+}
+
+function validateReadIdentity(input: Record<string, unknown>, op: string): void {
+  if (op === "list_projects") optionalText(input.repo_name, "repo_name", 300);
   if (op === "get_memory") requiredId(input.memory_id, "memory_id");
   if (["get_entity", "get_entity_memories", "get_relationships"].includes(op))
     requiredId(input.entity_id, "entity_id");
   if (op === "get_document") requiredId(input.document_id, "document_id");
   if (op === "get_code_artifact") requiredId(input.code_artifact_id, "code_artifact_id");
   if (op === "get_file") requiredId(input.file_id, "file_id");
-  if (["list_documents", "list_code_artifacts", "list_files"].includes(op)) {
+  if (["list_documents", "list_code_artifacts", "list_files"].includes(op))
     optionalId(input.project_id, "project_id");
-    boundedId(input.limit, "limit", 100);
-  }
-  if (["list_projects", "get_entity_memories", "get_relationships"].includes(op))
-    boundedId(input.limit, "limit", 100);
+}
+
+function validateReadPagination(input: Record<string, unknown>, op: string): void {
+  const listOperations = new Set(["list_projects", "get_entity_memories", "get_relationships",
+    "list_documents", "list_code_artifacts", "list_files"]);
+  if (listOperations.has(op)) boundedId(input.limit, "limit", 100);
   if (input.offset !== undefined &&
       (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0 ||
         Number(input.offset) > 10_000_000))
     throw new Error("offset must be a non-negative integer.");
-  if (input.limit !== undefined &&
-      op !== "search_memories" && op !== "search_entities" &&
-      !["list_projects", "get_entity_memories", "get_relationships",
-        "list_documents", "list_code_artifacts", "list_files"].includes(op))
+  if (op !== "search_memories" && op !== "search_entities" && !listOperations.has(op))
     boundedId(input.limit, "limit", 5_000);
+}
+
+/** Provider validation is intentionally repeated here for callers that bypass Pi's schema. */
+export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadRequest {
+  const input = record(value, "Knowledge read arguments");
+  const op = checkOperation(input.operation, READ_OPS);
+  validateReadSearch(input, op);
+  if (op !== "search_memories") {
+    for (const field of ["k", "max_links_per_primary", "include_links"]) {
+      if (input[field] !== undefined)
+        throw new Error(`${field} is only supported by search_memories.`);
+    }
+  }
+  validateReadIdentity(input, op);
+  validateReadPagination(input, op);
   return input as KnowledgeReadRequest;
 }
 
@@ -560,18 +645,46 @@ async function readProjects(read: KnowledgeReadContext): Promise<KnowledgeToolRe
 
 async function readMemories(read: KnowledgeReadContext): Promise<KnowledgeToolResult> {
   const requestedProject = requestedReadProject(read);
-  let values = await read.client.search({
+  const searchRequest = {
     query: read.request.query as string,
-    query_context: (read.request.query_context as string | undefined) ??
-      "Foreground knowledge read",
+    query_context: read.request.query_context as string,
     strict_project_filter: read.context.scope === "project" || requestedProject !== undefined,
     ...(requestedProject === undefined ? {} : { project_ids: [requestedProject] }),
-    k: (read.request.k as number | undefined) ?? 10,
+    k: (read.request.k as number | undefined) ?? 3,
     include_links: (read.request.include_links as boolean | undefined) ?? true,
-  }, read.signal);
-  if (requestedProject !== undefined)
-    values = values.filter((item) => inMemoryProject(item, requestedProject));
-  return readResult(values, { operation: read.request.operation, count: values.length });
+    ...(read.request.max_links_per_primary === undefined ? {} : {
+      max_links_per_primary: read.request.max_links_per_primary as number,
+    }),
+  };
+  if (!read.client.queryMemory)
+    throw new Error("Grouped Forgetful memory search is unavailable.");
+  const result = await read.client.queryMemory(searchRequest, read.signal);
+  const primaryMemories = requestedProject === undefined
+    ? result.primary_memories
+    : result.primary_memories.filter((item) => inMemoryProject(item, requestedProject));
+  const primaryIds = new Set(primaryMemories.map((item) => item.id));
+  const linkedMemories = requestedProject === undefined
+    ? result.linked_memories
+    : result.linked_memories.filter((item) =>
+      primaryIds.has(item.link_source_id) && inMemoryProject(item.memory, requestedProject));
+  const filtered = primaryMemories.length !== result.primary_memories.length ||
+    linkedMemories.length !== result.linked_memories.length;
+  const grouped: MemorySearchResult = filtered
+    ? {
+      ...result,
+      primary_memories: primaryMemories,
+      linked_memories: linkedMemories,
+      total_count: primaryMemories.length + linkedMemories.length,
+    }
+    : result;
+  return readResult(grouped, {
+    operation: read.request.operation,
+    count: grouped.total_count,
+    primary_count: grouped.primary_memories.length,
+    linked_count: grouped.linked_memories.length,
+    token_count: grouped.token_count,
+    truncated: grouped.truncated,
+  });
 }
 
 async function readMemory(read: KnowledgeReadContext): Promise<KnowledgeToolResult> {

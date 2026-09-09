@@ -136,6 +136,89 @@ describe("ApiForgetfulClient", () => {
     assert.deepEqual(memories, [memory]);
   });
 
+  it("preserves the grouped query_memory response and sends MCP defaults", async () => {
+    let body: Record<string, unknown> | undefined;
+    const linked = {
+      ...memory,
+      id: 9,
+      title: "The linked memory",
+      content: "Supporting context.",
+    };
+    const client = new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async (_url, init) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          query: "grouped",
+          primary_memories: [memory],
+          linked_memories: [{ memory: linked, link_source_id: memory.id }],
+          total_count: 2,
+          token_count: 17,
+          truncated: true,
+        });
+      },
+    });
+
+    const result = await client.queryMemory({
+      query: "grouped",
+      query_context: "Check grouped search results",
+      strict_project_filter: false,
+    });
+
+    assert.deepEqual(body, {
+      query: "grouped",
+      query_context: "Check grouped search results",
+      strict_project_filter: false,
+      k: 3,
+      include_links: 1,
+      max_links_per_primary: 5,
+    });
+    assert.equal(result.query, "grouped");
+    assert.deepEqual(result.primary_memories, [memory]);
+    assert.deepEqual(result.linked_memories, [{ memory: linked, link_source_id: memory.id }]);
+    assert.equal(result.total_count, 2);
+    assert.equal(result.token_count, 17);
+    assert.equal(result.truncated, true);
+
+    const noLinks = await client.queryMemory({
+      query: "grouped",
+      query_context: "Check an explicit zero link budget",
+      strict_project_filter: false,
+      include_links: false,
+      max_links_per_primary: 0,
+    });
+    assert.deepEqual(body, {
+      query: "grouped",
+      query_context: "Check an explicit zero link budget",
+      strict_project_filter: false,
+      k: 3,
+      include_links: 0,
+      max_links_per_primary: 0,
+    });
+    assert.equal(noLinks.truncated, true);
+
+    const missingMetadata = new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async () => Response.json({
+        query: "grouped", primary_memories: [memory], linked_memories: [],
+      }),
+    });
+    await assert.rejects(
+      missingMetadata.queryMemory({
+        query: "grouped", query_context: "Require server budget metadata",
+        strict_project_filter: false,
+      }),
+      /total_count is required/,
+    );
+
+    const flattened = await client.search({
+      query: "grouped",
+      query_context: "Keep automatic recall compatible",
+      strict_project_filter: false,
+    });
+    assert.deepEqual(flattened, [memory, linked]);
+  });
+
   it("uses bearer auth and implements project lookup, create, read, and supersede", async () => {
     const client = new ApiForgetfulClient({ baseUrl, token: "secret-token" });
     assert.deepEqual(await client.listProjects("owner/repo"), [

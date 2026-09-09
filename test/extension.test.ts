@@ -16,7 +16,7 @@ import type {
   Project,
   WorkContext,
 } from "../src/contracts.ts";
-import type { RecallResult } from "../src/recall.ts";
+import { RecallService, type RecallResult } from "../src/recall.ts";
 
 type Handler = (event: any, context: any) => Promise<unknown> | unknown;
 
@@ -78,6 +78,7 @@ async function harness(
     }) => ForgetfulClient;
     workContextGate?: Promise<void>;
     onWorkContext?: () => void;
+    recallService?: RecallServicePort;
   } = {},
 ): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "pi-forgetful-extension-"));
@@ -232,7 +233,7 @@ async function harness(
   createForgetfulExtension({
     agentDir,
     dependencies: {
-      recall,
+      recall: options.recallService ?? recall,
       capture,
       ...(options.createClient ? { createClient: options.createClient } : {}),
       resolveWorkContext: async () => {
@@ -663,6 +664,75 @@ test("debug reports automated recall activity and status keeps the latest result
         message.includes("last recall 1 memory in global scope"),
       ),
     );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug shows recall exceptions without injecting them into the agent prompt", async () => {
+  // Arrange: real recall service; only the external memory model fails.
+  const service = new RecallService(new ApiForgetfulClient({
+    baseUrl: "http://localhost:8020/api/v1",
+  }), {
+    async complete() {
+      throw new Error("Provider rejected request: Bearer private-test-token");
+    },
+  });
+  const fixture = await harness({ recallService: service });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    const prompt = {
+      type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
+    };
+
+    // Act and assert: debug off stays quiet, debug on exposes the redacted exception.
+    fixture.notifications.splice(0);
+    assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
+    assert.equal(fixture.notifications.length, 0);
+    await fixture.command("debug on");
+    fixture.notifications.splice(0);
+    assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
+    assert.match(fixture.notifications.join("\n"),
+      /planning.*Error: Provider rejected request: \[redacted\]/);
+    assert.doesNotMatch(fixture.notifications.join("\n"), /private-test-token/);
+    assert.equal(fixture.sentMessages.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug reports search exceptions for automatic and manual recall", async () => {
+  // Arrange: real recall and REST adapter, with an external service returning HTTP 503.
+  const service = new RecallService(new ApiForgetfulClient({
+    baseUrl: "http://localhost:8020/api/v1",
+    fetchImpl: async () => new Response("{}", { status: 503 }),
+  }), {
+    async complete() {
+      return { search: true, queries: ["decisions"], queryIntent: "History", entities: [] };
+    },
+  });
+  const fixture = await harness({ recallService: service, userSettings: { debug: true } });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+    // Act: automatic recall fails without blocking the normal turn.
+    fixture.notifications.splice(0);
+    assert.equal(await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
+    }), undefined);
+
+    // Assert: the failure names the step, exception and HTTP status.
+    assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
+    assert.doesNotMatch(fixture.notifications.join("\n"), /completed|no-matches/);
+
+    fixture.notifications.splice(0);
+    const tool = fixture.tools.get("forgetful_recall")!;
+    await assert.rejects(
+      tool.execute("call-1", { query: "decisions" }, undefined,
+        undefined, fixture.ctx),
+      /Forgetful recall is unavailable/,
+    );
+    assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
   } finally {
     await fixture.cleanup();
   }
@@ -1114,17 +1184,19 @@ test("a sibling branch cannot inherit a conflict from the shared baseline", asyn
     assert.equal(fixture.sentMessages.length, 0);
 
     const tool = fixture.tools.get("forgetful_resolve");
-    const result = await tool.execute(
-      "resolve-old",
-      {
-        conflict_id: "old-branch-conflict",
-        action: "skip",
-      },
-      undefined,
-      undefined,
-      fixture.ctx,
+    await assert.rejects(
+      tool.execute(
+        "resolve-old",
+        {
+          conflict_id: "old-branch-conflict",
+          action: "skip",
+        },
+        undefined,
+        undefined,
+        fixture.ctx,
+      ),
+      /No pending Forgetful conflict can be resolved/,
     );
-    assert.match(String(result.content[0].text), /No pending/);
     assert.equal(fixture.capture.resolutions.length, 0);
   } finally {
     await fixture.cleanup();
@@ -1176,8 +1248,7 @@ test("a resolver race cannot delegate after session tree navigation", async () =
         reason: "race",
       },
     ]);
-    const result = await resolving;
-    assert.match(String(result.content[0].text), /No pending/);
+    await assert.rejects(resolving, /No pending Forgetful conflict can be resolved/);
     assert.equal(fixture.capture.resolutions.length, 0);
   } finally {
     await fixture.cleanup();
@@ -1955,12 +2026,44 @@ test("agent project init reports rejected setup as a tool error", async () => {
   const fixture = await projectFixture();
   try {
     fixture.ctx.isProjectTrusted = () => false;
-    const result = await fixture.tools.get("forgetful_project_init")!.execute(
-      "untrusted-init", { name: "API", description: "API project" },
-      undefined, undefined, fixture.ctx,
+    await assert.rejects(
+      fixture.tools.get("forgetful_project_init")!.execute(
+        "untrusted-init", { name: "API", description: "API project" },
+        undefined, undefined, fixture.ctx,
+      ),
+      /Project trust is required|project setup failed/i,
     );
-    assert.equal(result.isError, true);
     assert.deepEqual(fixture.writes, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+
+test("knowledge read renders a compact summary and expands the full result", async () => {
+  // Arrange: the registered Pi tool and a full foreground search response.
+  const fixture = await harness();
+  try {
+    const tool = fixture.tools.get("forgetful_knowledge_read");
+    const text = JSON.stringify({
+      primary_memories: [{ id: 42, title: "Architecture", content: "Full durable decision." }],
+      linked_memories: [], truncated: false,
+    });
+    const result = {
+      content: [{ type: "text", text }],
+      details: { operation: "search_memories", count: 1 },
+    };
+    const theme = { fg: (_color: string, value: string) => value };
+
+    // Act: render the normal and expanded terminal views through Pi's tool contract.
+    const compact = tool.renderResult(result, { expanded: false }, theme).render(100).join("\n");
+    const expanded = tool.renderResult(result, { expanded: true }, theme).render(100).join("\n");
+
+    // Assert: display volume is bounded without removing the model's full memory content.
+    assert.match(compact, /search_memories.*1/);
+    assert.doesNotMatch(compact, /Full durable decision/);
+    assert.match(expanded.replace(/\s+/g, " "), /Full durable decision/);
+    assert.equal(result.content[0].text, text);
   } finally {
     await fixture.cleanup();
   }

@@ -2,11 +2,15 @@ import type {
   AssistantMessage,
   Context,
   Model,
-  SimpleStreamOptions,
+  ModelsSimpleStreamOptions,
+  ProviderHeaders,
   TextContent,
 } from "@earendil-works/pi-ai";
 import type { MemoryModelClient, ModelRequest } from "./contracts.ts";
-import type { ModelSelection } from "./config.ts";
+import {
+  DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
+  type ModelSelection,
+} from "./config.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 
 export interface ModelRegistryPort {
@@ -14,9 +18,13 @@ export interface ModelRegistryPort {
   complete(
     model: Model<any>,
     context: Context,
-    options?: SimpleStreamOptions,
+    options?: ModelsSimpleStreamOptions,
   ): Promise<AssistantMessage>;
 }
+
+export type MemoryModelHeaderTransform = (
+  headers: ProviderHeaders,
+) => ProviderHeaders | Promise<ProviderHeaders>;
 
 export interface ModelPickerContext {
   modelRegistry: ModelRegistryPort & {
@@ -29,11 +37,17 @@ const MODEL_OUTPUT_LIMIT = 1_200;
 const CAPTURE_OUTPUT_LIMIT = 6_000;
 const INPUT_LIMIT = 32_000;
 const RESPONSE_LIMIT = 32_000;
-const DEFAULT_TIMEOUT_MS = 1_500;
 const CAPTURE_TIMEOUT_MS = 15_000;
 
 export interface PiMemoryModelOptions {
+  /** Classification deadline; capture and overlap retain their 15-second deadline. */
+  classificationTimeoutMs?: number;
+  /** Compatibility alias for classificationTimeoutMs. */
   timeoutMs?: number;
+  /** The current Pi session ID used for provider session affinity. */
+  sessionId?: string;
+  /** Public pi-ai header transform for provider-specific background request preparation. */
+  transformHeaders?: MemoryModelHeaderTransform;
 }
 
 function textContent(message: AssistantMessage): string {
@@ -102,8 +116,12 @@ function parseCompletionResponse(
     throw new Error("Memory model request aborted");
   }
   if (timedOut) throw new Error("Memory model timeout");
-  if (response.stopReason !== "stop")
-    throw new Error("Memory model request failed");
+  if (response.stopReason !== "stop") {
+    const detail = sanitizeText(
+      response.errorMessage || response.stopReason,
+    ).slice(0, 500);
+    throw new Error(`Memory model request failed: ${detail}`);
+  }
   const text = sanitizeText(textContent(response));
   if (Buffer.byteLength(text, "utf8") > RESPONSE_LIMIT) {
     throw new Error("Memory model response too large");
@@ -140,9 +158,135 @@ export function modelLabel(model: ModelSelection): string {
   return `${model.provider}/${model.id}`;
 }
 
+function isOpenCodeModel(model: Model<any>): boolean {
+  if (model.provider === "opencode" || model.provider === "opencode-go") {
+    return true;
+  }
+  try {
+    return new URL(model.baseUrl).hostname === "opencode.ai";
+  } catch {
+    return false;
+  }
+}
+
+function openCodeSessionHeaders(
+  model: Model<any>,
+  sessionId: string | undefined,
+): ProviderHeaders | undefined {
+  if (!sessionId || !isOpenCodeModel(model)) return undefined;
+  return {
+    "x-opencode-session": sessionId,
+    "x-opencode-client": "pi",
+  };
+}
+
+function requestTimeout(
+  request: ModelRequest,
+  classificationTimeoutMs: number,
+): number {
+  return request.purpose === "classification"
+    ? classificationTimeoutMs
+    : CAPTURE_TIMEOUT_MS;
+}
+
+function requestOutputLimit(request: ModelRequest): number {
+  return request.purpose === "capture"
+    ? CAPTURE_OUTPUT_LIMIT
+    : MODEL_OUTPUT_LIMIT;
+}
+
+function requestOptions(
+  model: Model<any>,
+  sessionId: string | undefined,
+  transformHeaders: MemoryModelHeaderTransform | undefined,
+  outputLimit: number,
+  signal: AbortSignal,
+): ModelsSimpleStreamOptions {
+  const sessionHeaders = openCodeSessionHeaders(model, sessionId);
+  const headerTransform = sessionHeaders || transformHeaders
+    ? async (headers: ProviderHeaders): Promise<ProviderHeaders> => {
+        const prepared = sessionHeaders
+          ? { ...headers, ...sessionHeaders }
+          : headers;
+        return transformHeaders ? transformHeaders(prepared) : prepared;
+      }
+    : undefined;
+  return {
+    signal,
+    maxTokens: outputLimit,
+    cacheRetention: "none",
+    ...(sessionId ? { sessionId } : {}),
+    ...(headerTransform ? { transformHeaders: headerTransform } : {}),
+  };
+}
+
+interface RequestDeadline {
+  controller: AbortController;
+  callerAbort: Promise<never>;
+  timeout: Promise<never>;
+  readonly timedOut: boolean;
+  cleanup(): void;
+}
+
+function requestDeadline(
+  request: ModelRequest,
+  timeoutMs: number,
+): RequestDeadline {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const callerAbort = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      controller.abort();
+      reject(new Error("Memory model request aborted"));
+    };
+    if (request.signal?.aborted) onAbort();
+    else request.signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new Error("Memory model timeout"));
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  return {
+    controller,
+    callerAbort,
+    timeout,
+    get timedOut() {
+      return timedOut;
+    },
+    cleanup() {
+      if (timer) clearTimeout(timer);
+      if (onAbort) request.signal?.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+function throwRequestFailure(error: unknown, request: ModelRequest): never {
+  if (
+    error instanceof Error &&
+    error.message === "Memory model request aborted"
+  ) {
+    throw error;
+  }
+  if (request.signal?.aborted) {
+    throw new Error("Memory model request aborted");
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  throw new Error("Memory model request failed", {
+    cause: new Error(sanitizeText(detail).slice(0, 550)),
+  });
+}
+
 export class PiMemoryModel implements MemoryModelClient {
   readonly version: string;
-  private readonly timeoutMs: number;
+  private readonly classificationTimeoutMs: number;
+  private readonly sessionId?: string;
+  private readonly transformHeaders?: MemoryModelHeaderTransform;
 
   constructor(
     private readonly registry: ModelRegistryPort,
@@ -150,8 +294,16 @@ export class PiMemoryModel implements MemoryModelClient {
     options: PiMemoryModelOptions = {},
   ) {
     this.version = modelLabel(selection);
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+    this.classificationTimeoutMs =
+      options.classificationTimeoutMs ??
+      options.timeoutMs ??
+      DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS;
+    this.sessionId = options.sessionId || undefined;
+    this.transformHeaders = options.transformHeaders;
+    if (
+      !Number.isFinite(this.classificationTimeoutMs) ||
+      this.classificationTimeoutMs <= 0
+    ) {
       throw new TypeError("Memory model timeoutMs must be positive");
     }
   }
@@ -168,32 +320,10 @@ export class PiMemoryModel implements MemoryModelClient {
         `Memory model ${modelLabel(this.selection)} is not available`,
       );
 
-    const controller = new AbortController();
-    const timeoutMs =
-      request.purpose === "classification"
-        ? this.timeoutMs
-        : Math.max(this.timeoutMs, CAPTURE_TIMEOUT_MS);
-    const outputLimit =
-      request.purpose === "capture" ? CAPTURE_OUTPUT_LIMIT : MODEL_OUTPUT_LIMIT;
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let onAbort: (() => void) | undefined;
-    const callerAbort = new Promise<never>((_, reject) => {
-      onAbort = () => {
-        controller.abort();
-        reject(new Error("Memory model request aborted"));
-      };
-      if (request.signal?.aborted) onAbort();
-      else request.signal?.addEventListener("abort", onAbort, { once: true });
-    });
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-        reject(new Error("Memory model timeout"));
-      }, timeoutMs);
-      timer.unref?.();
-    });
+    const deadline = requestDeadline(
+      request,
+      requestTimeout(request, this.classificationTimeoutMs),
+    );
     try {
       const response = await Promise.race([
         this.registry.complete(
@@ -208,30 +338,23 @@ export class PiMemoryModel implements MemoryModelClient {
               },
             ],
           },
-          {
-            signal: controller.signal,
-            maxTokens: outputLimit,
-            cacheRetention: "none",
-            sessionId: `forgetful-${request.purpose}`,
-          },
+          requestOptions(
+            model,
+            this.sessionId,
+            this.transformHeaders,
+            requestOutputLimit(request),
+            deadline.controller.signal,
+          ),
         ),
-        callerAbort,
-        timeout,
+        deadline.callerAbort,
+        deadline.timeout,
       ]);
 
-      return parseCompletionResponse(response, request, timedOut);
+      return parseCompletionResponse(response, request, deadline.timedOut);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "Memory model request aborted"
-      )
-        throw error;
-      if (request.signal?.aborted)
-        throw new Error("Memory model request aborted");
-      throw new Error("Memory model request failed");
+      throwRequestFailure(error, request);
     } finally {
-      if (timer) clearTimeout(timer);
-      if (onAbort) request.signal?.removeEventListener("abort", onAbort);
+      deadline.cleanup();
     }
   }
 }
@@ -239,8 +362,9 @@ export class PiMemoryModel implements MemoryModelClient {
 export function resolveMemoryModel(
   registry: ModelRegistryPort,
   selection: ModelSelection | undefined,
+  options: PiMemoryModelOptions = {},
 ): PiMemoryModel | undefined {
-  return selection ? new PiMemoryModel(registry, selection) : undefined;
+  return selection ? new PiMemoryModel(registry, selection, options) : undefined;
 }
 
 export function modelSelectionFromModel(model: Model<any>): ModelSelection {

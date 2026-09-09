@@ -41,7 +41,52 @@ test("knowledge read validation keeps list and content bounds distinct", () => {
     () => validateKnowledgeReadRequest({ operation: "get_document", document_id: 1, offset: -1 }),
     /non-negative/,
   );
+  assert.throws(
+    () => validateKnowledgeReadRequest({ operation: "get_relationships" }),
+    /entity_id is required/,
+  );
+  assert.throws(
+    () => validateKnowledgeReadRequest({
+      operation: "search_memories", query: "database", query_context: "Test", limit: 3,
+    }),
+    /uses k.*limit is not supported/,
+  );
+  assert.throws(
+    () => validateKnowledgeReadRequest({ operation: "search_memories", query: "database" }),
+    /query_context is required/,
+  );
 });
+
+test(
+  "foreground memory search returns the server's grouped query metadata",
+  realOptions,
+  async (t) => {
+    const baseUrl = await startForgetful(t);
+    const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+    const project = await client.createProject({
+      name: "Grouped", description: "Grouped search", repo_name: "test/grouped",
+    });
+    await client.create({
+      title: "Grouped query memory", content: "The grouped REST result is complete.",
+      context: "Foreground search", keywords: ["grouped"], tags: [], project_ids: [project.id],
+    });
+
+    const result = value(await executeKnowledgeRead(client, {
+      operation: "search_memories", query: "grouped REST result",
+      query_context: "Verify grouped foreground search", k: 3,
+    }, context(project.id)));
+
+    assert.equal(typeof result.query, "string");
+    assert.ok(Array.isArray(result.primary_memories));
+    assert.ok(Array.isArray(result.linked_memories));
+    assert.equal(typeof result.total_count, "number");
+    assert.equal(typeof result.token_count, "number");
+    assert.equal(typeof result.truncated, "boolean");
+    assert.ok((result.primary_memories as Array<{ content: string }>).some(
+      (item) => item.content.includes("grouped REST result"),
+    ));
+  },
+);
 
 test("entity updates reject coercible types before preparing a write", realOptions, async (t) => {
   const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t), timeoutMs: 4_000 });

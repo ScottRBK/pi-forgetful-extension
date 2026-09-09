@@ -120,6 +120,104 @@ describe("RecallService", () => {
     assert.ok(result.text.length <= 6_000);
   });
 
+  it("adds the current repository identity to global repository-specific searches", async () => {
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({
+      search: true,
+      queries: ["architecture decisions"],
+      queryIntent: "Find decisions made in the active repository",
+      entities: [],
+    });
+    const service = new RecallService(client, model);
+
+    const result = await service.recall({
+      prompt: "What architecture decisions did we make here?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    assert.equal(result.scope, "global");
+    assert.equal(client.searches[0]?.strict_project_filter, false);
+    assert.equal(client.searches[0]?.project_ids, undefined);
+    assert.match(client.searches[0]?.query ?? "", /architecture decisions/);
+    assert.match(client.searches[0]?.query ?? "", /owner\/forgetful/);
+  });
+
+  it("keeps an explicit cross-project global query unscoped", async () => {
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({
+      search: true,
+      queries: ["compare database choices across projects"],
+      queryIntent: "Compare decisions across projects",
+      entities: [],
+    });
+    const service = new RecallService(client, model);
+
+    const result = await service.recall({
+      prompt: "Compare the database choices across projects",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    assert.equal(result.scope, "global");
+    assert.equal(client.searches[0]?.strict_project_filter, false);
+    assert.equal(client.searches[0]?.project_ids, undefined);
+    assert.match(client.searches[0]?.query ?? "", /across projects/);
+    assert.doesNotMatch(client.searches[0]?.query ?? "", /owner\/forgetful/);
+  });
+
+  it("does not bias unrelated global preferences toward the active repository", async () => {
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({
+      search: true,
+      queries: ["coding preferences"],
+      queryIntent: "Find the user's general coding preferences",
+      entities: [],
+      repositorySpecific: false,
+    });
+    const service = new RecallService(client, model);
+
+    await service.recall({
+      prompt: "What are my coding preferences?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    assert.equal(client.searches[0]?.query, "coding preferences");
+    assert.equal(client.searches[0]?.strict_project_filter, false);
+  });
+
+  it("keeps an explicit other-repository global query broad", async () => {
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({
+      search: true,
+      queries: ["decisions in the other repository"],
+      queryIntent: "Find decisions in the other repository",
+      entities: [],
+    });
+    const service = new RecallService(client, model);
+
+    await service.recall({
+      prompt: "What decisions were made in the other repository?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    assert.equal(
+      client.searches[0]?.query,
+      "decisions in the other repository",
+    );
+    assert.equal(client.searches[0]?.strict_project_filter, false);
+  });
+
   it("authorizes a planner scope override and sends strict project filtering", async () => {
     const client = new FakeForgetfulClient();
     const model = new FakeModel({
@@ -342,8 +440,8 @@ describe("RecallService", () => {
       recallPolicy: "policy",
     };
 
-    assert.equal((await service.recall(request)).reason, "no-matches");
-    assert.equal((await service.recall(request)).reason, "no-matches");
+    assert.equal((await service.recall(request)).reason, "recall-unavailable");
+    assert.equal((await service.recall(request)).reason, "recall-unavailable");
     assert.equal((await service.recall(request)).reason, "circuit-open");
   });
 });

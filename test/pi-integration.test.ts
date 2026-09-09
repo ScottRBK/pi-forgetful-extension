@@ -127,6 +127,7 @@ test(
 
     const mainContexts: Context[] = [];
     const memoryContexts: Context[] = [];
+    const providerSessions: Array<{ model: string; sessionId?: string }> = [];
     const captureInputs: Array<{
       entries: Array<{ id: string; role: string; text: string }>;
     }> = [];
@@ -156,7 +157,8 @@ test(
         maxTokens: 2048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       })),
-      streamSimple(model, context) {
+      streamSimple(model, context, options) {
+        providerSessions.push({ model: model.id, sessionId: options?.sessionId });
         (model.id === "main" ? mainContexts : memoryContexts).push(
           JSON.parse(JSON.stringify(context)) as Context,
         );
@@ -357,6 +359,10 @@ test(
     // Assert: the real provider sees recall, but the saved session does not contain that injection.
     assert.equal(mainContexts.length, 1, JSON.stringify(session.messages));
     assert.equal(memoryContexts.length, 1);
+    assert.deepEqual(providerSessions.slice(0, 2), [
+      { model: "memory", sessionId: sessionManager.getSessionId() },
+      { model: "main", sessionId: sessionManager.getSessionId() },
+    ]);
     assert.ok(mainContexts[0]?.systemPrompt?.includes(memory.content));
     assert.ok(
       JSON.stringify(memoryContexts[0]).includes(
@@ -580,5 +586,196 @@ test(
         );
       },
     );
+  },
+);
+
+test(
+  "real Pi persists recall failures as errors while keeping no-match results successful",
+  { timeout: 20_000 },
+  async (t) => {
+    // Arrange: the real SDK, a scripted provider, and a memory endpoint that first fails.
+    const root = await mkdtemp(join(tmpdir(), "pi-forgetful-errors-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const agentDir = join(root, "agent");
+    await mkdir(join(agentDir, "forgetful"), { recursive: true });
+    await promisify(execFile)("git", ["init", "--quiet", root]);
+    await promisify(execFile)("git", [
+      "-C",
+      root,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/test/recall-errors.git",
+    ]);
+    let searchCalls = 0;
+    const server = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (!request.url?.endsWith("/memories/search")) {
+        response.statusCode = 404;
+        response.end("{}");
+        return;
+      }
+      searchCalls += 1;
+      if (searchCalls === 1) {
+        response.statusCode = 503;
+        response.end("{}");
+        return;
+      }
+      response.end(JSON.stringify({
+        primary_memories: [],
+        linked_memories: [],
+      }));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => new Promise<void>((done) => server.close(() => done())));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    await writeFile(
+      join(agentDir, "forgetful/settings.json"),
+      JSON.stringify({
+        base_url: `http://127.0.0.1:${address.port}/api/v1`,
+        model: "test/memory",
+        capture_mode: "off",
+        timeout_ms: 2_000,
+      }),
+    );
+
+    const runtime = await ModelRuntime.create({
+      authPath: join(agentDir, "auth.json"),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+    const mainPrompts = new Set<string>();
+    runtime.registerProvider("test", {
+      api: "faux",
+      apiKey: "test-only-key",
+      baseUrl: "http://127.0.0.1/unused",
+      models: ["main", "memory"].map((id) => ({
+        id,
+        name: id,
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 32_000,
+        maxTokens: 2_048,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      })),
+      streamSimple(model, context) {
+        const stream = createAssistantMessageEventStream();
+        const decision = model.id === "memory"
+          ? {
+              search: false,
+              queries: [],
+              queryIntent: "No historical context needed",
+              entities: [],
+            }
+          : undefined;
+        const latestUser = context.messages.findLast(
+          (message) => message.role === "user",
+        );
+        const promptKey = JSON.stringify(latestUser?.content ?? "");
+        const shouldCall = model.id === "main" && !mainPrompts.has(promptKey);
+        if (shouldCall) mainPrompts.add(promptKey);
+        const content = decision
+          ? [{ type: "text" as const, text: JSON.stringify(decision) }]
+          : shouldCall
+            ? [{
+              type: "toolCall" as const,
+              id: `recall-${searchCalls + 1}`,
+              name: "forgetful_recall",
+              arguments: { query: "recall error regression" },
+            }]
+            : [{ type: "text" as const, text: "Recall completed." }];
+        const message: AssistantMessage = {
+          role: "assistant",
+          api: "faux",
+          provider: "test",
+          model: model.id,
+          content,
+          stopReason: decision || !shouldCall ? "stop" : "toolUse",
+          timestamp: Date.now(),
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0,
+            },
+          },
+        };
+        queueMicrotask(() => {
+          stream.push({
+            type: "done",
+            reason: message.stopReason as "stop" | "toolUse",
+            message,
+          });
+          stream.end(message);
+        });
+        return stream;
+      },
+    });
+    const settings = SettingsManager.create(root, agentDir);
+    settings.setProjectTrusted(true);
+    settings.applyOverrides({
+      retry: { enabled: false },
+      compaction: { enabled: false },
+    });
+    const loader = new DefaultResourceLoader({
+      cwd: root,
+      agentDir,
+      settingsManager: settings,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+      extensionFactories: [createForgetfulExtension({ agentDir })],
+    });
+    await loader.reload();
+    assert.deepEqual(loader.getExtensions().errors, []);
+    const sessionManager = SessionManager.inMemory(root);
+    const { session } = await createAgentSession({
+      cwd: root,
+      agentDir,
+      modelRuntime: runtime,
+      model: runtime.getModel("test", "main"),
+      settingsManager: settings,
+      sessionManager,
+      resourceLoader: loader,
+      noTools: "builtin",
+    });
+    t.after(() => session.dispose());
+    await session.bindExtensions({});
+    const toolEnds: Array<{ isError?: boolean }> = [];
+    session.subscribe((event) => {
+      if (
+        event.type === "tool_execution_end" &&
+        event.toolName === "forgetful_recall"
+      ) {
+        toolEnds.push(event);
+      }
+    });
+
+    // Act: the first direct recall fails, then the second returns no matches.
+    await session.prompt("Trigger the recall error path.");
+    await session.prompt("Trigger the normal no-match path.");
+
+    // Assert at the SDK event and persisted-message seams.
+    assert.equal(searchCalls, 2);
+    assert.ok(toolEnds[0]?.isError, "the emitted tool execution must be an error");
+    assert.equal(toolEnds[1]?.isError, false);
+    const results = session.messages.filter(
+      (message) =>
+        message.role === "toolResult" &&
+        message.toolName === "forgetful_recall",
+    ) as Array<{ role: "toolResult"; isError?: boolean }>;
+    assert.equal(results.length, 2);
+    assert.equal(results[0]?.isError, true);
+    assert.equal(results[1]?.isError, false);
   },
 );

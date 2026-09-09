@@ -86,6 +86,7 @@ directory. The effective settings can also be represented as:
   "base_url": "http://localhost:8020/api/v1",
   "token_env": "FORGETFUL_TOKEN",
   "timeout_ms": 2000,
+  "recall_model_timeout_ms": 1500,
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto"
@@ -161,7 +162,7 @@ capture destination. Explicit repository encoding can initialise its project thr
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
-| `/forgetful debug on` / `/forgetful debug off` | Enable or disable diagnostic detail. |
+| `/forgetful debug on` / `/forgetful debug off` | Show diagnostics and recall exceptions. |
 
 With debug enabled, automated recall shows a bounded notification with the number of memories and
 scope used. `/forgetful status` also reports the latest recall result. Automated preflight context
@@ -172,6 +173,13 @@ The main model can search further with `forgetful_recall`, inspect records and s
 with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_knowledge_write`.
 `forgetful_resolve` resolves an existing pending capture conflict. Retrieved content is untrusted
 historical context, never executable instructions.
+
+Foreground `search_memories` follows Forgetful MCP search defaults: `k=3` primary matches,
+linked memories enabled, and up to five links per primary memory. Results retain full memory
+content, primary and linked groups, and the server's count, token and truncation metadata.
+Use `k` (1–20) for search breadth; `offset` and `limit` belong to list and content operations.
+Pi shows a compact result summary that expands to the full response. Automatic recall retains
+its separate, bounded context budget.
 
 ### Recall
 
@@ -205,6 +213,18 @@ resolved automatically, while uncertain conflicts still return to the originatin
 Project scope is stored in `.pi/forgetful/settings.json` and requires Pi project trust. A missing
 scope setting means global recall. A malformed scope setting also uses global recall with a
 warning. Scope preference is independent of capture destination.
+
+`recall_model_timeout_ms` limits the background classification request (default 1,500 ms).
+`timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
+2,000 ms). Both settings are positive integer milliseconds in the user settings file. The
+overall deadline still applies when the model deadline is longer. Capture and overlap retain
+their separate 15-second model budget. Select a memory model that fits these limits; changing
+them is optional. Restart or reload the extension after editing settings directly.
+
+Background requests use Pi's model registry for authentication and carry the current session ID,
+including the OpenCode session headers. Pi 0.85.1 does not expose the active session's provider
+hook chain to extensions: background requests do not invoke other extensions'
+`before_provider_headers` hooks. Full reuse of that chain needs a public Pi API.
 
 Append policy text through `classification.md`, `recall.md`, and `capture.md` under
 `~/.pi/agent/forgetful/prompts/`. Trusted repository overlays use `.pi/forgetful/prompts/`.

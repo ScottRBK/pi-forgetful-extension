@@ -99,7 +99,8 @@ An editable Excalidraw version of this architecture is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).
 
 ## Status
-MVP implemented for Pi 0.85.1, with TDD, parent review, and 104 passing regression/integration
-tests, including the real Pi SDK and Forgetful REST routes against an isolated database.
+MVP implemented for Pi 0.85.1 with TDD and parent review. Run `npm run check` for the current
+regression/integration results, including the real Pi SDK and Forgetful REST routes against an
+isolated database. Set `FORGETFUL_TEST_SOURCE` to the Forgetful checkout to run its REST tests.
 Real-model judgment quality and latency remain separate acceptance checks.
 See [setup and controls](README.md).

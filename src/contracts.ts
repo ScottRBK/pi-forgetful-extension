@@ -146,7 +146,24 @@ export interface Memory extends MemoryInput {
   is_obsolete: boolean;
   superseded_by?: number | null;
   linked_memory_ids?: number[];
+  access_count?: number;
+  last_accessed_at?: string | null;
   updated_at?: string;
+}
+
+export interface LinkedMemory {
+  memory: Memory;
+  link_source_id: number;
+}
+
+/** The complete grouped response returned by the Forgetful query_memory API. */
+export interface MemorySearchResult {
+  query: string;
+  primary_memories: Memory[];
+  linked_memories: LinkedMemory[];
+  total_count: number;
+  token_count: number;
+  truncated: boolean;
 }
 
 export interface SearchRequest {
@@ -157,11 +174,14 @@ export interface SearchRequest {
   k?: number;
   include_links?: boolean;
   max_links?: number;
+  max_links_per_primary?: number;
 }
 
 export interface ForgetfulClient {
   knowledge?: KnowledgeClient;
   search(request: SearchRequest, signal?: AbortSignal): Promise<Memory[]>;
+  /** Query memory while retaining the server's grouped result and budget metadata. */
+  queryMemory?(request: SearchRequest, signal?: AbortSignal): Promise<MemorySearchResult>;
   listProjects(repoName?: string, signal?: AbortSignal): Promise<Project[]>;
   createProject(input: ProjectInput, signal?: AbortSignal): Promise<Project>;
   linkProject(
