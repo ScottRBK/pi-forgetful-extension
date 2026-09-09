@@ -28,10 +28,11 @@ The following choices are intentional for the first implementation:
   slice; no stronger Forgetful write contract is proposed without explicit approval.
 - The planner uses a separately configurable authenticated Pi model, distinct from the active
   main-agent model.
-- Repository/project mapping is resolved by the agent from active work context for capture and
-  when project recall is selected; it is not managed through a Forgetful project command. If an
-  existing target project cannot be resolved, the affected capture or project recall skips and
-  the user is given setup guidance. Global recall can still run without a project mapping.
+- Repository/project mapping is resolved from the Git remote and the project's `repo_name`.
+  `/forgetful project init` explicitly creates a project or links an unassigned existing project
+  after user review. It reuses an existing exact match and rejects ambiguous mappings. Connection
+  setup remains separate. If a destination cannot be resolved, the affected capture or project
+  recall skips with setup guidance. Global recall can still run without a project mapping.
 - The effective recall scope defaults to global. An explicit choice is persisted per repository
   in `.pi/forgetful/settings.json` and is reloaded whenever the project is revisited.
 - The recall planner may request a scope different from the persisted setting. The extension must
@@ -184,6 +185,10 @@ request and response shapes:
   Forgetful owns search filtering and returned-memory scope validation;
 - project lookup: `GET /projects` with `repo_name` when available, resolving an existing numeric
   project ID from the candidate's work context; missing or ambiguous matches do not create one;
+- explicit project initialisation: `POST /projects` with name, description, `repo_name`, and
+  `project_type: development`, or `PUT /projects/{id}` with only `repo_name` to link an unassigned
+  project. Recheck after confirmation and verify the resulting mapping before using it. These
+  checks reduce races but are not atomic; the server does not enforce unique repository links;
 - create: `POST /memories` with the required `title`, `content`, `context`, `keywords`, and
   `tags` fields, plus the resolved capture destination in `project_ids`;
 - read for resolution: `GET /memories/{id}` for an existing conflict's selected memory, checking

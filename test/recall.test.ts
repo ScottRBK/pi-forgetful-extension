@@ -35,6 +35,12 @@ const memory: Memory = {
 };
 
 class FakeForgetfulClient implements ForgetfulClient {
+  async createProject(): Promise<never> {
+    throw new Error("Not used by recall");
+  }
+  async linkProject(): Promise<never> {
+    throw new Error("Not used by recall");
+  }
   readonly searches: SearchRequest[] = [];
   readonly projectLookups: (string | undefined)[] = [];
 

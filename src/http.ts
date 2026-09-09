@@ -3,6 +3,7 @@ import type {
   Memory,
   MemoryInput,
   Project,
+  ProjectInput,
   SearchRequest,
 } from "./contracts.ts";
 
@@ -66,6 +67,25 @@ function requiredString(value: unknown, field: string): string {
     );
   }
   return value;
+}
+
+function projectText(value: string, field: string, max: number): string {
+  if (typeof value !== "string" || !value.trim() || value.length > max) {
+    throw new TypeError(
+      `Forgetful project ${field} must contain 1–${max} characters`,
+    );
+  }
+  return value.trim();
+}
+
+function projectRepository(value: string): string {
+  const repo = projectText(value, "repository", PROJECT_REPO_MAX);
+  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    throw new TypeError(
+      "Forgetful project repository must use owner/repo format",
+    );
+  }
+  return repo;
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
@@ -419,6 +439,45 @@ export class ApiForgetfulClient implements ForgetfulClient {
     return payload.projects.map((item, index) =>
       parseProject(item, `projects[${index}]`),
     );
+  }
+
+  async createProject(
+    input: ProjectInput,
+    signal?: AbortSignal,
+  ): Promise<Project> {
+    const body = {
+      name: projectText(input.name, "name", PROJECT_NAME_MAX),
+      description: projectText(
+        input.description,
+        "description",
+        PROJECT_DESCRIPTION_MAX,
+      ),
+      repo_name: projectRepository(input.repo_name),
+      project_type: "development",
+    };
+    const payload = await this.request(
+      "/projects",
+      "POST",
+      body,
+      signal,
+      [201],
+    );
+    return parseProject(payload, "createProject");
+  }
+
+  async linkProject(
+    id: number,
+    repoName: string,
+    signal?: AbortSignal,
+  ): Promise<Project> {
+    const payload = await this.request(
+      `/projects/${this.validId(id)}`,
+      "PUT",
+      { repo_name: projectRepository(repoName) },
+      signal,
+      [200],
+    );
+    return parseProject(payload, "linkProject");
   }
 
   async create(

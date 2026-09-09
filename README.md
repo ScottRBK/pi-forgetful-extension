@@ -61,6 +61,28 @@ the environment variable must be set. Remote services require HTTPS. The extensi
 start Forgetful or change its API. First-time connection setup does not create, select, or map a
 Forgetful project; project association remains a per-repository concern.
 
+Inside each repository, initialise its project:
+
+```text
+/forgetful project init
+```
+
+The wizard detects the Git `origin` remote and reuses its existing Forgetful project. If none
+matches, choose to create a project with a name and description, or link an existing project
+that has no repository. Review the link before saving. Large project lists prompt for a name
+filter first. Initialisation requires an interactive Pi session, project trust, and an origin
+remote that resolves to `owner/repo`.
+
+The link is stored on the project in Forgetful and applies to other checkouts of that repository
+using the same Forgetful account. The active session picks it up immediately; future sessions
+discover it from the remote. `/forgetful status` shows the project name and ID. Initialisation
+does not change recall scope, enable memory, or replay previously queued capture snapshots.
+Use `/forgetful scope project` separately if you want recall restricted to this project.
+
+Repeated initialisation reuses the existing link. If a request fails, run init again to check
+whether it was saved. Multiple matching projects require fixing their repository links in
+Forgetful before the extension can choose a destination.
+
 ## Normal use and controls
 
 Recall searches globally by default. Capture files knowledge under the current project, and
@@ -70,6 +92,7 @@ capture destinations skip with setup guidance; the extension never silently crea
 | Command | Effect |
 | --- | --- |
 | `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |
+| `/forgetful project init` | Create or link this repository's Forgetful project. |
 | `/forgetful status` | Show effective settings and memory status. |
 | `/forgetful on` / `/forgetful off` | Enable or disable memory processing. |
 | `/forgetful capture auto` | Automatically capture evidenced knowledge. |

@@ -52,6 +52,12 @@ function memory(id: number, input: MemoryInput): Memory {
 }
 
 class FakeClient implements ForgetfulClient {
+  async createProject(): Promise<never> {
+    throw new Error("Not used by capture");
+  }
+  async linkProject(): Promise<never> {
+    throw new Error("Not used by capture");
+  }
   readonly created: MemoryInput[] = [];
   readonly searches: Array<{ projectId?: number; query: string }> = [];
   readonly superseded: Array<{ oldId: number; replacementId: number }> = [];

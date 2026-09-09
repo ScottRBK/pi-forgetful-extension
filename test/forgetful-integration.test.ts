@@ -213,3 +213,44 @@ test(
     assert.deepEqual(memories[0]?.project_ids, [destinationId]);
   },
 );
+
+test(
+  "real Forgetful REST creates and links projects for repository discovery",
+  options,
+  async (t) => {
+    // Arrange: an isolated server and an existing project without a repository.
+    const baseUrl = await startForgetful(t);
+    const response = await fetch(`${baseUrl}/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Existing",
+        description: "Preserve existing knowledge",
+        project_type: "development",
+      }),
+    });
+    assert.equal(response.status, 201);
+    const existing = (await response.json()) as { id: number };
+    const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4000 });
+
+    // Act: both onboarding paths use the extension's real HTTP adapter.
+    const created = await client.createProject({
+      name: "New project",
+      description: "Repository decisions",
+      repo_name: "test/new",
+    });
+    const linked = await client.linkProject(existing.id, "test/existing");
+
+    // Assert through repository discovery, also verifying that linking preserves metadata.
+    assert.deepEqual(
+      (await client.listProjects("test/new")).map((p) => p.id),
+      [created.id],
+    );
+    assert.deepEqual(
+      (await client.listProjects("test/existing")).map((p) => p.id),
+      [existing.id],
+    );
+    assert.equal(linked.name, "Existing");
+    assert.equal(linked.description, "Preserve existing knowledge");
+  },
+);

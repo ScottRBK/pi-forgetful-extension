@@ -205,3 +205,93 @@ describe("ApiForgetfulClient", () => {
     await assert.rejects(pending, ForgetfulAbortError);
   });
 });
+
+describe("project administration HTTP contract", () => {
+  it("uses bearer authentication and sends only supported project fields", async () => {
+    // Arrange.
+    const calls: Array<{ method?: string; path: string; body: unknown }> = [];
+    const client = new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      token: "project-test-token",
+      fetchImpl: async (url, init) => {
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer project-test-token",
+        );
+        calls.push({
+          method: init?.method,
+          path: new URL(String(url)).pathname,
+          body: JSON.parse(String(init?.body)),
+        });
+        return Response.json(
+          { id: 3, name: "Project", repo_name: "owner/repo" },
+          { status: init?.method === "POST" ? 201 : 200 },
+        );
+      },
+    });
+    // Act.
+    await client.createProject({
+      name: "Project",
+      description: "Description",
+      repo_name: "owner/repo",
+      ...{ unexpected: "must not be sent" },
+    });
+    await client.linkProject(3, "owner/repo");
+    // Assert.
+    assert.deepEqual(calls, [
+      {
+        method: "POST",
+        path: "/api/v1/projects",
+        body: {
+          name: "Project",
+          description: "Description",
+          repo_name: "owner/repo",
+          project_type: "development",
+        },
+      },
+      {
+        method: "PUT",
+        path: "/api/v1/projects/3",
+        body: { repo_name: "owner/repo" },
+      },
+    ]);
+  });
+
+  it("rejects invalid project input without sending HTTP requests", async () => {
+    // Arrange.
+    let requests = 0;
+    const client = new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async () => {
+        requests++;
+        return Response.json(
+          { id: 3, name: "Project", repo_name: "owner/repo" },
+          { status: 201 },
+        );
+      },
+    });
+    // Act / Assert.
+    for (const invalid of [
+      { name: " " },
+      { name: "x".repeat(501) },
+      { description: "" },
+      { description: "x".repeat(5001) },
+      { repo_name: "missing-slash" },
+      { repo_name: "owner/group/repo" },
+      { repo_name: "x".repeat(250) + "/long-repo" },
+    ]) {
+      await assert.rejects(
+        client.createProject({
+          name: "Project",
+          description: "Description",
+          repo_name: "owner/repo",
+          ...invalid,
+        }),
+        TypeError,
+      );
+    }
+    await assert.rejects(client.linkProject(3, "bad"), TypeError);
+    await assert.rejects(client.linkProject(-1, "owner/repo"), TypeError);
+    assert.equal(requests, 0);
+  });
+});

@@ -68,6 +68,8 @@ async function harness(
     userSettings?: Record<string, unknown>;
     uiInputs?: Array<string | undefined>;
     uiSelections?: Array<string | undefined>;
+    withoutProject?: boolean;
+    gitRemote?: string;
     createClient?: (options: {
       baseUrl: string;
       token?: string;
@@ -149,11 +151,13 @@ async function harness(
     repoName: "test/repo",
     sessionId: "session-1",
     branchId: "session-1:root",
-    project: {
-      id: 7,
-      name: "Test repo",
-      repo_name: "test/repo",
-    } satisfies Project,
+    project: options.withoutProject
+      ? undefined
+      : ({
+          id: 7,
+          name: "Test repo",
+          repo_name: "test/repo",
+        } satisfies Project),
   };
   const sessionManager = {
     getSessionId: () => "session-1",
@@ -214,16 +218,18 @@ async function harness(
     sendMessage(message: unknown, sendOptions: unknown) {
       sentMessages.push({ message, options: sendOptions });
     },
-    exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+    exec: async () => ({
+      code: options.gitRemote ? 0 : 1,
+      stdout: options.gitRemote ?? "",
+      stderr: "",
+    }),
   };
   createForgetfulExtension({
     agentDir,
     dependencies: {
       recall,
       capture,
-      ...(options.createClient
-        ? { createClient: options.createClient }
-        : {}),
+      ...(options.createClient ? { createClient: options.createClient } : {}),
       resolveWorkContext: async () => {
         options.onWorkContext?.();
         await options.workContextGate;
@@ -1367,6 +1373,454 @@ test("a delayed conflict handoff is discarded after branch navigation", async ()
     ]);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(fixture.sentMessages.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init creates once and activates capture in the session", async () => {
+  // Arrange: an unmapped repository and a real HTTP adapter with a fake external service.
+  const projects: Project[] = [];
+  const writes: unknown[] = [];
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "git@github.com:test/repo.git",
+    uiInputs: ["Repo memory", "Decisions for the repository"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (url, init) => {
+          assert.equal(new URL(String(url)).pathname, "/api/v1/projects");
+          if (init?.method === "POST") {
+            const body = JSON.parse(String(init.body));
+            writes.push(body);
+            projects.push({ id: 23, ...body });
+            return Response.json(projects[0], { status: 201 });
+          }
+          return Response.json({ projects });
+        },
+      }),
+  });
+  try {
+    await fixture.emit("session_start", { type: "session_start" });
+    fixture.entries.push(entry("question", "root", "user", "We chose SQLite."));
+    fixture.entries.push(
+      entry("answer", "question", "assistant", "Confirmed.", "stop"),
+    );
+    fixture.setLeaf("answer");
+
+    // Act: initialise twice and capture work already present in the session.
+    await fixture.command("project init");
+    await fixture.command("project init");
+    await fixture.command("status");
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+
+    // Assert: one server project, unchanged scope, and the new default capture destination.
+    assert.deepEqual(writes, [
+      {
+        name: "Repo memory",
+        description: "Decisions for the repository",
+        project_type: "development",
+        repo_name: "test/repo",
+      },
+    ]);
+    assert.match(
+      fixture.notifications.join("\n"),
+      /project Repo memory \(#23\)/,
+    );
+    assert.match(fixture.notifications.join("\n"), /scope global/);
+    assert.equal(fixture.capture.enqueued.at(-1)?.context.project?.id, 23);
+    assert.ok(
+      fixture.capture.enqueued.at(-1)?.entries.some((e) => e.id === "question"),
+    );
+    await assert.rejects(
+      readFile(join(fixture.root, ".pi/forgetful/settings.json")),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init links an unassigned project and preserves other repositories", async () => {
+  // Arrange: two identically named projects, only one available to link.
+  const projects: Project[] = [
+    { id: 9, name: "Existing", repo_name: "test/other" },
+    {
+      id: 10,
+      name: "Existing",
+      repo_name: null,
+      description: "Keep this description",
+    },
+  ];
+  const writes: unknown[] = [];
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "https://github.com/test/repo.git",
+    uiSelections: ["Link an existing project", "Existing (#10)"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (url, init) => {
+          if (init?.method === "PUT") {
+            assert.equal(new URL(String(url)).pathname, "/api/v1/projects/10");
+            const body = JSON.parse(String(init.body));
+            writes.push(body);
+            Object.assign(projects[1], body);
+            return Response.json(projects[1]);
+          }
+          assert.equal(init?.method, "GET");
+          return Response.json({ projects });
+        },
+      }),
+  });
+  const selections: string[][] = [];
+  const select = fixture.ctx.ui.select;
+  fixture.ctx.ui.select = async (title: string, values: string[]) => {
+    selections.push(values);
+    return select(title, values);
+  };
+  try {
+    // Act.
+    await fixture.command("project init");
+    await fixture.command("status");
+
+    // Assert through the command and API boundaries.
+    assert.deepEqual(writes, [{ repo_name: "test/repo" }]);
+    assert.deepEqual(selections[1], ["Existing (#10)"]);
+    assert.equal(projects[0]?.repo_name, "test/other");
+    assert.equal(projects[1]?.description, "Keep this description");
+    assert.match(fixture.notifications.join("\n"), /project Existing \(#10\)/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+async function projectFixture(
+  projects: Project[] = [],
+  inputs?: Array<string | undefined>,
+) {
+  const writes: unknown[] = [];
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "git@github.com:test/repo.git",
+    uiInputs: inputs ?? ["Project", "Description"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (_url, init) => {
+          if (init?.method !== "GET") {
+            const body = JSON.parse(String(init?.body));
+            writes.push(body);
+            const project = { id: 25, name: "Project", ...body };
+            projects.push(project);
+            return Response.json(project, {
+              status: init?.method === "POST" ? 201 : 200,
+            });
+          }
+          return Response.json({ projects });
+        },
+      }),
+  });
+  return { ...fixture, writes };
+}
+
+test("project init cancellation leaves the server and settings unchanged", async () => {
+  for (const stage of [
+    "action",
+    "name",
+    "description",
+    "create",
+    "project",
+    "link",
+  ]) {
+    // Arrange.
+    const fixture = await projectFixture([{ id: 10, name: "Existing" }]);
+    const settingsPath = join(fixture.agentDir, "forgetful/settings.json");
+    const before = await readFile(settingsPath, "utf8");
+    let inputs = 0;
+    fixture.ctx.ui.input = async () => {
+      inputs++;
+      return (stage === "name" && inputs === 1) ||
+        (stage === "description" && inputs === 2)
+        ? undefined
+        : "Project";
+    };
+    fixture.ctx.ui.select = async (_title: string, values: string[]) => {
+      if (stage === "action") return undefined;
+      if (values.includes("Link an existing project")) {
+        return ["project", "link"].includes(stage)
+          ? "Link an existing project"
+          : values[0];
+      }
+      return stage === "project" ? undefined : values[0];
+    };
+    fixture.ctx.ui.confirm = async () => false;
+    try {
+      // Act.
+      await fixture.command("project init");
+      // Assert.
+      assert.deepEqual(fixture.writes, [], stage);
+      assert.equal(await readFile(settingsPath, "utf8"), before, stage);
+      assert.doesNotMatch(
+        fixture.notifications.join("\n"),
+        /linked to test\/repo/,
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
+test("project init rejects blank or oversized project details before writing", async () => {
+  for (const inputs of [
+    [" ", "Description"],
+    ["Project", " "],
+    ["x".repeat(501), "Description"],
+    ["Project", "x".repeat(5001)],
+  ]) {
+    // Arrange.
+    const fixture = await projectFixture([], inputs);
+    try {
+      // Act.
+      await fixture.command("project init");
+      // Assert.
+      assert.deepEqual(fixture.writes, []);
+      assert.match(fixture.notifications.join("\n"), /name|description/i);
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
+test("project init reports ambiguous mappings without creating another project", async () => {
+  // Arrange.
+  const fixture = await projectFixture([
+    { id: 1, name: "First", repo_name: "test/repo" },
+    { id: 2, name: "Second", repo_name: "test/repo" },
+  ]);
+  try {
+    // Act.
+    await fixture.command("project init");
+    // Assert.
+    assert.deepEqual(fixture.writes, []);
+    assert.match(
+      fixture.notifications.join("\n"),
+      /Multiple Forgetful projects/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init rechecks the mapping after the user confirms creation", async () => {
+  // Arrange: another session initialises the repository while the dialog is open.
+  const projects: Project[] = [];
+  const fixture = await projectFixture(projects);
+  fixture.ctx.ui.confirm = async () => {
+    projects.push({ id: 40, name: "Already created", repo_name: "test/repo" });
+    return true;
+  };
+  try {
+    // Act.
+    await fixture.command("project init");
+    await fixture.command("status");
+    // Assert.
+    assert.deepEqual(fixture.writes, []);
+    assert.match(
+      fixture.notifications.join("\n"),
+      /project Already created \(#40\)/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init rejects linking a project assigned while the dialog was open", async () => {
+  // Arrange.
+  const projects: Project[] = [{ id: 10, name: "Existing" }];
+  const fixture = await projectFixture(projects);
+  fixture.ctx.ui.select = async (_title: string, values: string[]) =>
+    values.includes("Link an existing project")
+      ? "Link an existing project"
+      : values[0];
+  fixture.ctx.ui.confirm = async () => {
+    projects[0]!.repo_name = "test/other";
+    return true;
+  };
+  try {
+    // Act.
+    await fixture.command("project init");
+    // Assert.
+    assert.deepEqual(fixture.writes, []);
+    assert.match(fixture.notifications.join("\n"), /changed|assigned/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init stops before writing if the originating session changes", async () => {
+  // Arrange.
+  const fixture = await projectFixture();
+  fixture.ctx.ui.confirm = async () => {
+    await fixture.emit("session_tree", { type: "session_tree" });
+    return true;
+  };
+  try {
+    // Act.
+    await fixture.command("project init");
+    // Assert.
+    assert.deepEqual(fixture.writes, []);
+    assert.match(fixture.notifications.join("\n"), /session changed/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init works before model selection and preserves off and scope settings", async () => {
+  // Arrange: connection setup is done, but memory is off and no model is selected.
+  const fixture = await projectFixture([], ["", "Repository decisions"]);
+  const settings = join(fixture.agentDir, "forgetful/settings.json");
+  await writeFile(settings, JSON.stringify({ enabled: false }));
+  await mkdir(join(fixture.root, ".pi/forgetful"), { recursive: true });
+  await writeFile(
+    join(fixture.root, ".pi/forgetful/settings.json"),
+    '{"scope":"project"}',
+  );
+  try {
+    // Act.
+    await fixture.command("project init");
+    await fixture.command("status");
+    // Assert.
+    assert.deepEqual(fixture.writes, [
+      {
+        name: "repo",
+        description: "Repository decisions",
+        repo_name: "test/repo",
+        project_type: "development",
+      },
+    ]);
+    assert.equal(await readFile(settings, "utf8"), '{"enabled":false}');
+    assert.match(
+      fixture.notifications.join("\n"),
+      /Forgetful off; capture auto; scope project/,
+    );
+    assert.match(fixture.notifications.join("\n"), /project repo \(#25\)/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init connection failure gives guidance and preserves settings", async () => {
+  // Arrange: an unreachable external service.
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "git@github.com:test/repo.git",
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async () => {
+          throw new Error("private service detail");
+        },
+      }),
+  });
+  const settings = join(fixture.agentDir, "forgetful/settings.json");
+  const before = await readFile(settings, "utf8");
+  try {
+    // Act.
+    await assert.doesNotReject(fixture.command("project init"));
+    // Assert.
+    assert.match(
+      fixture.notifications.join("\n"),
+      /initialisation failed.*\/forgetful setup/,
+    );
+    assert.doesNotMatch(
+      fixture.notifications.join("\n"),
+      /private service detail/,
+    );
+    assert.equal(await readFile(settings, "utf8"), before);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init requires interactive project trust and a usable origin remote", async () => {
+  for (const reason of ["trust", "ui", "remote"]) {
+    // Arrange.
+    const fixture =
+      reason === "remote"
+        ? await harness({ withoutProject: true })
+        : await projectFixture();
+    if (reason === "trust") fixture.ctx.isProjectTrusted = () => false;
+    if (reason === "ui") fixture.ctx.hasUI = false;
+    fixture.ctx.ui.select = async () => {
+      assert.fail("No wizard should open");
+    };
+    try {
+      // Act.
+      await fixture.command("project init");
+      // Assert.
+      assert.match(
+        fixture.notifications.join("\n"),
+        reason === "remote"
+          ? /origin remote/
+          : /interactive Pi session and project trust/,
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
+test("project status discovers an existing repository link even when memory is off", async () => {
+  // Arrange: a fresh session with a server mapping, memory disabled, and no model.
+  const fixture = await projectFixture([
+    { id: 40, name: "Existing", repo_name: "test/repo" },
+  ]);
+  await writeFile(
+    join(fixture.agentDir, "forgetful/settings.json"),
+    '{"enabled":false}',
+  );
+  try {
+    // Act.
+    await fixture.emit("session_start", { type: "session_start" });
+    await fixture.command("status");
+    // Assert.
+    assert.match(fixture.notifications.join("\n"), /project Existing \(#40\)/);
+    assert.deepEqual(fixture.writes, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("project init filters large project lists before opening the selector", async () => {
+  // Arrange.
+  const projects = Array.from({ length: 150 }, (_, i) => ({
+    id: i + 1,
+    name: `Project ${i}`,
+  }));
+  const fixture = await projectFixture(projects, ["Project 149"]);
+  fixture.ctx.ui.select = async (_title: string, values: string[]) => {
+    assert.ok(
+      values.length <= 20,
+      "Dialogs should not render a huge project catalogue",
+    );
+    return values.includes("Link an existing project")
+      ? "Link an existing project"
+      : values[0];
+  };
+  // Cancel at the last review: this test checks navigation without linking the fake project.
+  const confirmations: string[] = [];
+  fixture.ctx.ui.confirm = async (_title: string, message: string) => {
+    confirmations.push(message);
+    return false;
+  };
+  try {
+    // Act.
+    await fixture.command("project init");
+    // Assert: filtering reached the final review instead of failing the oversized selector.
+    assert.doesNotMatch(fixture.notifications.join("\n"), /failed/);
+    assert.deepEqual(confirmations, ["Link Project 149 (#150) to test/repo?"]);
+    assert.deepEqual(fixture.writes, []);
   } finally {
     await fixture.cleanup();
   }

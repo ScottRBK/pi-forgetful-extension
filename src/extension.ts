@@ -22,6 +22,7 @@ import type {
   WorkContext,
 } from "./contracts.ts";
 import { ApiForgetfulClient } from "./http.ts";
+import { initialiseProject, ProjectInitError } from "./project-init.ts";
 import { CaptureService } from "./capture.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
@@ -923,11 +924,14 @@ export function createForgetfulExtension(
       let client = dependencies.client;
       if (client) return { config, client };
       try {
-        client = new ApiForgetfulClient({
+        const clientOptions = {
           baseUrl: config.instance.baseUrl,
           token: config.instance.token,
           timeoutMs: config.instance.timeoutMs,
-        });
+        };
+        client = dependencies.createClient
+          ? dependencies.createClient(clientOptions)
+          : new ApiForgetfulClient(clientOptions);
       } catch {
         const warning =
           "Forgetful endpoint configuration is invalid; memory traffic is disabled.";
@@ -1720,6 +1724,14 @@ export function createForgetfulExtension(
       ctx: ExtensionContext,
       runtime: Runtime,
     ): Promise<void> => {
+      // Status can inspect the repository link even before a model is configured.
+      if (!runtime.context.project && runtime.client) {
+        const context = await discoverWorkContext(pi, ctx, runtime.branchId);
+        if (context.repoName) {
+          const enriched = await enrichRuntimeContext(context, runtime.client);
+          if (state.runtime === runtime) runtime.context = enriched;
+        }
+      }
       let conflictText = "";
       if (
         runtime.config.debug &&
@@ -1767,6 +1779,11 @@ export function createForgetfulExtension(
         ctx,
         `Forgetful ${runtime.config.enabled ? "on" : "off"}; ` +
           `capture ${runtime.config.captureMode}; scope ${runtime.config.scope}; ` +
+          `project ${
+            runtime.context.project
+              ? `${sanitizeText(runtime.context.project.name)} (#${runtime.context.project.id})`
+              : "unresolved (run /forgetful project init)"
+          }; ` +
           `model ${modelToString(runtime.config.model) ?? "not configured"}` +
           `${recallText}${conflictText}${diagnosticText}.`,
       );
@@ -1952,6 +1969,95 @@ export function createForgetfulExtension(
         notify(ctx, "Choose a memory model next with /forgetful model.");
     };
 
+    const handleProjectCommand = async (
+      parts: string[],
+      ctx: ExtensionContext,
+      runtime: Runtime,
+    ): Promise<void> => {
+      if (parts.length !== 2 || parts[1] !== "init") {
+        notify(ctx, "Usage: /forgetful project init", "error");
+        return;
+      }
+      if (!ctx.hasUI || !ctx.isProjectTrusted()) {
+        notify(
+          ctx,
+          "Project initialisation requires an interactive Pi session and project trust.",
+          "error",
+        );
+        return;
+      }
+      const context = await discoverWorkContext(pi, ctx, runtime.branchId);
+      if (
+        !context.repoName ||
+        context.repoName.length > 255 ||
+        !/^[^/\s]+\/[^/\s]+$/.test(context.repoName)
+      ) {
+        notify(
+          ctx,
+          "No supported Git origin remote found. Add an origin remote, then run " +
+            "/forgetful project init again.",
+          "error",
+        );
+        return;
+      }
+      if (!runtime.client) {
+        notify(
+          ctx,
+          "Connect to Forgetful with /forgetful setup first.",
+          "error",
+        );
+        return;
+      }
+      try {
+        const repoName = context.repoName;
+        const ensureCurrent = async () => {
+          const current = await discoverWorkContext(pi, ctx, runtime.branchId);
+          if (
+            state.runtime !== runtime ||
+            ctx.cwd !== runtime.cwd ||
+            ctx.sessionManager.getSessionId() !== runtime.sessionId ||
+            !ctx.isProjectTrusted() ||
+            ctx.signal?.aborted ||
+            current.repoName !== repoName
+          ) {
+            throw new ProjectInitError(
+              "The repository or session changed. Run init again.",
+            );
+          }
+        };
+        const project = await initialiseProject(
+          runtime.client,
+          ctx,
+          repoName,
+          ensureCurrent,
+        );
+        if (!project) return;
+        await ensureCurrent();
+        runtime.context = {
+          ...runtime.context,
+          repoName: context.repoName,
+          project,
+          projects: [project],
+        };
+        notify(
+          ctx,
+          `Forgetful project ${sanitizeText(project.name)} (#${project.id}) ` +
+            `linked to ${context.repoName}. Recall scope: ${runtime.config.scope}.`,
+        );
+      } catch (error) {
+        if (error instanceof ProjectInitError) {
+          notify(ctx, error.message, "error");
+          return;
+        }
+        notify(
+          ctx,
+          "Project initialisation failed. Check the Forgetful connection with " +
+            "/forgetful setup, then run /forgetful project init again to check the mapping.",
+          "error",
+        );
+      }
+    };
+
     pi.registerCommand("forgetful", {
       description: "Configure automatic Forgetful recall and capture",
       handler: async (args, ctx) => {
@@ -1963,6 +2069,9 @@ export function createForgetfulExtension(
         }
         const runtime = await loadRuntime(ctx);
         switch (action) {
+          case "project":
+            await handleProjectCommand(parts, ctx, runtime);
+            return;
           case "status":
             await handleStatusCommand(ctx, runtime);
             return;
@@ -1985,7 +2094,7 @@ export function createForgetfulExtension(
           default:
             notify(
               ctx,
-              "Usage: /forgetful setup|status|scope|capture|on|off|debug|model",
+              "Usage: /forgetful setup|project init|status|scope|capture|on|off|debug|model",
               "error",
             );
         }

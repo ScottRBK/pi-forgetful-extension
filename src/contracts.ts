@@ -8,6 +8,12 @@ export interface Project {
   description?: string;
 }
 
+export interface ProjectInput {
+  name: string;
+  description: string;
+  repo_name: string;
+}
+
 export interface MemoryInput {
   title: string;
   content: string;
@@ -41,6 +47,12 @@ export interface SearchRequest {
 export interface ForgetfulClient {
   search(request: SearchRequest, signal?: AbortSignal): Promise<Memory[]>;
   listProjects(repoName?: string, signal?: AbortSignal): Promise<Project[]>;
+  createProject(input: ProjectInput, signal?: AbortSignal): Promise<Project>;
+  linkProject(
+    id: number,
+    repoName: string,
+    signal?: AbortSignal,
+  ): Promise<Project>;
   create(input: MemoryInput, signal?: AbortSignal): Promise<{ id: number }>;
   get(id: number, signal?: AbortSignal): Promise<Memory>;
   supersede(
