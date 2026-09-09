@@ -191,6 +191,9 @@ describe("RecallService", () => {
 
     assert.equal(client.searches[0]?.query, "coding preferences");
     assert.equal(client.searches[0]?.strict_project_filter, false);
+    assert.doesNotMatch(client.searches[0]?.query_context ?? "", /owner\/forgetful/);
+    await service.deeper({ query: "coding preferences", context, scope: "global" });
+    assert.doesNotMatch(client.searches[1]?.query_context ?? "", /owner\/forgetful/);
   });
 
   it("keeps an explicit other-repository global query broad", async () => {

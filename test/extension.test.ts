@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -733,6 +735,144 @@ test("debug reports search exceptions for automatic and manual recall", async ()
       /Forgetful recall is unavailable/,
     );
     assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("manual recall cancels a pending external search with the session signal", async (t) => {
+  let resolveSearchStarted!: () => void;
+  const searchStarted = new Promise<void>((resolve) => {
+    resolveSearchStarted = resolve;
+  });
+  let resolveSearchAborted!: () => void;
+  const searchAborted = new Promise<void>((resolve) => {
+    resolveSearchAborted = resolve;
+  });
+  let searchAbortedObserved = false;
+  const pendingResponses = new Set<{ destroy(): void }>();
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url?.includes("/projects")) {
+      response.end(JSON.stringify({ projects: [] }));
+      return;
+    }
+    if (!request.url?.endsWith("/memories/search")) {
+      response.statusCode = 404;
+      response.end("{}");
+      return;
+    }
+    resolveSearchStarted();
+    pendingResponses.add(response);
+    const markAborted = () => {
+      if (searchAbortedObserved) return;
+      searchAbortedObserved = true;
+      resolveSearchAborted();
+      pendingResponses.delete(response);
+      response.destroy();
+    };
+    request.once("aborted", markAborted);
+    request.once("close", () => {
+      if (request.aborted) markAborted();
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => {
+    for (const response of pendingResponses) response.destroy();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
+  const fixture = await harness({
+    userSettings: { base_url: baseUrl },
+    recallService: new RecallService(
+      new ApiForgetfulClient({ baseUrl, timeoutMs: 5_000 }),
+      { async complete() { return { search: false, queries: [], queryIntent: "", entities: [] }; } },
+    ),
+  });
+  const sessionAbort = new AbortController();
+  fixture.ctx.signal = sessionAbort.signal;
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    const execution = fixture.tools.get("forgetful_recall")!.execute(
+      "manual-cancel",
+      { query: "pending external recall" },
+      undefined,
+      undefined,
+      fixture.ctx,
+    );
+    await Promise.race([
+      searchStarted,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("search did not start")), 500),
+      ),
+    ]);
+
+    sessionAbort.abort();
+    const outcome = await Promise.race([
+      execution.then(
+        () => ({ kind: "resolved" as const }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) =>
+        setTimeout(() => resolve({ kind: "timeout" }), 500),
+      ),
+    ]);
+    assert.equal(outcome.kind, "rejected", "session cancellation must stop promptly");
+    if (outcome.kind === "rejected")
+      assert.match(String(outcome.error), /Forgetful recall is unavailable/);
+    await Promise.race([
+      searchAborted,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("search was not aborted")), 500),
+      ),
+    ]);
+    assert.equal(searchAbortedObserved, true);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug recall catch diagnostics are redacted and bounded for automatic and queued input", async () => {
+  const longFailure = `Bearer external-test-secret ${"x".repeat(1_000)}`;
+  const fixture = await harness({
+    userSettings: { debug: true },
+    recallService: {
+      async recall(): Promise<RecallResult> {
+        throw new Error(longFailure);
+      },
+      async deeper(): Promise<RecallResult> {
+        return { text: "unused", memoryIds: [], scope: "global" };
+      },
+    },
+  });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.notifications.splice(0);
+
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: "automatic diagnostic",
+      systemPrompt: "base",
+    });
+    const automatic = fixture.notifications.at(-1) ?? "";
+    assert.match(automatic, /Forgetful recall skipped: Error: \[redacted\]/);
+    assert.doesNotMatch(automatic, /external-test-secret/);
+    assert.ok(automatic.length <= "Forgetful recall skipped: ".length + 500);
+
+    fixture.notifications.splice(0);
+    await fixture.emit("input", {
+      type: "input",
+      text: "queued diagnostic",
+      source: "interactive",
+      streamingBehavior: "followUp",
+    });
+    const queued = fixture.notifications.at(-1) ?? "";
+    assert.match(queued, /Forgetful queued recall skipped: Error: \[redacted\]/);
+    assert.doesNotMatch(queued, /external-test-secret/);
+    assert.ok(queued.length <= "Forgetful queued recall skipped: ".length + 500);
   } finally {
     await fixture.cleanup();
   }

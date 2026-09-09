@@ -683,9 +683,7 @@ export class RecallService {
             referencesCurrentRepository(query, request.context),
           isCrossProjectText(query),
         ),
-        query_context: `Read-only deeper recall requested for ${sanitizeText(
-          request.context.repoName ?? request.context.cwd,
-        )}`,
+        query_context: "Read-only deeper recall requested by the active agent.",
         strict_project_filter: request.scope === "project",
         k: 3,
         include_links: false,
@@ -950,7 +948,7 @@ export class RecallService {
           (value) => typeof value === "string" && isCrossProjectText(value),
         ),
       ),
-      query_context: this.queryContext(plan, context),
+      query_context: this.queryContext(plan),
       strict_project_filter: scope === "project",
       k: 3,
       include_links: false,
@@ -960,14 +958,14 @@ export class RecallService {
     return search;
   }
 
-  private queryContext(plan: RecallPlan, context: WorkContext): string {
+  private queryContext(plan: RecallPlan): string {
     const entities =
       plan.entities.length > 0
         ? ` Entities: ${plan.entities.map((item) => sanitizeText(item)).join(", ")}.`
         : "";
     return trim(
       sanitizeText(
-        `${plan.queryIntent}. Repository: ${context.repoName ?? context.cwd}.${entities}`,
+        `${plan.queryIntent}.${entities}`,
       ),
       1_000,
     );

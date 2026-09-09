@@ -361,6 +361,10 @@ function sessionKey(ctx: ExtensionContext, branchId: string): string {
   return `${ctx.sessionManager.getSessionId()}\u0000${branchId}`;
 }
 
+function boundedErrorDiagnostic(error: unknown): string {
+  return sanitizeText(String(error)).slice(0, 500);
+}
+
 function textMessage(text: string): UserMessage {
   return { role: "user", content: text, timestamp: Date.now() };
 }
@@ -1174,7 +1178,7 @@ export function createForgetfulExtension(
               if (runtime.config.debug)
                 notify(
                   ctx,
-                  `Forgetful recovery skipped: ${String(error)}`,
+                  `Forgetful recovery skipped: ${boundedErrorDiagnostic(error)}`,
                   "warning",
                 );
             });
@@ -1360,7 +1364,7 @@ export function createForgetfulExtension(
         if (runtime.config.debug)
           notify(
             ctx,
-            `Forgetful ${messagePrefix}: ${String(error)}`,
+            `Forgetful ${messagePrefix}: ${boundedErrorDiagnostic(error)}`,
             "warning",
           );
       }
@@ -1402,7 +1406,7 @@ export function createForgetfulExtension(
               if (runtime.config.debug)
                 notify(
                   ctx,
-                  `Forgetful capture worker skipped: ${String(error)}`,
+                  `Forgetful capture worker skipped: ${boundedErrorDiagnostic(error)}`,
                   "warning",
                 );
             });
@@ -1413,7 +1417,7 @@ export function createForgetfulExtension(
         if (runtime.config.debug)
           notify(
             ctx,
-            `Forgetful capture enqueue skipped: ${String(error)}`,
+            `Forgetful capture enqueue skipped: ${boundedErrorDiagnostic(error)}`,
             "warning",
           );
       }
@@ -1450,7 +1454,11 @@ export function createForgetfulExtension(
         return { systemPrompt: `${event.systemPrompt}\n\n${result.text}` };
       } catch (error) {
         if (state.runtime?.config.debug)
-          notify(ctx, `Forgetful recall skipped: ${String(error)}`, "warning");
+          notify(
+            ctx,
+            `Forgetful recall skipped: ${boundedErrorDiagnostic(error)}`,
+            "warning",
+          );
       }
     });
 
@@ -1482,7 +1490,7 @@ export function createForgetfulExtension(
         if (state.runtime?.config.debug)
           notify(
             ctx,
-            `Forgetful queued recall skipped: ${String(error)}`,
+            `Forgetful queued recall skipped: ${boundedErrorDiagnostic(error)}`,
             "warning",
           );
       }
@@ -1836,20 +1844,43 @@ export function createForgetfulExtension(
           if (!runtime.recall || !runtime.config.enabled) {
             throw new Error("Forgetful recall is unavailable.");
           }
+          const activeSignals = [signal, ctx.signal].filter(
+            (value): value is AbortSignal => Boolean(value),
+          );
+          const activeSignal = activeSignals.length > 0
+            ? AbortSignal.any(activeSignals)
+            : undefined;
+          const sessionId = runtime.sessionId;
+          const branchId = runtime.branchId;
+          const checkSession = () => {
+            if (
+              activeSignal?.aborted ||
+              state.runtime !== runtime ||
+              ctx.cwd !== runtime.cwd ||
+              ctx.sessionManager.getSessionId() !== sessionId ||
+              runtime.branchId !== branchId
+            ) {
+              throw new Error("Forgetful recall is unavailable.");
+            }
+          };
+          checkSession();
           const context = await workContext(ctx, runtime);
+          checkSession();
           const result = await runtime.recall.deeper({
             query: params.query,
             context,
             scope: runtime.config.scope,
-            signal,
+            signal: activeSignal,
             projects: context.projects,
           });
+          checkSession();
           if (runtime.config.debug && result.diagnostic)
             notify(ctx, `Forgetful recall failed during ${result.diagnostic}`, "warning");
           const unavailable = !result.text && [
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");
           if (unavailable) throw new Error("Forgetful recall is unavailable.");
+          checkSession();
           return {
             content: [
               {
