@@ -618,6 +618,44 @@ test("missing model warning directs the user to setup", async () => {
   }
 });
 
+test("debug reports automated recall activity and status keeps the latest result", async () => {
+  const fixture = await harness();
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    await fixture.command("debug on");
+    fixture.notifications.splice(0);
+
+    const result = await fixture.emit("before_agent_start", {
+      type: "before_agent_start",
+      prompt: "Which database did we choose?",
+      systemPrompt: "base system prompt",
+    });
+
+    assert.match(
+      String((result as { systemPrompt?: unknown } | undefined)?.systemPrompt),
+      /historical context/,
+    );
+    assert.ok(
+      fixture.notifications.some((message) =>
+        message.includes("Forgetful recall completed: 1 memory in global scope."),
+      ),
+    );
+
+    await fixture.command("status");
+
+    assert.ok(
+      fixture.notifications.some((message) =>
+        message.includes("last recall 1 memory in global scope"),
+      ),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("model command uses Pi's searchable picker for a large model catalogue", async () => {
   const fixture = await harness();
   try {

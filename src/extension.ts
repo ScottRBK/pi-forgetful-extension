@@ -278,6 +278,12 @@ interface PendingQueuedRecall {
   text: string;
 }
 
+interface RecallActivity {
+  memoryCount: number;
+  scope: Scope;
+  reason?: string;
+}
+
 interface Runtime {
   sessionId: string;
   cwd: string;
@@ -290,6 +296,7 @@ interface Runtime {
   branchId: string;
   baselineEntryId: string | null;
   lastCaptureEntryId?: string;
+  lastRecall?: RecallActivity;
   skipNextCapture: boolean;
   notifiedConflictIds: Set<string>;
 }
@@ -357,6 +364,31 @@ function messageContentText(content: unknown): string {
     )
     .map((part) => part.text)
     .join("\n");
+}
+
+function recallActivitySummary(activity: RecallActivity): string {
+  const noun = activity.memoryCount === 1 ? "memory" : "memories";
+  const reason = activity.reason
+    ? `; ${sanitizeText(activity.reason).slice(0, 80)}`
+    : "";
+  return `${activity.memoryCount} ${noun} in ${activity.scope} scope${reason}`;
+}
+
+function recordRecallActivity(
+  runtime: Runtime,
+  result: RecallResult,
+  ctx: ExtensionContext,
+): void {
+  runtime.lastRecall = {
+    memoryCount: result.memoryIds.length,
+    scope: result.scope,
+    reason: result.reason,
+  };
+  if (runtime.config.debug)
+    notify(
+      ctx,
+      `Forgetful recall completed: ${recallActivitySummary(runtime.lastRecall)}.`,
+    );
 }
 
 function recallContextEntries(ctx: ExtensionContext): EvidenceEntry[] {
@@ -1377,6 +1409,7 @@ export function createForgetfulExtension(
         state.activeQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
         if (!runtime.config.enabled) return;
         const result = await runRecall(ctx, runtime, event.prompt, ctx.signal);
+        recordRecallActivity(runtime, result, ctx);
         if (!result.text) return;
         return { systemPrompt: `${event.systemPrompt}\n\n${result.text}` };
       } catch (error) {
@@ -1397,6 +1430,7 @@ export function createForgetfulExtension(
         const runtime = await loadRuntime(ctx);
         if (!runtime.config.enabled) return { action: "continue" as const };
         const result = await runRecall(ctx, runtime, event.text, ctx.signal);
+        recordRecallActivity(runtime, result, ctx);
         if (result.text) {
           const key = sessionKey(ctx, runtime.branchId);
           const pending = state.pendingQueuedRecall.get(key) ?? [];
@@ -1726,12 +1760,15 @@ export function createForgetfulExtension(
           diagnosticText = "; diagnostics unavailable";
         }
       }
+      const recallText = runtime.lastRecall
+        ? `; last recall ${recallActivitySummary(runtime.lastRecall)}`
+        : "";
       notify(
         ctx,
         `Forgetful ${runtime.config.enabled ? "on" : "off"}; ` +
           `capture ${runtime.config.captureMode}; scope ${runtime.config.scope}; ` +
           `model ${modelToString(runtime.config.model) ?? "not configured"}` +
-          `${conflictText}${diagnosticText}.`,
+          `${recallText}${conflictText}${diagnosticText}.`,
       );
       for (const warning of runtime.config.warnings.slice(0, 4))
         notify(ctx, warning, "warning");
