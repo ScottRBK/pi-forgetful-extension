@@ -43,6 +43,25 @@ test("knowledge read validation keeps list and content bounds distinct", () => {
   );
 });
 
+test("entity updates reject coercible types before preparing a write", realOptions, async (t) => {
+  const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t), timeoutMs: 4_000 });
+  const project = await client.createProject({
+    name: "Types", description: "Type validation", repo_name: "test/tools",
+  });
+  const entity = await client.knowledge.createEntity({
+    name: "API", entity_type: "System", project_ids: [project.id], tags: [], aka: [],
+  });
+  let preparedWrites = 0;
+
+  await assert.rejects(executeKnowledgeWrite(client, {
+    operation: "update_entity", entity_id: entity.id, entity_type: ["System"],
+  }, context(project.id), undefined, async () => { preparedWrites += 1; }),
+  /invalid/);
+
+  assert.equal(preparedWrites, 0);
+  assert.equal((await client.knowledge.getEntity(entity.id)).entity_type, "System");
+});
+
 test(
   "knowledge tools hydrate entity search results before scoped dedupe",
   realOptions,

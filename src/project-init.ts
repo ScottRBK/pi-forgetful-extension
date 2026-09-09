@@ -186,7 +186,7 @@ export async function initialiseProject(
     await client.listProjects(repoName, ctx.signal),
     repoName,
   );
-  if (!verified || verified.id !== result.id) {
+  if (verified?.id !== result.id) {
     throw new ProjectInitError(
       "The project was saved but its repository link could not be verified. " +
         "Run /forgetful project init again.",
@@ -237,7 +237,7 @@ export async function initialiseProjectForAgent(
     await client.listProjects(repoName, ctx.signal),
     repoName,
   );
-  if (!verified || verified.id !== result.id) {
+  if (verified?.id !== result.id) {
     throw new ProjectInitError(
       "The project was saved but its repository link could not be verified. " +
         "Run project init again.",

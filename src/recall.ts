@@ -8,7 +8,6 @@ import type {
   EvidenceEntry,
   Memory,
   MemoryModelClient,
-  ModelRequest,
   Project,
   Scope,
   SearchRequest,
@@ -396,8 +395,7 @@ function formatRecall(
     const budget = Math.min(MAX_RICH_RECALL_CHARS, remaining);
     knowledgeText = trim(expansion.text, Math.max(0, budget - header.length - 1));
     if (knowledgeText) {
-      lines.push(header);
-      lines.push(...knowledgeText.split("\n"));
+      lines.push(header, ...knowledgeText.split("\n"));
     }
   }
   if (recallPolicy.trim()) {
@@ -533,7 +531,8 @@ export class RecallService {
         expansion,
         formatted.knowledgeText,
       );
-    } catch (error) {
+    } catch {
+      // Recall is failure-open: convert planner/service failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
       return this.empty(request.scope, failureReason(deadline, request.signal));
     } finally {
@@ -607,7 +606,8 @@ export class RecallService {
         expansion,
         formatted.knowledgeText,
       );
-    } catch (error) {
+    } catch {
+      // Recall is failure-open: convert search failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
       return this.empty(request.scope, failureReason(deadline, request.signal));
     } finally {
@@ -638,6 +638,7 @@ export class RecallService {
         signal,
       );
     } catch {
+      // Rich knowledge is optional enrichment; core recall remains failure-open.
       return undefined;
     }
   }

@@ -618,6 +618,11 @@ export class ApiForgetfulClient implements ForgetfulClient {
     return `${this.baseUrl.toString().replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
   }
 
+  private responseByteLimit(method: string, url: URL): number {
+    return method === "GET" && /\/files\/[1-9]\d*$/.test(url.pathname)
+      ? this.maxFileResponseBytes : this.maxResponseBytes;
+  }
+
   private async request(
     pathOrUrl: string | URL,
     method: string,
@@ -654,8 +659,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
         signal: controller.signal,
         redirect: "error",
       });
-      const maxBytes = method === "GET" && /\/files\/[1-9][0-9]*$/.test(url.pathname)
-        ? this.maxFileResponseBytes : this.maxResponseBytes;
+      const maxBytes = this.responseByteLimit(method, url);
       const text = await this.readResponse(response, controller.signal, maxBytes);
       if (!expectedStatuses.includes(response.status)) {
         throw new ForgetfulHttpError(

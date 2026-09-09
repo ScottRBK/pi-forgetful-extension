@@ -148,8 +148,11 @@ const MAX_QUEUE_BYTES = 5 * 1024 * 1024;
 const MAX_PENDING_CONFLICTS = 100;
 const processMutationTails = new Map<string, Promise<void>>();
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+function jsonSnapshot<T>(value: T): T {
+  // Match persisted JSON, including omission of undefined patch fields. A structured clone
+  // retains those fields and could erase existing conflict values when applying a patch.
+  const serialized = JSON.stringify(value);
+  return JSON.parse(serialized) as T;
 }
 
 function nowIso(now: () => Date): string {
@@ -603,7 +606,7 @@ export class DurableQueueStore {
         id,
         dedupeKey: key,
         binding: identity,
-        snapshot: clone(safeSnapshot),
+        snapshot: jsonSnapshot(safeSnapshot),
         status: "pending",
         attempts: 0,
         callCount: 0,
@@ -649,7 +652,7 @@ export class DurableQueueStore {
     }
     return this.mutate((state) => {
       this.prune(state);
-      return { value: clone(this.updateWatermark(state, value)) };
+      return { value: jsonSnapshot(this.updateWatermark(state, value)) };
     });
   }
 
@@ -658,7 +661,7 @@ export class DurableQueueStore {
     branchId: string,
   ): Promise<QueueWatermark> {
     const state = await this.readState();
-    return clone(
+    return jsonSnapshot(
       state.watermarks[contextKey(sessionId, branchId)] ?? {
         sessionId,
         branchId,
@@ -680,7 +683,7 @@ export class DurableQueueStore {
     identity: QueueIdentity = this.defaultIdentity(),
   ): Promise<QueueJob[]> {
     const state = await this.readState();
-    return clone(
+    return jsonSnapshot(
       state.jobs.filter(
         (job) =>
           identityMatches(job, identity) &&
@@ -691,7 +694,7 @@ export class DurableQueueStore {
 
   async listJobs(identity?: QueueIdentity): Promise<QueueJob[]> {
     const state = await this.readState();
-    return clone(
+    return jsonSnapshot(
       identity
         ? state.jobs.filter((job) => identityMatches(job, identity))
         : state.jobs,
@@ -701,7 +704,7 @@ export class DurableQueueStore {
   async getJob(jobId: string): Promise<QueueJob | undefined> {
     const state = await this.readState();
     const job = state.jobs.find((item) => item.id === jobId);
-    return job ? clone(job) : undefined;
+    return job ? jsonSnapshot(job) : undefined;
   }
 
   async claimNext(
@@ -727,7 +730,7 @@ export class DurableQueueStore {
           continue;
         }
         this.claimJob(job);
-        return { value: clone(job) };
+        return { value: jsonSnapshot(job) };
       }
       return { value: undefined, changed };
     });
@@ -795,13 +798,13 @@ export class DurableQueueStore {
       if (patch.callCount !== undefined) job.callCount = patch.callCount;
       if (patch.extractedCandidates !== undefined) {
         job.extractedCandidates = sanitizeValue(
-          clone(patch.extractedCandidates),
+          jsonSnapshot(patch.extractedCandidates),
         ) as unknown[];
       }
       if (patch.candidateOutcomes) {
         job.candidateOutcomes = {
           ...job.candidateOutcomes,
-          ...sanitizeOutcomeMap(clone(patch.candidateOutcomes)),
+          ...sanitizeOutcomeMap(jsonSnapshot(patch.candidateOutcomes)),
         };
       }
       if (patch.lastError !== undefined)
@@ -812,7 +815,7 @@ export class DurableQueueStore {
       if (job.status === "complete" || job.status === "failed") {
         job.snapshot = { ...job.snapshot, entries: [] as EvidenceEntry[] };
       }
-      return { value: clone(job) };
+      return { value: jsonSnapshot(job) };
     });
   }
 
@@ -824,7 +827,7 @@ export class DurableQueueStore {
     return this.mutate((state) => {
       this.prune(state);
       const existing = state.conflicts.find((item) => item.id === conflict.id);
-      if (existing) return { value: clone(existing), changed: false };
+      if (existing) return { value: jsonSnapshot(existing), changed: false };
       if (
         state.conflicts.filter((item) => item.status === "pending").length >=
         MAX_PENDING_CONFLICTS
@@ -834,20 +837,20 @@ export class DurableQueueStore {
         );
       }
       const bounded = sanitizeValue({
-        ...clone(conflict),
+        ...jsonSnapshot(conflict),
         reason: scrubDiagnostic(conflict.reason),
         evidence: conflict.evidence.slice(0, 8).map(scrubDiagnostic),
         updatedAt: nowIso(this.now),
       }) as PendingConflict;
       state.conflicts.push(bounded);
-      return { value: clone(bounded) };
+      return { value: jsonSnapshot(bounded) };
     });
   }
 
   async getConflict(conflictId: string): Promise<PendingConflict | undefined> {
     const state = await this.readState();
     const conflict = state.conflicts.find((item) => item.id === conflictId);
-    return conflict ? clone(conflict) : undefined;
+    return conflict ? jsonSnapshot(conflict) : undefined;
   }
 
   async pendingConflicts(
@@ -856,7 +859,7 @@ export class DurableQueueStore {
     branchId?: string,
   ): Promise<PendingConflict[]> {
     const state = await this.readState();
-    return clone(
+    return jsonSnapshot(
       state.conflicts.filter(
         (conflict) =>
           conflict.status === "pending" &&
@@ -882,13 +885,13 @@ export class DurableQueueStore {
     return this.mutate((state) => {
       const conflict = state.conflicts.find((item) => item.id === conflictId);
       if (!conflict) throw new Error(`Unknown pending conflict: ${conflictId}`);
-      Object.assign(conflict, sanitizeValue(clone(patch)), {
+      Object.assign(conflict, sanitizeValue(jsonSnapshot(patch)), {
         updatedAt: nowIso(this.now),
       });
       if (conflict.status !== "pending") {
         conflict.evidence = conflict.evidence.slice(0, 2).map(scrubDiagnostic);
       }
-      return { value: clone(conflict) };
+      return { value: jsonSnapshot(conflict) };
     });
   }
 

@@ -49,10 +49,7 @@ import {
   resolveMemoryModel,
 } from "./model.ts";
 import { isMemoryOperation, sanitizeText } from "./privacy.ts";
-import {
-  buildCaptureSnapshot,
-  type CaptureSnapshotWithStatus,
-} from "./snapshot.ts";
+import { buildCaptureSnapshot } from "./snapshot.ts";
 import {
   RecallService,
   type DeeperRecallRequest,
@@ -104,7 +101,7 @@ const FORGETFUL_AUTH_OPTIONS = [
   "Unauthenticated",
   "Bearer token from environment variable",
 ] as const;
-const ENVIRONMENT_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ENVIRONMENT_VARIABLE_NAME = /^[A-Za-z_]\w*$/;
 
 function setupEndpointSuggestion(value: string): string {
   try {
@@ -209,7 +206,7 @@ export interface CaptureServicePort {
   checkpoint?(options?: {
     sessionId?: string;
     branchId?: string;
-  }): Promise<unknown> | unknown;
+  }): unknown;
   advanceWatermark?(update: {
     sessionId: string;
     branchId: string;
@@ -430,9 +427,7 @@ function resolutionEvidence(
 ): EvidenceEntry[] {
   const entries: EvidenceEntry[] = [];
   let budget = 12_000;
-  for (const entry of [
-    ...ctx.sessionManager.getBranch().slice(-40),
-  ].reverse()) {
+  for (const entry of ctx.sessionManager.getBranch().slice(-40).reverse()) {
     if (budget <= 0 || entry.type !== "message") continue;
     const message = entry.message as unknown as {
       role?: string;
@@ -536,7 +531,7 @@ function defaultWorkContext(
 export function canonicalRepository(remote: string): string | undefined {
   if (remote.length > 500) return undefined;
   const value = remote.trim().replace(/\.git$/, "");
-  const scp = value.match(/^[^@]+@([^:]+):(.+)$/);
+  const scp = /^[^@]+@([^:]+):(.+)$/.exec(value);
   if (scp) {
     const host = scp[1].toLowerCase();
     const path = scp[2].replace(/^\/+/, "");
@@ -682,6 +677,10 @@ function diagnosticSourceIds(value: unknown): string {
     .join(",");
 }
 
+function claimText(value: unknown): string {
+  return typeof value === "string" ? value : "unknown";
+}
+
 function diagnosticCandidateDetail(
   value: unknown,
   stages: Map<string, number>,
@@ -695,9 +694,9 @@ function diagnosticCandidateDetail(
   }
   const sourceIds = diagnosticSourceIds(item.sourceEntryIds);
   const destination =
-    item.destinationProjectId === undefined
-      ? ""
-      : `project:${String(item.destinationProjectId).slice(0, 20)}`;
+    typeof item.destinationProjectId === "number"
+      ? `project:${String(item.destinationProjectId).slice(0, 20)}`
+      : "";
   const detail = [
     typeof item.id === "string"
       ? sanitizeText(item.id).slice(0, 100)
@@ -846,11 +845,11 @@ export function createForgetfulExtension(
           "old claim: " +
             (typeof conflict.oldClaim === "string"
               ? conflict.oldClaim
-              : String(oldMemory?.content ?? "unknown")),
+              : claimText(oldMemory?.content)),
           "proposed claim: " +
             (typeof conflict.newClaim === "string"
               ? conflict.newClaim
-              : String(candidate?.content ?? "unknown")),
+              : claimText(candidate?.content)),
           "destination project: " +
             (typeof conflict.destinationProjectId === "number"
               ? conflict.destinationProjectId
@@ -859,7 +858,7 @@ export function createForgetfulExtension(
             (Array.isArray(conflict.sourceEntryIds)
               ? conflict.sourceEntryIds.join(", ")
               : "unknown"),
-          `candidate title: ${String(candidate?.title ?? "unknown")}`,
+          `candidate title: ${claimText(candidate?.title)}`,
           "evidence: " +
             (Array.isArray(conflict.evidence)
               ? conflict.evidence.join(" | ")
@@ -1970,19 +1969,10 @@ export function createForgetfulExtension(
       },
     });
 
-    const handleStatusCommand = async (
+    const pendingConflictStatus = async (
       ctx: ExtensionContext,
       runtime: Runtime,
-    ): Promise<void> => {
-      // Status can inspect the repository link even before a model is configured.
-      if (!runtime.context.project && runtime.client) {
-        const context = await discoverWorkContext(pi, ctx, runtime.branchId);
-        if (context.repoName) {
-          const enriched = await enrichRuntimeContext(context, runtime.client);
-          if (state.runtime === runtime) runtime.context = enriched;
-        }
-      }
-      let conflictText = "";
+    ): Promise<string> => {
       if (
         runtime.config.debug &&
         runtime.config.enabled &&
@@ -2002,12 +1992,15 @@ export function createForgetfulExtension(
                 ctx,
               ),
           ).length;
-          conflictText = `; pending conflicts ${active}`;
+          return `; pending conflicts ${active}`;
         } catch {
-          conflictText = "; pending conflicts unavailable";
+          return "; pending conflicts unavailable";
         }
       }
-      let diagnosticText = "";
+      return "";
+    };
+
+    const captureDiagnosticStatus = async (runtime: Runtime): Promise<string> => {
       if (
         runtime.config.debug &&
         runtime.config.enabled &&
@@ -2017,11 +2010,28 @@ export function createForgetfulExtension(
           const diagnostics = await runtime.capture.diagnostics({
             sessionId: runtime.sessionId,
           });
-          diagnosticText = diagnosticSummary(diagnostics);
+          return diagnosticSummary(diagnostics);
         } catch {
-          diagnosticText = "; diagnostics unavailable";
+          return "; diagnostics unavailable";
         }
       }
+      return "";
+    };
+
+    const handleStatusCommand = async (
+      ctx: ExtensionContext,
+      runtime: Runtime,
+    ): Promise<void> => {
+      // Status can inspect the repository link even before a model is configured.
+      if (!runtime.context.project && runtime.client) {
+        const context = await discoverWorkContext(pi, ctx, runtime.branchId);
+        if (context.repoName) {
+          const enriched = await enrichRuntimeContext(context, runtime.client);
+          if (state.runtime === runtime) runtime.context = enriched;
+        }
+      }
+      const conflictText = await pendingConflictStatus(ctx, runtime);
+      const diagnosticText = await captureDiagnosticStatus(runtime);
       const recallText = runtime.lastRecall
         ? `; last recall ${recallActivitySummary(runtime.lastRecall)}`
         : "";

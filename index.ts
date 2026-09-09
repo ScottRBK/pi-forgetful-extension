@@ -2,14 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
-import {
-  createForgetfulExtension,
-  type CaptureServicePort,
-  type ExtensionWorkContext,
-  type ForgetfulExtensionDependencies,
-  type ForgetfulExtensionOptions,
-  type RecallServicePort,
-} from "./src/extension.ts";
+import { createForgetfulExtension } from "./src/extension.ts";
 
 export {
   createForgetfulExtension,
@@ -18,7 +11,7 @@ export {
   type ForgetfulExtensionDependencies,
   type ForgetfulExtensionOptions,
   type RecallServicePort,
-};
+} from "./src/extension.ts";
 
 /** Pi loads the default export as the extension factory itself. */
 const defaultExtension: ExtensionFactory = (pi: ExtensionAPI) =>

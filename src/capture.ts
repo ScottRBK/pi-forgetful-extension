@@ -9,8 +9,6 @@ import type {
   MemoryInput,
   MemoryModelClient,
   WorkContext,
-} from "./contracts.ts";
-import type {
   CodeArtifactInput,
   DocumentInput,
   EntityInput,
@@ -277,7 +275,7 @@ const OVERLAP_POLICY_CORE = [
 ].join(" ");
 
 function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  return structuredClone(value);
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -1647,12 +1645,9 @@ export class CaptureService {
     const action = outcome.action;
     const oldMemory = (record(outcome.existingMemory) ??
       record(outcome.oldMemory)) as Memory | undefined;
-    const finalStage =
-      action === "skip"
-        ? "skipped"
-        : action === "supersede"
-          ? "replacement-created"
-          : "created";
+    let finalStage: "created" | "skipped" | "replacement-created" = "created";
+    if (action === "skip") finalStage = "skipped";
+    if (action === "supersede") finalStage = "replacement-created";
     const written = await this.writeKnowledge(
       job,
       candidate,
@@ -2518,9 +2513,8 @@ export class CaptureService {
   private async ownedConflict(conflictId: string): Promise<PendingConflict> {
     const conflict = await this.queue.getConflict(conflictId);
     if (
-      !conflict ||
-      conflict.status !== "pending" ||
-      !conflict.binding.instanceId ||
+      conflict?.status !== "pending" ||
+      !conflict.binding?.instanceId ||
       conflict.binding.instanceId !== this.identity.instanceId ||
       conflict.binding.endpoint !== this.identity.endpoint ||
       conflict.binding.accountId !== this.identity.accountId ||
@@ -2771,21 +2765,22 @@ export class CaptureService {
     const persistedOutcome = sourceJob
       ? record(sourceJob.candidateOutcomes[target.candidate.id])
       : undefined;
+    const knowledgeOutcome = {
+      ...persistedOutcome,
+      stage: "replacement-created",
+      action: "supersede",
+      oldMemoryId: target.oldMemory.id,
+      oldMemory: sanitizeValue(target.oldMemory),
+      replacementId,
+      destinationProjectId: conflict.destinationProjectId,
+      reason: resolution.reason,
+    };
     const knowledgeJob = await this.writeKnowledge(
       writeJob,
       target.candidate,
       conflict.destinationProjectId,
       replacementId,
-      {
-        ...(persistedOutcome ?? {}),
-        stage: "replacement-created",
-        action: "supersede",
-        oldMemoryId: target.oldMemory.id,
-        oldMemory: sanitizeValue(target.oldMemory),
-        replacementId,
-        destinationProjectId: conflict.destinationProjectId,
-        reason: resolution.reason,
-      },
+      knowledgeOutcome,
       "replacement-created",
     );
     const applied = await this.applySupersession(

@@ -1060,6 +1060,32 @@ test("startup recovery and escalation handoff stay on the originating branch", a
   }
 });
 
+test("conflict handoff renders malformed claims as unknown", async () => {
+  const fixture = await harness({
+    conflicts: [{
+      id: "malformed-conflict",
+      sessionId: "session-1",
+      branchId: "session-1:root",
+      sourceEntryIds: [],
+      oldMemory: { content: { unexpected: true } },
+      candidate: { title: [], content: { unexpected: true } },
+    }],
+  });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
+
+    assert.equal(fixture.sentMessages.length, 1);
+    const content = (fixture.sentMessages[0]!.message as { content: string }).content;
+    assert.match(content, /old claim: unknown/);
+    assert.match(content, /proposed claim: unknown/);
+    assert.match(content, /candidate title: unknown/);
+    assert.doesNotMatch(content, /\[object Object\]/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("a sibling branch cannot inherit a conflict from the shared baseline", async () => {
   const fixture = await harness();
   try {
@@ -1321,6 +1347,28 @@ test("debug status reports bounded capture diagnostics", async () => {
       fixture.notifications.some((message) => /candidate-1/.test(message)),
     );
     assert.ok(fixture.notifications.some((message) => /overlap/.test(message)));
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug status omits malformed project IDs", async () => {
+  const fixture = await harness();
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.capture.diagnostics = async () => ({
+      jobs: [{ candidates: [
+        { id: "invalid", stage: "overlap", destinationProjectId: { unexpected: true } },
+        { id: "valid", stage: "overlap", destinationProjectId: 7 },
+      ] }],
+    });
+
+    await fixture.command("debug on");
+    await fixture.command("status");
+
+    const output = fixture.notifications.join("\n");
+    assert.match(output, /project:7/);
+    assert.doesNotMatch(output, /\[object Object\]/);
   } finally {
     await fixture.cleanup();
   }

@@ -79,6 +79,19 @@ test("DurableQueueStore persists one fixed snapshot and deduplicates a settled e
   assert.equal((await stat(join(directory, "queue.json"))).mode & 0o777, 0o600);
 });
 
+test("undefined conflict patch fields preserve the persisted decision", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-queue-patch-"));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  await queue.addConflict(pendingConflict("preserve"));
+
+  const updated = await queue.updateConflict("preserve", { reason: undefined });
+  const reopened = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const persisted = await reopened.getConflict("preserve");
+
+  assert.equal(updated.reason, "Needs review");
+  assert.equal(persisted?.reason, "Needs review");
+});
+
 test("the queue redacts known sensitive snapshot text before persistence", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-queue-privacy-"),

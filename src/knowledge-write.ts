@@ -101,6 +101,13 @@ export type KnowledgeMemoryReader = (
   signal?: AbortSignal,
 ) => Promise<Memory>;
 
+type KnowledgeWriteSave = () => Promise<void>;
+
+interface KnowledgeAttachmentIds {
+  documentIds: number[];
+  codeArtifactIds: number[];
+}
+
 function copyState(value: KnowledgeWriteState): KnowledgeWriteState {
   return {
     entities: value.entities.map((receipt) => ({ ...receipt })),
@@ -123,8 +130,14 @@ function normalized(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
+function compareCanonicalStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 function sortedStrings(values: string[] | undefined): string[] {
-  return [...(values ?? [])].map(normalized).sort();
+  return [...(values ?? [])].map(normalized).sort(compareCanonicalStrings);
 }
 
 function provenance(value: {
@@ -415,6 +428,445 @@ export class KnowledgeWriter {
     }
   }
 
+  private validatePlan(plan: KnowledgeWritePlan): void {
+    if (!positiveId(plan.projectId)) {
+      throw new Error("Invalid knowledge project ID");
+    }
+    if (!positiveId(plan.memoryId)) {
+      throw new Error("Invalid knowledge memory ID");
+    }
+    if (!plan.operationId.trim()) {
+      throw new Error("Missing knowledge operation ID");
+    }
+  }
+
+  private async findEntity(
+    resource: KnowledgeEntityPlan,
+    signal?: AbortSignal,
+  ): Promise<Entity | undefined> {
+    const matches = await this.client.searchEntities(
+      resource.input.name,
+      100,
+      signal,
+    );
+    const existingMatches = new Map<number, Entity>();
+    for (const match of matches) {
+      if (!sameEntityIdentity(resource.input, match)) continue;
+      const full = await this.client.getEntity(match.id, signal);
+      if (entityMatches(resource.input, full)) {
+        existingMatches.set(full.id, full);
+      }
+    }
+    if (existingMatches.size > 1) {
+      throw new Error(
+        `Ambiguous knowledge entity identity for ${resource.key}`,
+      );
+    }
+    return [...existingMatches.values()][0];
+  }
+
+  private async ensureEntityProjects(
+    entity: Entity,
+    input: EntityInput,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<Entity> {
+    const projectIds = [
+      ...new Set([...entity.project_ids, ...input.project_ids]),
+    ];
+    if (projectIds.length === entity.project_ids.length) return entity;
+    await beforeWrite?.();
+    return this.client.updateEntity(entity.id, { project_ids: projectIds }, signal);
+  }
+
+  private async writeEntity(
+    resource: KnowledgeEntityPlan,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<Entity> {
+    const existing = await this.findEntity(resource, signal);
+    if (existing) {
+      return this.ensureEntityProjects(
+        existing,
+        resource.input,
+        signal,
+        beforeWrite,
+      );
+    }
+    await beforeWrite?.();
+    const created = await this.client.createEntity(resource.input, signal);
+    const entity = await this.client.getEntity(created.id, signal);
+    return this.ensureEntityProjects(
+      entity,
+      resource.input,
+      signal,
+      beforeWrite,
+    );
+  }
+
+  private async writeEntities(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const resource of plan.entities ?? []) {
+      if (positiveId(stateId(state.entities, resource.key))) continue;
+      const entity = await this.writeEntity(resource, signal, beforeWrite);
+      stateWithNumber(state.entities, resource.key, entity.id);
+      await save();
+    }
+  }
+
+  private async writeDocument(
+    resource: KnowledgeDocumentPlan,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<Document> {
+    const existing = await findDocument(this.client, resource.input, signal);
+    if (existing) return existing;
+    await beforeWrite?.();
+    return this.client.createDocument(resource.input, signal);
+  }
+
+  private async writeDocuments(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const resource of plan.documents ?? []) {
+      if (positiveId(stateId(state.documents, resource.key))) continue;
+      const document = await this.writeDocument(resource, signal, beforeWrite);
+      stateWithNumber(state.documents, resource.key, document.id);
+      await save();
+    }
+  }
+
+  private async writeCodeArtifact(
+    resource: KnowledgeCodeArtifactPlan,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<CodeArtifact> {
+    const existing = await findCodeArtifact(
+      this.client,
+      resource.input,
+      signal,
+    );
+    if (existing) return existing;
+    await beforeWrite?.();
+    return this.client.createCodeArtifact(resource.input, signal);
+  }
+
+  private async writeCodeArtifacts(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const resource of plan.codeArtifacts ?? []) {
+      if (positiveId(stateId(state.codeArtifacts, resource.key))) continue;
+      const artifact = await this.writeCodeArtifact(
+        resource,
+        signal,
+        beforeWrite,
+      );
+      stateWithNumber(state.codeArtifacts, resource.key, artifact.id);
+      await save();
+    }
+  }
+
+  private requestedAttachmentIds(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+  ): KnowledgeAttachmentIds {
+    return {
+      documentIds: uniqueIds(
+        [...(plan.existingDocumentIds ?? []), ...stateIds(state.documents)],
+        "document",
+      ),
+      codeArtifactIds: uniqueIds(
+        [
+          ...(plan.existingCodeArtifactIds ?? []),
+          ...stateIds(state.codeArtifacts),
+        ],
+        "code artifact",
+      ),
+    };
+  }
+
+  private attachmentIds(
+    memory: Memory,
+    requested: KnowledgeAttachmentIds,
+  ): KnowledgeAttachmentIds {
+    return {
+      documentIds: uniqueIds(
+        [...(memory.document_ids ?? []), ...requested.documentIds],
+        "document",
+      ),
+      codeArtifactIds: uniqueIds(
+        [...(memory.code_artifact_ids ?? []), ...requested.codeArtifactIds],
+        "code artifact",
+      ),
+    };
+  }
+
+  private attachmentsDiffer(
+    memory: Memory,
+    ids: KnowledgeAttachmentIds,
+  ): boolean {
+    return (
+      !sameIds(memory.document_ids, ids.documentIds) ||
+      !sameIds(memory.code_artifact_ids, ids.codeArtifactIds)
+    );
+  }
+
+  private ensureMemoryCanReceiveAttachments(memory: Memory): void {
+    if (memory.project_ids.length > 1) {
+      throw new Error("Shared memories cannot receive rich attachments");
+    }
+  }
+
+  private attachmentPatch(ids: KnowledgeAttachmentIds): {
+    document_ids?: number[];
+    code_artifact_ids?: number[];
+  } {
+    return {
+      ...(ids.documentIds.length ? { document_ids: ids.documentIds } : {}),
+      ...(ids.codeArtifactIds.length
+        ? { code_artifact_ids: ids.codeArtifactIds }
+        : {}),
+    };
+  }
+
+  private async writeAttachments(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    const memory = await this.currentMemory(plan, signal);
+    const requested = this.requestedAttachmentIds(plan, state);
+    const ids = this.attachmentIds(memory, requested);
+    await this.validateAttachments(
+      ids.documentIds,
+      ids.codeArtifactIds,
+      plan.projectId,
+      signal,
+    );
+
+    let updated = false;
+    if (this.attachmentsDiffer(memory, ids)) {
+      this.ensureMemoryCanReceiveAttachments(memory);
+      const refreshedMemory = await this.currentMemory(plan, signal);
+      const refreshedIds = this.attachmentIds(refreshedMemory, requested);
+      await this.validateAttachments(
+        refreshedIds.documentIds,
+        refreshedIds.codeArtifactIds,
+        plan.projectId,
+        signal,
+      );
+      this.ensureMemoryCanReceiveAttachments(refreshedMemory);
+      if (this.attachmentsDiffer(refreshedMemory, refreshedIds)) {
+        await beforeWrite?.();
+        await this.client.updateMemory(
+          plan.memoryId,
+          this.attachmentPatch(refreshedIds),
+          signal,
+        );
+        updated = true;
+      }
+    }
+    if (!state.attachmentsApplied || updated) {
+      state.attachmentsApplied = true;
+      await save();
+    }
+  }
+
+  private async writeRelationship(
+    resource: KnowledgeRelationshipPlan,
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<EntityRelationship> {
+    const sourceId = stateId(state.entities, resource.sourceEntityKey);
+    const targetId = stateId(state.entities, resource.targetEntityKey);
+    if (!positiveId(sourceId) || !positiveId(targetId)) {
+      throw new Error(`Relationship references an unknown entity: ${resource.key}`);
+    }
+    await this.entityInProject(sourceId, plan.projectId, signal);
+    await this.entityInProject(targetId, plan.projectId, signal);
+    const relationships = await this.client.getRelationships(sourceId, signal);
+    const existing = relationships.find(
+      (relationship) =>
+        relationship.source_entity_id === sourceId &&
+        relationship.target_entity_id === targetId &&
+        relationship.relationship_type === resource.input.relationship_type,
+    );
+    if (existing) return existing;
+    if (positiveId(stateId(state.relationships, resource.key))) {
+      state.relationships = state.relationships.filter(
+        (receipt) => receipt.key !== resource.key,
+      );
+    }
+    await beforeWrite?.();
+    return this.client.createRelationship(
+      {
+        ...resource.input,
+        source_entity_id: sourceId,
+        target_entity_id: targetId,
+      },
+      signal,
+    );
+  }
+
+  private async writeRelationships(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const resource of plan.relationships ?? []) {
+      const relationship = await this.writeRelationship(
+        resource,
+        plan,
+        state,
+        signal,
+        beforeWrite,
+      );
+      stateWithNumber(state.relationships, resource.key, relationship.id);
+      await save();
+    }
+  }
+
+  private async writeEntityMemoryLink(
+    resource: KnowledgeEntityMemoryLinkPlan,
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    const entityId = stateId(state.entities, resource.entityKey);
+    if (!positiveId(entityId)) {
+      throw new Error(
+        `Memory link references an unknown entity: ${resource.entityKey}`,
+      );
+    }
+    await this.entityInProject(entityId, plan.projectId, signal);
+    const key = `${resource.entityKey}:${plan.memoryId}`;
+    const linked = await this.client.getEntityMemories(entityId, signal);
+    const alreadyLinked = linked.some((memory) => memory.id === plan.memoryId);
+    if (hasValue(state.entityMemoryLinks, key) && alreadyLinked) return;
+    if (alreadyLinked) {
+      state.entityMemoryLinks.push(key);
+      await save();
+      return;
+    }
+    await this.currentMemory(plan, signal);
+    await beforeWrite?.();
+    await this.client.linkEntityMemory(entityId, plan.memoryId, signal);
+    if (!hasValue(state.entityMemoryLinks, key)) {
+      state.entityMemoryLinks.push(key);
+    }
+    await save();
+  }
+
+  private async writeEntityMemoryLinks(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const resource of plan.entityMemoryLinks ?? []) {
+      await this.writeEntityMemoryLink(
+        resource,
+        plan,
+        state,
+        save,
+        signal,
+        beforeWrite,
+      );
+    }
+  }
+
+  private async writeLinkedMemory(
+    linkedMemoryId: number,
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    if (!positiveId(linkedMemoryId)) {
+      throw new Error("Invalid linked memory ID");
+    }
+    const key = `${plan.memoryId}:${linkedMemoryId}`;
+    if (!this.readMemory) {
+      throw new Error("Linked memories require a memory validation reader");
+    }
+    let sourceMemory = await this.currentMemory(plan, signal);
+    const linkedMemory = await this.readMemory(linkedMemoryId, signal);
+    if (linkedMemory.is_obsolete) {
+      throw new Error("Linked memory is obsolete");
+    }
+    if (!linkedMemory.project_ids.includes(plan.projectId)) {
+      throw new Error("Linked memory is outside the destination project");
+    }
+    const sourceLinks = () => sourceMemory.linked_memory_ids ?? [];
+    if (
+      hasValue(state.linkedMemories, key) &&
+      sourceLinks().includes(linkedMemoryId)
+    ) {
+      return;
+    }
+    if (sourceLinks().includes(linkedMemoryId)) {
+      state.linkedMemories.push(key);
+      await save();
+      return;
+    }
+    sourceMemory = await this.currentMemory(plan, signal);
+    if (sourceLinks().includes(linkedMemoryId)) {
+      if (!hasValue(state.linkedMemories, key)) {
+        state.linkedMemories.push(key);
+      }
+      await save();
+      return;
+    }
+    await beforeWrite?.();
+    await this.client.linkMemories(plan.memoryId, [linkedMemoryId], signal);
+    if (!hasValue(state.linkedMemories, key)) {
+      state.linkedMemories.push(key);
+    }
+    await save();
+  }
+
+  private async writeLinkedMemories(
+    plan: KnowledgeWritePlan,
+    state: KnowledgeWriteState,
+    save: KnowledgeWriteSave,
+    signal: AbortSignal | undefined,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    for (const linkedMemoryId of new Set(plan.linkedMemoryIds ?? [])) {
+      await this.writeLinkedMemory(
+        linkedMemoryId,
+        plan,
+        state,
+        save,
+        signal,
+        beforeWrite,
+      );
+    }
+  }
+
   async execute(
     plan: KnowledgeWritePlan,
     previous: Partial<KnowledgeWriteState> = {},
@@ -422,284 +874,22 @@ export class KnowledgeWriter {
     signal?: AbortSignal,
     beforeWrite?: KnowledgeWriteGuard,
   ): Promise<KnowledgeWriteState> {
-    if (!positiveId(plan.projectId)) throw new Error("Invalid knowledge project ID");
-    if (!positiveId(plan.memoryId)) throw new Error("Invalid knowledge memory ID");
-    if (!plan.operationId.trim()) throw new Error("Missing knowledge operation ID");
-
+    this.validatePlan(plan);
     const state = normalizedState(previous);
     await this.currentMemory(plan, signal);
     await this.validateReceipts(state, plan, signal);
     const save = async (): Promise<void> => {
       if (checkpoint) await checkpoint(copyState(state));
     };
-
-    for (const resource of plan.entities ?? []) {
-      if (positiveId(stateId(state.entities, resource.key))) continue;
-      const matches = await this.client.searchEntities(
-        resource.input.name,
-        100,
-        signal,
-      );
-      const existingMatches = new Map<number, Entity>();
-      for (const match of matches) {
-        if (!sameEntityIdentity(resource.input, match)) continue;
-        const full = await this.client.getEntity(match.id, signal);
-        if (entityMatches(resource.input, full)) {
-          existingMatches.set(full.id, full);
-        }
-      }
-      if (existingMatches.size > 1) {
-        throw new Error(
-          `Ambiguous knowledge entity identity for ${resource.key}`,
-        );
-      }
-      const existing = [...existingMatches.values()][0];
-      let entity: Entity;
-      if (existing) {
-        const projectIds = [
-          ...new Set([...existing.project_ids, ...resource.input.project_ids]),
-        ];
-        if (projectIds.length !== existing.project_ids.length) {
-          await beforeWrite?.();
-          entity = await this.client.updateEntity(
-            existing.id,
-            { project_ids: projectIds },
-            signal,
-          );
-        } else {
-          entity = existing;
-        }
-      } else {
-        await beforeWrite?.();
-        const created = await this.client.createEntity(resource.input, signal);
-        entity = await this.client.getEntity(created.id, signal);
-        const projectIds = [
-          ...new Set([...entity.project_ids, ...resource.input.project_ids]),
-        ];
-        if (projectIds.length !== entity.project_ids.length) {
-          await beforeWrite?.();
-          entity = await this.client.updateEntity(
-            entity.id,
-            { project_ids: projectIds },
-            signal,
-          );
-        }
-      }
-      stateWithNumber(state.entities, resource.key, entity.id);
-      await save();
-    }
-
-    for (const resource of plan.documents ?? []) {
-      if (positiveId(stateId(state.documents, resource.key))) continue;
-      const existing = await findDocument(this.client, resource.input, signal);
-      if (!existing) await beforeWrite?.();
-      const document =
-        existing ?? (await this.client.createDocument(resource.input, signal));
-      stateWithNumber(state.documents, resource.key, document.id);
-      await save();
-    }
-
-    for (const resource of plan.codeArtifacts ?? []) {
-      if (positiveId(stateId(state.codeArtifacts, resource.key))) continue;
-      const existing = await findCodeArtifact(
-        this.client,
-        resource.input,
-        signal,
-      );
-      if (!existing) await beforeWrite?.();
-      const artifact =
-        existing ??
-        (await this.client.createCodeArtifact(resource.input, signal));
-      stateWithNumber(state.codeArtifacts, resource.key, artifact.id);
-      await save();
-    }
-
+    await this.writeEntities(plan, state, save, signal, beforeWrite);
+    await this.writeDocuments(plan, state, save, signal, beforeWrite);
+    await this.writeCodeArtifacts(plan, state, save, signal, beforeWrite);
     if (plan.attachResources) {
-      let memory = await this.currentMemory(plan, signal);
-      const requestedDocumentIds = uniqueIds(
-        [...(plan.existingDocumentIds ?? []), ...stateIds(state.documents)],
-        "document",
-      );
-      const requestedCodeArtifactIds = uniqueIds(
-        [
-          ...(plan.existingCodeArtifactIds ?? []),
-          ...stateIds(state.codeArtifacts),
-        ],
-        "code artifact",
-      );
-      let documentIds = uniqueIds(
-        [...(memory.document_ids ?? []), ...requestedDocumentIds],
-        "document",
-      );
-      let codeArtifactIds = uniqueIds(
-        [...(memory.code_artifact_ids ?? []), ...requestedCodeArtifactIds],
-        "code artifact",
-      );
-      await this.validateAttachments(
-        documentIds,
-        codeArtifactIds,
-        plan.projectId,
-        signal,
-      );
-
-      let updated = false;
-      if (
-        !sameIds(memory.document_ids, documentIds) ||
-        !sameIds(memory.code_artifact_ids, codeArtifactIds)
-      ) {
-        if (memory.project_ids.length > 1) {
-          throw new Error("Shared memories cannot receive rich attachments");
-        }
-        memory = await this.currentMemory(plan, signal);
-        documentIds = uniqueIds(
-          [...(memory.document_ids ?? []), ...requestedDocumentIds],
-          "document",
-        );
-        codeArtifactIds = uniqueIds(
-          [...(memory.code_artifact_ids ?? []), ...requestedCodeArtifactIds],
-          "code artifact",
-        );
-        await this.validateAttachments(
-          documentIds,
-          codeArtifactIds,
-          plan.projectId,
-          signal,
-        );
-        if (memory.project_ids.length > 1) {
-          throw new Error("Shared memories cannot receive rich attachments");
-        }
-        if (
-          !sameIds(memory.document_ids, documentIds) ||
-          !sameIds(memory.code_artifact_ids, codeArtifactIds)
-        ) {
-          await beforeWrite?.();
-          await this.client.updateMemory(
-            plan.memoryId,
-            {
-              ...(documentIds.length ? { document_ids: documentIds } : {}),
-              ...(codeArtifactIds.length
-                ? { code_artifact_ids: codeArtifactIds }
-                : {}),
-            },
-            signal,
-          );
-          updated = true;
-        }
-      }
-      if (!state.attachmentsApplied || updated) {
-        state.attachmentsApplied = true;
-        await save();
-      }
+      await this.writeAttachments(plan, state, save, signal, beforeWrite);
     }
-
-    for (const resource of plan.relationships ?? []) {
-      const sourceId = stateId(state.entities, resource.sourceEntityKey);
-      const targetId = stateId(state.entities, resource.targetEntityKey);
-      if (!positiveId(sourceId) || !positiveId(targetId)) {
-        throw new Error(`Relationship references an unknown entity: ${resource.key}`);
-      }
-      await this.entityInProject(sourceId, plan.projectId, signal);
-      await this.entityInProject(targetId, plan.projectId, signal);
-      const relationships = await this.client.getRelationships(sourceId, signal);
-      const existing = relationships.find(
-        (relationship) =>
-          relationship.source_entity_id === sourceId &&
-          relationship.target_entity_id === targetId &&
-          relationship.relationship_type === resource.input.relationship_type,
-      );
-      let relationship: EntityRelationship;
-      if (existing) {
-        relationship = existing;
-      } else {
-        if (positiveId(stateId(state.relationships, resource.key))) {
-          state.relationships = state.relationships.filter(
-            (receipt) => receipt.key !== resource.key,
-          );
-        }
-        await beforeWrite?.();
-        relationship = await this.client.createRelationship(
-          {
-            ...resource.input,
-            source_entity_id: sourceId,
-            target_entity_id: targetId,
-          },
-          signal,
-        );
-      }
-      stateWithNumber(state.relationships, resource.key, relationship.id);
-      await save();
-    }
-
-    for (const resource of plan.entityMemoryLinks ?? []) {
-      const entityId = stateId(state.entities, resource.entityKey);
-      if (!positiveId(entityId)) {
-        throw new Error(`Memory link references an unknown entity: ${resource.entityKey}`);
-      }
-      await this.entityInProject(entityId, plan.projectId, signal);
-      const key = `${resource.entityKey}:${plan.memoryId}`;
-      const linked = await this.client.getEntityMemories(entityId, signal);
-      if (
-        hasValue(state.entityMemoryLinks, key) &&
-        linked.some((memory) => memory.id === plan.memoryId)
-      ) {
-        continue;
-      }
-      if (linked.some((memory) => memory.id === plan.memoryId)) {
-        state.entityMemoryLinks.push(key);
-        await save();
-        continue;
-      }
-      await this.currentMemory(plan, signal);
-      await beforeWrite?.();
-      await this.client.linkEntityMemory(entityId, plan.memoryId, signal);
-      if (!hasValue(state.entityMemoryLinks, key)) {
-        state.entityMemoryLinks.push(key);
-      }
-      await save();
-    }
-
-    for (const linkedMemoryId of new Set(plan.linkedMemoryIds ?? [])) {
-      if (!positiveId(linkedMemoryId)) {
-        throw new Error("Invalid linked memory ID");
-      }
-      const key = `${plan.memoryId}:${linkedMemoryId}`;
-      if (!this.readMemory) {
-        throw new Error("Linked memories require a memory validation reader");
-      }
-      let sourceMemory = await this.currentMemory(plan, signal);
-      const linkedMemory = await this.readMemory(linkedMemoryId, signal);
-      if (linkedMemory.is_obsolete) {
-        throw new Error("Linked memory is obsolete");
-      }
-      if (!linkedMemory.project_ids.includes(plan.projectId)) {
-        throw new Error("Linked memory is outside the destination project");
-      }
-      if (
-        hasValue(state.linkedMemories, key) &&
-        (sourceMemory.linked_memory_ids ?? []).includes(linkedMemoryId)
-      ) {
-        continue;
-      }
-      if ((sourceMemory.linked_memory_ids ?? []).includes(linkedMemoryId)) {
-        state.linkedMemories.push(key);
-        await save();
-        continue;
-      }
-      sourceMemory = await this.currentMemory(plan, signal);
-      if ((sourceMemory.linked_memory_ids ?? []).includes(linkedMemoryId)) {
-        if (!hasValue(state.linkedMemories, key)) {
-          state.linkedMemories.push(key);
-        }
-        await save();
-        continue;
-      }
-      await beforeWrite?.();
-      await this.client.linkMemories(plan.memoryId, [linkedMemoryId], signal);
-      if (!hasValue(state.linkedMemories, key)) {
-        state.linkedMemories.push(key);
-      }
-      await save();
-    }
+    await this.writeRelationships(plan, state, save, signal, beforeWrite);
+    await this.writeEntityMemoryLinks(plan, state, save, signal, beforeWrite);
+    await this.writeLinkedMemories(plan, state, save, signal, beforeWrite);
 
     return copyState(state);
   }

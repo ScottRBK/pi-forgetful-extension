@@ -3,7 +3,7 @@ const REDACTED = "[redacted]";
 const credentialPatterns = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\bBearer\s+[a-z0-9._~+/-]+=*/gi,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,})\b/g,
   /\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}\b/g,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,

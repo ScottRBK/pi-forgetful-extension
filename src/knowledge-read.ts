@@ -37,6 +37,21 @@ export interface KnowledgeExpansionResult {
   fileIds: number[];
 }
 
+type RelationshipExpansion = {
+  relationship: EntityRelationship;
+  source: Entity;
+  target: Entity;
+};
+
+type LinkedMemoryExpansion = { entity: Entity; id: number; title: string };
+
+interface Attachments {
+  documents: Document[];
+  artifacts: CodeArtifact[];
+  files: FileSummary[];
+  fileIds: number[];
+}
+
 export type MemoryReader = (
   id: number,
   signal?: AbortSignal,
@@ -218,7 +233,7 @@ export class KnowledgeReadService {
       safeCall(() => this.client.getEntity(candidate.id, request.signal), request.signal)));
     return selected.map((candidate, index) => {
       const entity = hydrated[index];
-      if (entity && entity.id === candidate.id && validEntity(entity) &&
+      if (entity?.id === candidate.id && validEntity(entity) &&
           inEntityScope(entity, request.scope, request.projectId)) return entity;
       return inEntityScope(candidate, request.scope, request.projectId) ? candidate : undefined;
     }).filter((entity): entity is Entity => entity !== undefined);
@@ -227,9 +242,22 @@ export class KnowledgeReadService {
   private async findRelationships(
     entities: Entity[],
     request: KnowledgeExpansionRequest,
-  ): Promise<{ relationship: EntityRelationship; source: Entity; target: Entity }[]> {
+  ): Promise<RelationshipExpansion[]> {
+    const relationships = await this.collectRelationships(entities, request.signal);
+    const endpoints = await this.resolveRelationshipEndpoints(
+      entities,
+      relationships,
+      request.signal,
+    );
+    return this.formatRelationships(entities, relationships, endpoints, request);
+  }
+
+  private async collectRelationships(
+    entities: Entity[],
+    signal?: AbortSignal,
+  ): Promise<EntityRelationship[]> {
     const relationshipResults = await Promise.all(entities.map((entity) =>
-      safeCall(() => this.client.getRelationships(entity.id, request.signal), request.signal)));
+      safeCall(() => this.client.getRelationships(entity.id, signal), signal)));
     const relationships = new Map<number, EntityRelationship>();
     for (const result of relationshipResults) {
       for (const relationship of (result ?? []).slice(0, MAX_EXPANSION_RELATIONSHIPS)) {
@@ -238,22 +266,39 @@ export class KnowledgeReadService {
       }
       if (relationships.size >= MAX_EXPANSION_RELATIONSHIPS) break;
     }
+    return [...relationships.values()].slice(0, MAX_EXPANSION_RELATIONSHIPS);
+  }
+
+  private async resolveRelationshipEndpoints(
+    entities: Entity[],
+    relationships: EntityRelationship[],
+    signal?: AbortSignal,
+  ): Promise<Map<number, Entity>> {
     const endpoints = new Map(entities.map((entity) => [entity.id, entity]));
-    const endpointIds = [...relationships.values()].flatMap((relationship) => [
+    const endpointIds = relationships.flatMap((relationship) => [
       relationship.source_entity_id,
       relationship.target_entity_id,
     ]);
     const missingIds = [...new Set(endpointIds)].filter((id) => !endpoints.has(id));
     const fetched = await Promise.all(missingIds.map((id) =>
-      safeCall(() => this.client.getEntity(id, request.signal), request.signal)));
+      safeCall(() => this.client.getEntity(id, signal), signal)));
     for (let index = 0; index < missingIds.length; index += 1) {
       const entity = fetched[index];
-      if (entity && entity.id === missingIds[index] && validEntity(entity)) {
+      if (entity?.id === missingIds[index] && validEntity(entity)) {
         endpoints.set(entity.id, entity);
       }
     }
-    const result: { relationship: EntityRelationship; source: Entity; target: Entity }[] = [];
-    for (const relationship of [...relationships.values()].slice(0, MAX_EXPANSION_RELATIONSHIPS)) {
+    return endpoints;
+  }
+
+  private formatRelationships(
+    entities: Entity[],
+    relationships: EntityRelationship[],
+    endpoints: Map<number, Entity>,
+    request: KnowledgeExpansionRequest,
+  ): RelationshipExpansion[] {
+    const result: RelationshipExpansion[] = [];
+    for (const relationship of relationships) {
       const source = endpoints.get(relationship.source_entity_id);
       const target = endpoints.get(relationship.target_entity_id);
       if (!source || !target) continue;
@@ -268,26 +313,23 @@ export class KnowledgeReadService {
   private async findEntityMemories(
     entities: Entity[],
     request: KnowledgeExpansionRequest,
-  ): Promise<{ entity: Entity; id: number; title: string }[]> {
+  ): Promise<LinkedMemoryExpansion[]> {
     const linked = await Promise.all(entities.map((entity) =>
       safeCall(() => this.client.getEntityMemories(entity.id, request.signal), request.signal)));
-    const result: { entity: Entity; id: number; title: string }[] = [];
+    return this.collectEntityMemories(entities, linked, request);
+  }
+
+  private async collectEntityMemories(
+    entities: Entity[],
+    linked: ({ id: number; title: string }[] | undefined)[],
+    request: KnowledgeExpansionRequest,
+  ): Promise<LinkedMemoryExpansion[]> {
+    const result: LinkedMemoryExpansion[] = [];
     const seen = new Set<number>();
     for (let index = 0; index < linked.length; index += 1) {
       for (const item of (linked[index] ?? []).slice(0, MAX_ENTITY_MEMORIES_PER_ENTITY)) {
         if (!validId(item.id) || typeof item.title !== "string" || seen.has(item.id)) continue;
-        if (this.readMemory) {
-          const memory = await safeCall(
-            () => this.readMemory!(item.id, request.signal),
-            request.signal,
-          );
-          if (!memory || !validMemory(memory) ||
-              (request.scope === "project" && !memory.project_ids.includes(request.projectId!))) {
-            continue;
-          }
-        } else if (request.scope === "project") {
-          continue;
-        }
+        if (!await this.isAllowedEntityMemory(item.id, request)) continue;
         seen.add(item.id);
         result.push({ entity: entities[index], id: item.id, title: item.title });
         if (result.length >= MAX_EXPANSION_MEMORY_LINKS) return result;
@@ -296,12 +338,22 @@ export class KnowledgeReadService {
     return result;
   }
 
-  private async findAttachments(request: KnowledgeExpansionRequest): Promise<{
-    documents: Document[];
-    artifacts: CodeArtifact[];
-    files: FileSummary[];
-    fileIds: number[];
-  }> {
+  private async isAllowedEntityMemory(
+    id: number,
+    request: KnowledgeExpansionRequest,
+  ): Promise<boolean> {
+    if (!this.readMemory) return request.scope !== "project";
+    const memory = await safeCall(
+      () => this.readMemory!(id, request.signal),
+      request.signal,
+    );
+    return Boolean(
+      memory && validMemory(memory) &&
+      (request.scope !== "project" || memory.project_ids.includes(request.projectId!)),
+    );
+  }
+
+  private async findAttachments(request: KnowledgeExpansionRequest): Promise<Attachments> {
     const documentIds = [
       ...new Set(request.memories.flatMap((memory) => memory.document_ids ?? [])),
     ]
@@ -348,14 +400,9 @@ export class KnowledgeReadService {
 
   private formatExpansion(
     entities: Entity[],
-    relationships: { relationship: EntityRelationship; source: Entity; target: Entity }[],
-    linkedMemories: { entity: Entity; id: number; title: string }[],
-    attachments: {
-      documents: Document[];
-      artifacts: CodeArtifact[];
-      files: FileSummary[];
-      fileIds: number[];
-    },
+    relationships: RelationshipExpansion[],
+    linkedMemories: LinkedMemoryExpansion[],
+    attachments: Attachments,
   ): KnowledgeExpansionResult {
     const lines: string[] = [];
     const entityIds = entities.map((entity) => entity.id);
@@ -364,6 +411,26 @@ export class KnowledgeReadService {
     const codeArtifactIds = attachments.artifacts.map((artifact) => artifact.id);
     const fileIds = attachments.fileIds;
     const memoryIds = linkedMemories.map((memory) => memory.id);
+
+    this.appendEntityLines(lines, entities);
+    this.appendRelationshipLines(lines, relationships);
+    this.appendLinkedMemoryLines(lines, linkedMemories);
+    this.appendDocumentLines(lines, attachments.documents);
+    this.appendArtifactLines(lines, attachments.artifacts);
+    this.appendFileLines(lines, attachments.files, fileIds);
+
+    return {
+      text: lines.join("\n"),
+      memoryIds,
+      entityIds,
+      relationshipIds,
+      documentIds,
+      codeArtifactIds,
+      fileIds,
+    };
+  }
+
+  private appendEntityLines(lines: string[], entities: Entity[]): void {
     if (entities.length > 0) appendLine(lines, "Entities:", this.maxExpansionChars);
     for (const entity of entities) {
       if (!appendLine(
@@ -384,6 +451,12 @@ export class KnowledgeReadService {
         );
       }
     }
+  }
+
+  private appendRelationshipLines(
+    lines: string[],
+    relationships: RelationshipExpansion[],
+  ): void {
     for (const { relationship, source, target } of relationships) {
       if (!appendLine(
         lines,
@@ -393,6 +466,12 @@ export class KnowledgeReadService {
         this.maxExpansionChars,
       )) break;
     }
+  }
+
+  private appendLinkedMemoryLines(
+    lines: string[],
+    linkedMemories: LinkedMemoryExpansion[],
+  ): void {
     for (const linked of linkedMemories) {
       if (!appendLine(
         lines,
@@ -401,7 +480,10 @@ export class KnowledgeReadService {
         this.maxExpansionChars,
       )) break;
     }
-    for (const document of attachments.documents) {
+  }
+
+  private appendDocumentLines(lines: string[], documents: Document[]): void {
+    for (const document of documents) {
       if (!appendLine(
         lines,
         `- Document #${document.id}: ${clean(document.title, 200)}`,
@@ -422,7 +504,10 @@ export class KnowledgeReadService {
         )) break;
       }
     }
-    for (const artifact of attachments.artifacts) {
+  }
+
+  private appendArtifactLines(lines: string[], artifacts: CodeArtifact[]): void {
+    for (const artifact of artifacts) {
       if (!appendLine(
         lines,
         `- Code artifact #${artifact.id}: ${clean(artifact.title, 200)} ` +
@@ -444,7 +529,14 @@ export class KnowledgeReadService {
         )) break;
       }
     }
-    for (const file of attachments.files) {
+  }
+
+  private appendFileLines(
+    lines: string[],
+    files: FileSummary[],
+    fileIds: number[],
+  ): void {
+    for (const file of files) {
       if (!appendLine(
         lines,
         `- File #${file.id}: ${clean(file.filename, 200)} ` +
@@ -459,7 +551,7 @@ export class KnowledgeReadService {
         );
       }
     }
-    const summarizedFileIds = new Set(attachments.files.map((file) => file.id));
+    const summarizedFileIds = new Set(files.map((file) => file.id));
     for (const fileId of fileIds) {
       if (summarizedFileIds.has(fileId)) continue;
       appendLine(
@@ -468,15 +560,6 @@ export class KnowledgeReadService {
         this.maxExpansionChars,
       );
     }
-    return {
-      text: lines.join("\n"),
-      memoryIds,
-      entityIds,
-      relationshipIds,
-      documentIds,
-      codeArtifactIds,
-      fileIds,
-    };
   }
 
   private emptyExpansion(): KnowledgeExpansionResult {
