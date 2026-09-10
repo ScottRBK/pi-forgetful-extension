@@ -418,9 +418,9 @@ model decision or network write. Raw transcripts, routine tool output, credentia
 data, and unverified guesses are never automatic capture candidates. Stored candidates should
 carry provenance such as the run and source-entry identity without copying the full transcript.
 
-## Default and debug modes
+## Output verbosity
 
-The default mode is silent:
+The default verbosity is `warning`, showing warnings and errors:
 
 - no preflight memory message is added to conversation history;
 - a `forgetful_recall` tool result may appear in normal Pi session history;
@@ -428,19 +428,19 @@ The default mode is silent:
 - optional transient footer status only;
 - compact rendering for agent-initiated deeper recall.
 
-Debug mode may show:
+`/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting
+session memory work. Each level includes more severe messages. `info` adds brief recall counts
+and scope; `debug` adds the bounded context actually supplied to the agent (IDs, titles, content
+and related knowledge), total recall duration and detailed redacted failures. Recoverable recall
+failures are warnings; invalid endpoint configuration and capture enqueue failures are
+errors. Explicit command responses and normal tool results remain visible at every level.
 
-- selected memory model;
-- prompt-policy sources and hashes;
-- planner input and validated output;
-- effective project/global recall scope and each candidate's destination project;
-- Forgetful queries and timings;
-- injected memory IDs and token count;
-- capture candidates and create/skip/supersede/escalate reasons with supporting source identities;
-- supersession replacement IDs, per-step outcomes, and pending escalations.
+The old `debug on/off` commands map to `debug`/`warning`; legacy `debug: true` settings remain
+supported unless an explicit `verbosity` is present. `/forgetful status` shows the current level
+and, at debug level, bounded capture candidates, outcomes and pending escalations.
 
-Prompt and memory content is not persisted in extension debug logs unless the user explicitly opts
-in. This does not override normal Pi persistence of a `forgetful_recall` tool result.
+Debug details use user-only UI notifications and are not added to model context or extension log
+files. Known secrets are redacted. This does not override normal Pi persistence of tool results.
 
 ## Latency
 
@@ -456,7 +456,8 @@ Initial SLO candidates to validate:
 
 - warm preflight p50 below 700 ms;
 - warm preflight p95 below 1.5 seconds;
-- hard fail-open timeout of 5 seconds by default (configurable).
+- hard fail-open timeout of 10 seconds by default (configurable);
+- classification defaults to 5 seconds, independently configurable.
 
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture

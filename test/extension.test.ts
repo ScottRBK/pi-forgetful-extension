@@ -633,6 +633,146 @@ test("missing model warning directs the user to setup", async () => {
   }
 });
 
+test("verbosity commands persist each level and reject invalid levels", async () => {
+  // Arrange.
+  const fixture = await harness();
+  try {
+    for (const level of ["debug", "info", "warning", "error"]) {
+      // Act.
+      await fixture.command(`verbosity ${level}`);
+      await fixture.command("status");
+
+      // Assert: explicit command replies remain visible even at error verbosity.
+      const settings = JSON.parse(await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+      ));
+      assert.equal(settings.verbosity, level);
+      assert.ok(fixture.notifications.some((message) => message.includes(`verbosity ${level}`)));
+    }
+    await fixture.command("verbosity noisy");
+    const settings = JSON.parse(await readFile(
+      join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+    ));
+    assert.equal(settings.verbosity, "error");
+    assert.match(fixture.notifications.at(-1)!, /Usage:.*verbosity debug\|info\|warning\|error/);
+
+    await fixture.command("debug on");
+    await fixture.command("status");
+    assert.match(fixture.notifications.at(-1)!, /verbosity debug/);
+    await fixture.command("debug off");
+    await fixture.command("status");
+    assert.match(fixture.notifications.at(-1)!, /verbosity warning/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+for (const verbosity of ["debug", "info", "warning", "error"]) {
+  test(`${verbosity} verbosity filters recall summaries, memory details and warnings`, async () => {
+    // Arrange: real recall and REST adapter, controlled external memory and model responses.
+    let fail = false;
+    const service = new RecallService(new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async () => new Response(JSON.stringify({
+        primary_memories: [{
+          id: 42, title: "Database decision", content: "Use SQLite. Bearer private-memory-token",
+          context: "Agreed for local storage", project_ids: [7],
+          keywords: [], tags: [], is_obsolete: false,
+        }],
+        linked_memories: [{
+          link_source_id: 42,
+          memory: {
+            id: 43, title: "Related storage choice", content: "Keep data on the local disk.",
+            context: "Supports the database decision", project_ids: [7],
+            keywords: [], tags: [], is_obsolete: false,
+          },
+        }],
+      })),
+    }), {
+      async complete() {
+        if (fail) throw new Error("Provider unavailable: Bearer private-provider-token");
+        return { search: true, queries: ["database"], queryIntent: "History", entities: [] };
+      },
+    });
+    const fixture = await harness({ recallService: service, userSettings: { verbosity } });
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+      fixture.notifications.splice(0);
+
+      // Act: recall through both prompt hooks and the foreground tool.
+      await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
+      });
+      await fixture.emit("input", {
+        type: "input", source: "interactive", text: "Which database?", streamingBehavior: "steer",
+      });
+      await fixture.tools.get("forgetful_recall")!.execute(
+        "details", { query: "database" }, undefined, undefined, fixture.ctx,
+      );
+
+      // Assert: debug reveals the actual bounded context; info reveals only summaries.
+      const output = fixture.notifications.join("\n");
+      const summaries = fixture.notifications.filter((message) => /recall completed/.test(message));
+      assert.equal(summaries.length, verbosity === "debug" || verbosity === "info" ? 3 : 0);
+      if (verbosity === "debug") {
+        assert.match(output, /Memory #42: Database decision/);
+        assert.match(output, /Use SQLite\. \[redacted\]/);
+        assert.match(output, /Memory #43: Related storage choice/);
+        assert.match(output, /Keep data on the local disk/);
+        assert.match(output, /recall took \d+ ms/);
+      } else {
+        assert.doesNotMatch(output, /Database decision|Use SQLite|Related storage|recall took/);
+      }
+      assert.doesNotMatch(output, /private-memory-token/);
+      assert.equal(fixture.sentMessages.length, 0);
+
+      // Act: the external planner fails on the next prompt.
+      fail = true;
+      fixture.notifications.splice(0);
+      await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
+      });
+
+      // Assert: recoverable failures remain warnings and are suppressed only at error level.
+      const warnings = fixture.notifications.join("\n");
+      if (verbosity === "error") assert.equal(warnings, "");
+      else assert.match(warnings, /recall failed during planning/);
+      if (verbosity === "debug") assert.match(warnings, /Provider unavailable: \[redacted\]/);
+      else assert.doesNotMatch(warnings, /Provider unavailable/);
+      assert.doesNotMatch(warnings, /private-provider-token/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
+for (const verbosity of ["debug", "info", "warning", "error"]) {
+  test(`${verbosity} keeps configuration errors visible and filters warnings`, async () => {
+    // Arrange: a missing model is a warning; an insecure remote endpoint disables memory.
+    const fixture = await harness({
+      userSettings: { verbosity, model: undefined, base_url: "http://remote.test/api/v1" },
+    });
+    const levels: string[] = [];
+    const originalNotify = fixture.ctx.ui.notify;
+    fixture.ctx.ui.notify = (message: string, level: string) => {
+      levels.push(level);
+      originalNotify(message);
+    };
+    try {
+      // Act.
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+      // Assert: severity is reflected in both filtering and Pi's visual notification type.
+      assert.match(fixture.notifications.join("\n"), /endpoint configuration is invalid/);
+      assert.ok(levels.includes("error"));
+      assert.equal(levels.includes("warning"), verbosity !== "error");
+      if (verbosity === "error") assert.ok(levels.every((level) => level === "error"));
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
 test("debug reports automated recall activity and status keeps the latest result", async () => {
   const fixture = await harness();
   try {
@@ -671,7 +811,7 @@ test("debug reports automated recall activity and status keeps the latest result
   }
 });
 
-test("debug shows recall exceptions without injecting them into the agent prompt", async () => {
+test("warnings stay brief while debug exposes redacted recall exceptions", async () => {
   // Arrange: real recall service; only the external memory model fails.
   const service = new RecallService(new ApiForgetfulClient({
     baseUrl: "http://localhost:8020/api/v1",
@@ -687,10 +827,11 @@ test("debug shows recall exceptions without injecting them into the agent prompt
       type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
     };
 
-    // Act and assert: debug off stays quiet, debug on exposes the redacted exception.
+    // Act and assert: default warnings stay brief, debug exposes the redacted exception.
     fixture.notifications.splice(0);
     assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
-    assert.equal(fixture.notifications.length, 0);
+    assert.match(fixture.notifications.join("\n"), /recall failed during planning/);
+    assert.doesNotMatch(fixture.notifications.join("\n"), /Provider rejected|private-test-token/);
     await fixture.command("debug on");
     fixture.notifications.splice(0);
     assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
@@ -739,6 +880,89 @@ test("debug reports search exceptions for automatic and manual recall", async ()
     await fixture.cleanup();
   }
 });
+
+test("debug explains the overall deadline during automatic and manual recall", async () => {
+  // Arrange: the external search stays pending beyond recall's shared time budget.
+  const service = new RecallService(new ApiForgetfulClient({
+    baseUrl: "http://localhost:8020/api/v1",
+    timeoutMs: 1_000,
+    fetchImpl: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }),
+  }), {
+    async complete() {
+      return { search: true, queries: ["decisions"], queryIntent: "History", entities: [] };
+    },
+  }, { deadlineMs: 30 });
+  const fixture = await harness({ recallService: service, userSettings: { debug: true } });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.notifications.splice(0);
+
+    // Act: automatic recall reaches the deadline without blocking the main turn.
+    const result = await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
+    });
+
+    // Assert: the warning explains the limit and that planning shares the search budget.
+    assert.equal(result, undefined);
+    assert.match(fixture.notifications.join("\n"),
+      /memory search.*overall recall deadline exceeded.*30 ms.*timeout_ms.*planning and search/i);
+    assert.equal(fixture.sentMessages.length, 0);
+
+    // Act: the foreground tool reaches the same limit.
+    fixture.notifications.splice(0);
+    await assert.rejects(fixture.tools.get("forgetful_recall")!.execute(
+      "deadline", { query: "decisions" }, undefined, undefined, fixture.ctx,
+    ), /Forgetful recall is unavailable/);
+
+    // Assert: it exposes the same explanation in debug UI.
+    assert.match(fixture.notifications.join("\n"),
+      /memory search.*overall recall deadline exceeded.*30 ms/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+for (const reason of [new Error("Session ended: Bearer private-abort-token"),
+  "Session ended: Bearer private-abort-token", undefined]) {
+  test(`debug explains caller cancellation (${typeof reason}) with redaction`, async () => {
+    // Arrange: the caller cancels while the external search is pending.
+    const controller = new AbortController();
+    const service = new RecallService(new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async () => {
+        controller.abort(reason);
+        throw new Error("External request aborted");
+      },
+    }), {
+      async complete() {
+        return { search: true, queries: ["decisions"], queryIntent: "History", entities: [] };
+      },
+    });
+    const fixture = await harness({ recallService: service, userSettings: { debug: true } });
+    fixture.ctx.signal = controller.signal;
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+      fixture.notifications.splice(0);
+
+      // Act.
+      const result = await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
+      });
+
+      // Assert: caller cancellation is distinct from a timeout and stays out of the prompt.
+      const warning = fixture.notifications.join("\n");
+      assert.equal(result, undefined);
+      assert.match(warning, /memory search.*Recall cancelled by caller/);
+      if (reason !== undefined) assert.match(warning, /Session ended: \[redacted\]/);
+      assert.doesNotMatch(warning, /deadline exceeded|private-abort-token/);
+      assert.equal(fixture.sentMessages.length, 0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
 
 test("manual recall cancels a pending external search with the session signal", async (t) => {
   let resolveSearchStarted!: () => void;
@@ -1090,6 +1314,30 @@ test("queued recalls wait for their matching user message and preserve two promp
     await fixture.cleanup();
   }
 });
+
+for (const command of ["verbosity debug", "debug on"]) {
+  test(`${command} preserves queued recall context`, async () => {
+    // Arrange: recalled context is waiting for its queued prompt.
+    const fixture = await harness();
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+      await fixture.emit("input", {
+        type: "input", text: "queued", source: "interactive", streamingBehavior: "followUp",
+      });
+
+      // Act: change only output verbosity, then deliver the queued prompt.
+      await fixture.command(command);
+      const result = await fixture.emit("context", {
+        type: "context", messages: [{ role: "user", content: "queued" }],
+      });
+
+      // Assert: logging controls do not discard memory work already done for the prompt.
+      assert.match(JSON.stringify(result) ?? "", /historical context for queued/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
 
 test("queued recall survives tool continuations and clears for the next user request", async () => {
   const fixture = await harness();

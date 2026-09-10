@@ -5,11 +5,25 @@ import { dirname, join } from "node:path";
 import type { CaptureMode, Scope } from "./contracts.ts";
 
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
-export const DEFAULT_FORGETFUL_TIMEOUT_MS = 5_000;
+export const DEFAULT_FORGETFUL_TIMEOUT_MS = 10_000;
 export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
 
 export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";
+export type Verbosity = "debug" | "info" | "warning" | "error";
+
+export function isVerbosity(value: unknown): value is Verbosity {
+  return value === "debug" || value === "info" || value === "warning" || value === "error";
+}
+
+function resolveVerbosity(user: PersistedUserSettings, warnings: string[]): Verbosity {
+  if (isVerbosity(user.verbosity)) return user.verbosity;
+  if (user.verbosity !== undefined) {
+    warnings.push("Invalid verbosity; using warning. Choose debug, info, warning, or error.");
+    return "warning";
+  }
+  return user.debug === true ? "debug" : "warning";
+}
 
 export interface ModelSelection {
   provider: string;
@@ -32,7 +46,7 @@ export interface PromptOverlays {
 export interface ForgetfulConfig {
   enabled: boolean;
   captureMode: CaptureMode;
-  debug: boolean;
+  verbosity: Verbosity;
   scope: Scope;
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
@@ -66,6 +80,7 @@ export interface PersistedUserSettings {
   capture?: unknown;
   capture_mode?: unknown;
   debug?: unknown;
+  verbosity?: unknown;
   recall_model_timeout_ms?: unknown;
   model?: unknown;
 }
@@ -317,7 +332,7 @@ export async function loadForgetfulConfig(
   return {
     enabled: asBoolean(user.enabled, true) && !tokenEnvMissing,
     captureMode,
-    debug: asBoolean(user.debug, false),
+    verbosity: resolveVerbosity(user, warnings),
     scope,
     scopeSource,
     recallModelTimeoutMs: asPositiveInteger(
@@ -373,6 +388,7 @@ export async function updateUserSettings(
       | "enabled"
       | "capture_mode"
       | "debug"
+      | "verbosity"
       | "recall_model_timeout_ms"
       | "model"
     >

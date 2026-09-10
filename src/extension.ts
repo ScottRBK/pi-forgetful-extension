@@ -32,6 +32,7 @@ import { CaptureService } from "./capture.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
   DEFAULT_FORGETFUL_BASE_URL,
+  isVerbosity,
   loadForgetfulConfig,
   modelToString,
   updateForgetfulConnection,
@@ -40,6 +41,7 @@ import {
   type ForgetfulConfig,
   type LoadConfigOptions,
   type ModelSelection,
+  type Verbosity,
 } from "./config.ts";
 import {
   PiMemoryModel,
@@ -396,23 +398,28 @@ function recordRecallActivity(
   runtime: Runtime,
   result: RecallResult,
   ctx: ExtensionContext,
+  elapsedMs: number,
 ): void {
   runtime.lastRecall = {
     memoryCount: result.memoryIds.length,
     scope: result.scope,
     reason: result.reason,
   };
-  if (runtime.config.debug) {
-    if (result.diagnostic) {
-      const outcome = result.text ? "partially completed; error" : "failed";
-      notify(ctx, `Forgetful recall ${outcome} during ${result.diagnostic}`, "warning");
-      return;
-    }
-    notify(
-      ctx,
-      `Forgetful recall completed: ${recallActivitySummary(runtime.lastRecall)}.`,
-    );
+  const config = runtime.config;
+  if (result.diagnostic) {
+    const outcome = result.text ? "partially completed; error" : "failed";
+    const detail = config.verbosity === "debug" ? result.diagnostic :
+      `${result.diagnostic.split(":", 1)[0]} (${result.reason ?? "recall-unavailable"})`;
+    log(ctx, config, `Forgetful recall ${outcome} during ${detail}`, "warning");
+  } else if (["recall-unavailable", "deadline-exceeded", "aborted", "circuit-open"]
+    .includes(result.reason ?? "")) {
+    log(ctx, config, `Forgetful recall unavailable: ${result.reason}.`, "warning");
+  } else {
+    log(ctx, config, `Forgetful recall completed: ${recallActivitySummary(runtime.lastRecall)}.`);
   }
+  log(ctx, config, `Forgetful recall took ${elapsedMs} ms.\n` +
+    (result.text ? `Recalled context:\n${sanitizeText(result.text).slice(0, 6_000)}` :
+      "No memory context was supplied."), "debug");
 }
 
 function recallContextEntries(ctx: ExtensionContext): EvidenceEntry[] {
@@ -654,6 +661,29 @@ function notify(
   }
 }
 
+const LOG_PRIORITY: Record<Verbosity, number> = { debug: 0, info: 1, warning: 2, error: 3 };
+
+function log(
+  ctx: ExtensionContext,
+  config: ForgetfulConfig,
+  message: string,
+  level: Verbosity = "info",
+): void {
+  if (LOG_PRIORITY[level] < LOG_PRIORITY[config.verbosity]) return;
+  notify(ctx, sanitizeText(message), level === "debug" ? "info" : level);
+}
+
+function logFailure(
+  ctx: ExtensionContext,
+  config: ForgetfulConfig,
+  message: string,
+  error: unknown,
+  level: "warning" | "error" = "warning",
+): void {
+  const detail = config.verbosity === "debug" ? `: ${boundedErrorDiagnostic(error)}` : ".";
+  log(ctx, config, message + detail, level);
+}
+
 function resolutionStatus(value: unknown): string {
   if (typeof value === "string") return value;
   const status =
@@ -795,12 +825,13 @@ export function createForgetfulExtension(
   return (pi) => {
     const showWarningOnce = (
       ctx: ExtensionContext,
+      config: ForgetfulConfig,
       key: string,
       message: string,
     ): void => {
-      if (state.shownWarnings.has(key)) return;
+      if (state.shownWarnings.has(key) || config.verbosity === "error") return;
       state.shownWarnings.add(key);
-      notify(ctx, message, "warning");
+      log(ctx, config, message, "warning");
     };
 
     const handoffPendingConflicts = async (
@@ -911,12 +942,8 @@ export function createForgetfulExtension(
       );
       for (const conflict of selected)
         runtime.notifiedConflictIds.add(String(conflict.id));
-      if (runtime.config.debug)
-        notify(
-          ctx,
-          `${pending.length} Forgetful conflict(s) need resolution.`,
-          "warning",
-        );
+      log(ctx, runtime.config,
+        `${pending.length} Forgetful conflict(s) need resolution.`, "warning");
     };
 
     const loadRuntimeConfig = async (
@@ -929,10 +956,11 @@ export function createForgetfulExtension(
         ...options.config,
       });
       for (const warning of config.warnings)
-        showWarningOnce(ctx, warning, warning);
+        showWarningOnce(ctx, config, warning, warning);
       if (config.enabled && !config.model) {
         showWarningOnce(
           ctx,
+          config,
           "missing-memory-model",
           "Forgetful memory model is not configured; recall and capture are paused. " +
             "Run /forgetful setup in Pi to configure Forgetful.",
@@ -969,7 +997,7 @@ export function createForgetfulExtension(
           enabled: false,
           warnings: [...config.warnings, warning],
         };
-        showWarningOnce(ctx, "invalid-endpoint", warning);
+        log(ctx, config, warning, "error");
       }
       return { config, client };
     };
@@ -1026,6 +1054,7 @@ export function createForgetfulExtension(
       if (memoryReady && config.scope === "project" && !context.project) {
         showWarningOnce(
           ctx,
+          config,
           "missing-project",
           "Forgetful project scope has no trusted project mapping; " +
             "project recall and capture are paused.",
@@ -1175,12 +1204,7 @@ export function createForgetfulExtension(
           void Promise.resolve(capture.checkpoint())
             .then(() => handoffPendingConflicts(runtime, ctx))
             .catch((error) => {
-              if (runtime.config.debug)
-                notify(
-                  ctx,
-                  `Forgetful recovery skipped: ${boundedErrorDiagnostic(error)}`,
-                  "warning",
-                );
+              logFailure(ctx, runtime.config, "Forgetful recovery skipped", error);
             });
         }
         return runtime;
@@ -1361,12 +1385,7 @@ export function createForgetfulExtension(
       try {
         await advanceSettledRange(runtime, ctx, context);
       } catch (error) {
-        if (runtime.config.debug)
-          notify(
-            ctx,
-            `Forgetful ${messagePrefix}: ${boundedErrorDiagnostic(error)}`,
-            "warning",
-          );
+        logFailure(ctx, runtime.config, `Forgetful ${messagePrefix}`, error);
       }
     };
 
@@ -1403,23 +1422,13 @@ export function createForgetfulExtension(
           )
             .then(() => handoffPendingConflicts(runtime, ctx))
             .catch((error) => {
-              if (runtime.config.debug)
-                notify(
-                  ctx,
-                  `Forgetful capture worker skipped: ${boundedErrorDiagnostic(error)}`,
-                  "warning",
-                );
+              logFailure(ctx, runtime.config, "Forgetful capture worker skipped", error);
             });
         } else {
           await advanceSettledRange(runtime, ctx, context, result.finalEntryId);
         }
       } catch (error) {
-        if (runtime.config.debug)
-          notify(
-            ctx,
-            `Forgetful capture enqueue skipped: ${boundedErrorDiagnostic(error)}`,
-            "warning",
-          );
+        logFailure(ctx, runtime.config, "Forgetful capture enqueue failed", error, "error");
       }
     };
 
@@ -1448,17 +1457,14 @@ export function createForgetfulExtension(
         const runtime = await loadRuntime(ctx);
         state.activeQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
         if (!runtime.config.enabled) return;
+        const startedAt = Date.now();
         const result = await runRecall(ctx, runtime, event.prompt, ctx.signal);
-        recordRecallActivity(runtime, result, ctx);
+        recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
         if (!result.text) return;
         return { systemPrompt: `${event.systemPrompt}\n\n${result.text}` };
       } catch (error) {
-        if (state.runtime?.config.debug)
-          notify(
-            ctx,
-            `Forgetful recall skipped: ${boundedErrorDiagnostic(error)}`,
-            "warning",
-          );
+        if (state.runtime)
+          logFailure(ctx, state.runtime.config, "Forgetful recall skipped", error);
       }
     });
 
@@ -1473,8 +1479,9 @@ export function createForgetfulExtension(
       try {
         const runtime = await loadRuntime(ctx);
         if (!runtime.config.enabled) return { action: "continue" as const };
+        const startedAt = Date.now();
         const result = await runRecall(ctx, runtime, event.text, ctx.signal);
-        recordRecallActivity(runtime, result, ctx);
+        recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
         if (result.text) {
           const key = sessionKey(ctx, runtime.branchId);
           const pending = state.pendingQueuedRecall.get(key) ?? [];
@@ -1487,12 +1494,8 @@ export function createForgetfulExtension(
           state.pendingQueuedRecall.set(key, pending);
         }
       } catch (error) {
-        if (state.runtime?.config.debug)
-          notify(
-            ctx,
-            `Forgetful queued recall skipped: ${boundedErrorDiagnostic(error)}`,
-            "warning",
-          );
+        if (state.runtime)
+          logFailure(ctx, state.runtime.config, "Forgetful queued recall skipped", error);
       }
       return { action: "continue" as const };
     });
@@ -1866,6 +1869,7 @@ export function createForgetfulExtension(
           checkSession();
           const context = await workContext(ctx, runtime);
           checkSession();
+          const startedAt = Date.now();
           const result = await runtime.recall.deeper({
             query: params.query,
             context,
@@ -1874,8 +1878,7 @@ export function createForgetfulExtension(
             projects: context.projects,
           });
           checkSession();
-          if (runtime.config.debug && result.diagnostic)
-            notify(ctx, `Forgetful recall failed during ${result.diagnostic}`, "warning");
+          recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
           const unavailable = !result.text && [
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");
@@ -1996,7 +1999,7 @@ export function createForgetfulExtension(
       runtime: Runtime,
     ): Promise<string> => {
       if (
-        runtime.config.debug &&
+        runtime.config.verbosity === "debug" &&
         runtime.config.enabled &&
         runtime.capture?.pendingConflicts
       ) {
@@ -2024,7 +2027,7 @@ export function createForgetfulExtension(
 
     const captureDiagnosticStatus = async (runtime: Runtime): Promise<string> => {
       if (
-        runtime.config.debug &&
+        runtime.config.verbosity === "debug" &&
         runtime.config.enabled &&
         runtime.capture?.diagnostics
       ) {
@@ -2061,6 +2064,7 @@ export function createForgetfulExtension(
         ctx,
         `Forgetful ${runtime.config.enabled ? "on" : "off"}; ` +
           `capture ${runtime.config.captureMode}; scope ${runtime.config.scope}; ` +
+          `verbosity ${runtime.config.verbosity}; ` +
           `project ${
             runtime.context.project
               ? `${sanitizeText(runtime.context.project.name)} (#${runtime.context.project.id})`
@@ -2147,11 +2151,27 @@ export function createForgetfulExtension(
         notify(ctx, "Usage: /forgetful debug on|off", "error");
         return;
       }
-      await resetRuntime(ctx, runtime);
       await updateUserSettings(runtime.config.paths.userSettings, {
         debug: value === "on",
+        verbosity: value === "on" ? "debug" : "warning",
       });
+      runtime.config.verbosity = value === "on" ? "debug" : "warning";
       notify(ctx, `Forgetful debug ${value}.`);
+    };
+
+    const handleVerbosityCommand = async (
+      parts: string[],
+      ctx: ExtensionContext,
+      runtime: Runtime,
+    ): Promise<void> => {
+      const verbosity = parts[1];
+      if (!isVerbosity(verbosity) || parts.length !== 2) {
+        notify(ctx, "Usage: /forgetful verbosity debug|info|warning|error", "error");
+        return;
+      }
+      await updateUserSettings(runtime.config.paths.userSettings, { verbosity });
+      runtime.config.verbosity = verbosity;
+      notify(ctx, `Forgetful verbosity ${verbosity}.`);
     };
 
     const handleModelCommand = async (
@@ -2411,13 +2431,17 @@ export function createForgetfulExtension(
           case "debug":
             await handleDebugCommand(parts, ctx, runtime);
             return;
+          case "verbosity":
+            await handleVerbosityCommand(parts, ctx, runtime);
+            return;
           case "model":
             await handleModelCommand(parts, ctx, runtime);
             return;
           default:
             notify(
               ctx,
-              "Usage: /forgetful setup|encode|project init|status|scope|capture|on|off|debug|model",
+              "Usage: /forgetful setup|encode|project init|status|scope|capture|on|off|" +
+                "verbosity|model (legacy: debug on|off)",
               "error",
             );
         }

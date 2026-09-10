@@ -85,11 +85,12 @@ directory. The effective settings can also be represented as:
 {
   "base_url": "http://localhost:8020/api/v1",
   "token_env": "FORGETFUL_TOKEN",
-  "timeout_ms": 5000,
+  "timeout_ms": 10000,
   "recall_model_timeout_ms": 5000,
   "model": "provider/model-id",
   "enabled": true,
-  "capture_mode": "auto"
+  "capture_mode": "auto",
+  "verbosity": "warning"
 }
 ```
 
@@ -162,12 +163,29 @@ capture destination. Explicit repository encoding can initialise its project thr
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
-| `/forgetful debug on` / `/forgetful debug off` | Show diagnostics and recall exceptions. |
+| `/forgetful verbosity debug` | Show recalled context, elapsed time and detailed failures. |
+| `/forgetful verbosity info` | Show brief recall summaries, warnings and errors. |
+| `/forgetful verbosity warning` | Show warnings and errors (default). |
+| `/forgetful verbosity error` | Show errors only. |
+| `/forgetful debug on` / `/forgetful debug off` | Legacy aliases for debug / warning verbosity. |
 
-With debug enabled, automated recall shows a bounded notification with the number of memories and
-scope used. `/forgetful status` also reports the latest recall result. Automated preflight context
-is transient; `forgetful_recall` tool results and conflict messages follow normal Pi session
-persistence.
+Verbosity is saved in user settings and applies immediately, including to queued recall and the
+`forgetful_recall` tool. Each level includes higher-severity messages. Explicit command replies
+(including `/forgetful status`) and normal Pi tool results remain visible at every level.
+Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
+
+At info level, recall reports the number of memories and scope used. Debug additionally shows
+the actual bounded context supplied to the agent: memory IDs, titles, content and any related
+knowledge, plus total recall time. Content already shortened for recall stays shortened in this
+display. These are user-only notifications, not extra conversation messages or log files.
+Automated preflight context is transient; tool results and conflict messages follow normal Pi
+session persistence. `/forgetful status` reports the verbosity and latest recall result.
+
+Recoverable recall failures, including timeouts, are warnings; invalid endpoint configuration and
+capture enqueue failures are errors. Debug failure warnings name the failing step and exception.
+Overall recall timeouts show the configured `timeout_ms` limit, which planning and search share. Caller
+cancellations are reported separately with the supplied reason when available. Exception details
+are bounded and redacted; recalled text also passes through known-secret redaction.
 
 The main model can search further with `forgetful_recall`, inspect records and supporting material
 with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_knowledge_write`.
@@ -216,7 +234,7 @@ warning. Scope preference is independent of capture destination.
 
 `recall_model_timeout_ms` limits the background classification request (default 5,000 ms).
 `timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
-5,000 ms). Both settings are positive integer milliseconds in the user settings file. The
+10,000 ms). Both settings are positive integer milliseconds in the user settings file. The
 overall deadline still applies when the model deadline is longer. Capture and overlap retain
 their separate 15-second model budget. Select a memory model that fits these limits; changing
 them is optional. Restart or reload the extension after editing settings directly.

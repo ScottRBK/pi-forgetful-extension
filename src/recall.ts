@@ -14,7 +14,7 @@ import type {
   WorkContext,
 } from "./contracts.ts";
 
-const DEFAULT_DEADLINE_MS = 5_000;
+const DEFAULT_DEADLINE_MS = 10_000;
 const MAX_PLAN_INPUT_CHARS = 8_000;
 const MAX_PROMPT_CHARS = 4_000;
 const MAX_POLICY_CHARS = 8_000;
@@ -104,6 +104,7 @@ interface DeadlineSignal {
   pause: () => void;
   resume: () => void;
   expired: () => boolean;
+  diagnostic: (stage: string, error: unknown) => string;
 }
 
 interface ScopeResolution {
@@ -313,6 +314,25 @@ function createDeadlineSignal(
       else timer = setTimeout(expire, remaining);
     },
     expired: () => expired,
+    diagnostic: (stage, error) => {
+      if (expired) {
+        const timeout = new Error(
+          `Overall recall deadline exceeded (${deadlineMs} ms; ` +
+          "timeout_ms covers planning and search together)",
+        );
+        timeout.name = "TimeoutError";
+        return exceptionDiagnostic(stage, timeout);
+      }
+      if (callerSignal?.aborted) {
+        const reason: unknown = callerSignal.reason;
+        const cancelled = new Error("Recall cancelled by caller", {
+          cause: typeof reason === "string" ? new Error(reason) : reason,
+        });
+        cancelled.name = "AbortError";
+        return exceptionDiagnostic(stage, cancelled);
+      }
+      return exceptionDiagnostic(stage, error);
+    },
   };
 }
 
@@ -320,7 +340,11 @@ async function raceAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal,
 ): Promise<T> {
-  if (signal.aborted) throw abortError();
+  if (signal.aborted) {
+    // The operation may already have started; still observe its eventual rejection.
+    void promise.catch(() => {});
+    throw abortError();
+  }
   let listener: (() => void) | undefined;
   const aborted = new Promise<never>((_, reject) => {
     listener = () => reject(abortError());
@@ -638,7 +662,7 @@ export class RecallService {
       if (!request.signal?.aborted) this.recordFailure();
       return {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
-        diagnostic: exceptionDiagnostic(stage, error),
+        diagnostic: deadline.diagnostic(stage, error),
       };
     } finally {
       deadline.finish();
@@ -722,7 +746,7 @@ export class RecallService {
       if (!request.signal?.aborted) this.recordFailure();
       return {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
-        diagnostic: exceptionDiagnostic(stage, error),
+        diagnostic: deadline.diagnostic(stage, error),
       };
     } finally {
       deadline.finish();

@@ -28,8 +28,37 @@ test("fresh projects use global scope and the default service endpoint", async (
   assert.equal(config.captureMode, "auto");
   assert.equal(config.enabled, true);
   assert.equal(config.model, undefined);
-  assert.equal(config.instance.timeoutMs, 5_000);
+  assert.equal(config.instance.timeoutMs, 10_000);
   assert.equal(config.recallModelTimeoutMs, 5_000);
+  assert.equal(config.verbosity, "warning");
+});
+
+test("verbosity accepts log levels and takes precedence over legacy debug settings", async () => {
+  // Arrange: a user settings file, including old installations using the debug toggle.
+  const root = await tempDirectory();
+  const settings = join(root, "settings.json");
+  const cases = [
+    [{ debug: true }, "debug"],
+    [{ debug: false }, "warning"],
+    [{ verbosity: "debug" }, "debug"],
+    [{ verbosity: "info", debug: true }, "info"],
+    [{ verbosity: "warning", debug: true }, "warning"],
+    [{ verbosity: "error", debug: true }, "error"],
+    [{ verbosity: "invalid", debug: true }, "warning"],
+  ] as const;
+  for (const [value, expected] of cases) {
+    await writeFile(settings, JSON.stringify(value));
+
+    // Act.
+    const config = await loadForgetfulConfig({
+      cwd: root, trusted: true, userSettingsPath: settings,
+    });
+
+    // Assert: invalid levels fall back safely and explain the fallback.
+    assert.equal(config.verbosity, expected);
+    if ("verbosity" in value && value.verbosity === "invalid")
+      assert.ok(config.warnings.some((warning) => /Invalid verbosity/.test(warning)));
+  }
 });
 
 test("trusted project scope stays separate from user settings", async () => {
