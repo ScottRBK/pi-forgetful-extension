@@ -844,6 +844,92 @@ test("warnings stay brief while debug exposes redacted recall exceptions", async
   }
 });
 
+for (const queryIntent of ["", "   "]) {
+  test(`no-search plans accept ${JSON.stringify(queryIntent)} intent without disabling recall`,
+    async () => {
+      // Arrange: real recall, with the external planner choosing to skip routine prompts.
+      let search = false;
+      let searches = 0;
+      const service = new RecallService(new ApiForgetfulClient({
+        baseUrl: "http://localhost:8020/api/v1",
+        fetchImpl: async () => {
+          searches += 1;
+          return new Response(JSON.stringify({ primary_memories: [], linked_memories: [] }));
+        },
+      }), {
+        async complete() {
+          return {
+            search, queries: search ? ["database"] : [], entities: [],
+            queryIntent: search ? "Find database decisions" : queryIntent,
+          };
+        },
+      });
+      const fixture = await harness({
+        recallService: service, userSettings: { verbosity: "debug" },
+      });
+      try {
+        await fixture.emit("session_start", { type: "session_start", reason: "new" });
+        fixture.notifications.splice(0);
+
+        // Act: repeat beyond the failure threshold, then request a real memory search.
+        for (let index = 0; index < 4; index += 1) {
+          await fixture.emit("before_agent_start", {
+            type: "before_agent_start", prompt: "Thanks", systemPrompt: "base prompt",
+          });
+        }
+
+        // Assert: skipping is a successful decision, not a failed plan or service outage.
+        assert.equal(searches, 0);
+        const skips = fixture.notifications.filter((text) => /planner-no-search/.test(text));
+        assert.equal(skips.length, 4);
+        assert.doesNotMatch(fixture.notifications.join("\n"), /failed|circuit-open/);
+
+        search = true;
+        await fixture.emit("before_agent_start", {
+          type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
+        });
+        assert.equal(searches, 1, "valid no-search decisions must not open the failure circuit");
+      } finally {
+        await fixture.cleanup();
+      }
+    });
+}
+
+test("search plans require intent and debug identifies the search decision", async () => {
+  for (const queryIntent of ["", "   ", undefined, 42]) {
+    // Arrange: the planner asks to search but provides invalid intent metadata.
+    let searches = 0;
+    const service = new RecallService(new ApiForgetfulClient({
+      baseUrl: "http://localhost:8020/api/v1",
+      fetchImpl: async () => {
+        searches += 1;
+        return new Response(JSON.stringify({ primary_memories: [] }));
+      },
+    }), {
+      async complete() {
+        return { search: true, queries: ["database"], queryIntent, entities: [] };
+      },
+    });
+    const fixture = await harness({ recallService: service, userSettings: { verbosity: "debug" } });
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+      fixture.notifications.splice(0);
+
+      // Act.
+      const result = await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
+      });
+
+      // Assert: malformed search plans cannot reach the external memory service.
+      assert.equal(result, undefined);
+      assert.equal(searches, 0);
+      assert.match(fixture.notifications.join("\n"), /queryIntent.*search=true.*non-empty string/);
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+});
+
 test("debug reports search exceptions for automatic and manual recall", async () => {
   // Arrange: real recall and REST adapter, with an external service returning HTTP 503.
   const service = new RecallService(new ApiForgetfulClient({

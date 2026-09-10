@@ -70,6 +70,8 @@ const POLICY_CONTRACTS = {
     "search (boolean), queries (zero to two short strings), queryIntent (short string),",
     "optional repositorySpecific (boolean),",
     "entities (zero to ten short strings), and optional scopeOverride {scope, reason}.",
+    "When search is true, queryIntent must explain what to find in 1–400 characters.",
+    'When search is false, return {"search":false,"queries":[],"queryIntent":"","entities":[]}.',
     "For repository-specific questions, include the full repository identity from context.repoName",
     "in each query; leave an explicitly cross-project query broad for global recall.",
     "Scope defaults to global; do not request project scope just because a repository is present.",

@@ -135,7 +135,9 @@ function boundedString(
   required = true,
 ): string {
   if (typeof value !== "string" || (required && value.trim().length === 0)) {
-    throw new Error(`Planner field ${field} must be a non-empty string`);
+    throw new Error(
+      `Planner field ${field} must be ${required ? "a non-empty string" : "a string"}`,
+    );
   }
   if (value.length > max)
     throw new Error(`Planner field ${field} exceeds its size limit`);
@@ -388,8 +390,9 @@ function parsePlan(value: unknown, currentScope: Scope): RecallPlan {
   const queries = parseQueries(value.queries, value.search);
   const queryIntent = boundedString(
     value.queryIntent,
-    "queryIntent",
+    `queryIntent (search=${value.search})`,
     MAX_INTENT_CHARS,
+    value.search,
   );
   const entities = parseEntities(value.entities);
   const repositorySpecific = value.repositorySpecific;
