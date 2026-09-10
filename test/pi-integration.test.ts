@@ -56,6 +56,7 @@ test(
     const queries: unknown[] = [];
     const created: Record<string, unknown>[] = [];
     const obsoleted: number[] = [];
+    let failCaptureSearch = false;
     const server = createServer(async (request, response) => {
       response.setHeader("content-type", "application/json");
       if (request.url?.startsWith("/api/v1/projects")) {
@@ -94,8 +95,16 @@ test(
       if (request.url === "/api/v1/memories/search") {
         let body = "";
         for await (const chunk of request) body += chunk;
-        const query = JSON.parse(body) as { query: string };
+        const query = JSON.parse(body) as {
+          query: string;
+          strict_project_filter?: boolean;
+        };
         queries.push(query);
+        if (failCaptureSearch && query.strict_project_filter === true) {
+          response.statusCode = 503;
+          response.end("{}");
+          return;
+        }
         const found =
           query.query === "queue-one"
             ? { ...memory, id: 43, content: "Queue one memory." }
@@ -121,6 +130,7 @@ test(
         base_url: `http://127.0.0.1:${address.port}/api/v1`,
         model: "test/memory",
         capture_mode: "off",
+        verbosity: "debug",
         timeout_ms: 2000,
       }),
     );
@@ -131,9 +141,14 @@ test(
     const captureInputs: Array<{
       entries: Array<{ id: string; role: string; text: string }>;
     }> = [];
+    const notifications: Array<{ message: string; type?: string }> = [];
+    const patchedUis = new WeakSet<object>();
     let holdNextMain = false;
     let releaseMain: (() => void) | undefined;
     let onHeldMain: (() => void) | undefined;
+    let holdNextCapture = false;
+    let releaseCapture: (() => void) | undefined;
+    let onHeldCapture: (() => void) | undefined;
     let createConflict = false;
     let resolveOnNextMain = false;
     let skipExtraction = false;
@@ -162,6 +177,7 @@ test(
         (model.id === "main" ? mainContexts : memoryContexts).push(
           JSON.parse(JSON.stringify(context)) as Context,
         );
+        let holdCapture = false;
         let decision: unknown = {
           search: true,
           queries: ["database decision"],
@@ -238,6 +254,10 @@ test(
               ],
             };
             if (skipExtraction) decision = { candidates: [] };
+            if (holdNextCapture) {
+              holdNextCapture = false;
+              holdCapture = true;
+            }
           }
         }
         const text =
@@ -312,7 +332,10 @@ test(
           });
           stream.end(message);
         };
-        if (model.id === "main" && holdNextMain) {
+        if (holdCapture) {
+          releaseCapture = emit;
+          onHeldCapture?.();
+        } else if (model.id === "main" && holdNextMain) {
           holdNextMain = false;
           releaseMain = emit;
           onHeldMain?.();
@@ -336,6 +359,24 @@ test(
       noContextFiles: true,
       extensionFactories: [
         (pi) => {
+          const observeNotifications = (ctx: {
+            ui: {
+              notify: (
+                message: string,
+                type?: "info" | "warning" | "error",
+              ) => void;
+            };
+          }) => {
+            if (patchedUis.has(ctx.ui)) return;
+            patchedUis.add(ctx.ui);
+            const notify = ctx.ui.notify.bind(ctx.ui);
+            ctx.ui.notify = (message, type) => {
+              notifications.push({ message, type });
+              notify(message, type);
+            };
+          };
+          pi.on("session_start", (_event, ctx) => observeNotifications(ctx));
+          pi.on("agent_settled", (_event, ctx) => observeNotifications(ctx));
           const sendMessage = pi.sendMessage.bind(pi);
           pi.sendMessage = (message, options) => {
             handoffs.push(message);
@@ -407,6 +448,15 @@ test(
         while (created.length === 0 && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
+        const feedbackDeadline = Date.now() + 3000;
+        while (
+          !notifications.some(({ message }) =>
+            /Forgetful capture saved 1 memory\./.test(message),
+          ) &&
+          Date.now() < feedbackDeadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
 
         // Assert through the external write boundary.
         assert.equal(
@@ -419,6 +469,22 @@ test(
           "The test project uses local storage.",
         );
         assert.deepEqual(created[0]?.project_ids, [7]);
+        const savedFeedback = notifications.find(({ message }) =>
+          /Forgetful capture saved 1 memory\./.test(message),
+        );
+        assert.ok(
+          savedFeedback,
+          notifications.map(({ message }) => message).join("\n"),
+        );
+        assert.equal(savedFeedback.type, "info");
+        assert.doesNotMatch(
+          JSON.stringify({
+            mainContexts,
+            memoryContexts,
+            entries: sessionManager.getEntries(),
+          }),
+          /Forgetful capture saved 1 memory\./,
+        );
         const overlap = memoryContexts.find((context) =>
           JSON.stringify(context.messages).includes('\\"candidate\\":'),
         );
@@ -435,11 +501,270 @@ test(
     );
 
     await t.test(
+      "overlapping captures report one combined outcome",
+      async () => {
+        const beforeCreated = created.length;
+        const beforeNotifications = notifications.length;
+        const heldCapture = new Promise<void>((done) => {
+          onHeldCapture = done;
+        });
+        holdNextCapture = true;
+        try {
+          // Arrange: hold the first capture worker while the second run is queued.
+          const firstPrompt = session.prompt(
+            "We decided that the first overlapping run uses local storage.",
+          );
+          await heldCapture;
+          await firstPrompt;
+
+          // Act: the second settled run queues while the first worker owns the lock.
+          await session.prompt(
+            "We decided that the second overlapping run uses local storage.",
+          );
+          releaseCapture?.();
+
+          const deadline = Date.now() + 3000;
+          while (created.length < beforeCreated + 2 && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                /Forgetful capture(?::| (saved|skipped|failed))/.test(message),
+              ) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          // Assert: both writes are reflected by one stable, truthful notice.
+          const feedback = notifications
+            .slice(beforeNotifications)
+            .filter(({ message }) =>
+              /Forgetful capture(?::| (saved|skipped|failed))/.test(message),
+            );
+          assert.equal(created.length, beforeCreated + 2);
+          assert.equal(
+            feedback.length,
+            1,
+            notifications.map(({ message }) => message).join("\n"),
+          );
+          assert.equal(feedback[0]?.type, "info");
+          assert.match(feedback[0]?.message ?? "", /saved 2 memories/);
+          assert.doesNotMatch(
+            JSON.stringify({
+              mainContexts,
+              memoryContexts,
+              entries: sessionManager.getEntries(),
+            }),
+            /Forgetful capture: saved 2 memories\./,
+          );
+        } finally {
+          releaseCapture?.();
+          holdNextCapture = false;
+          onHeldCapture = undefined;
+          releaseCapture = undefined;
+        }
+      },
+    );
+
+    await t.test(
+      "debug reports when automatic capture finds no candidates",
+      async () => {
+        const beforeNotifications = notifications.length;
+        const beforeCaptures = captureInputs.length;
+        skipExtraction = true;
+        try {
+          // Act: settle a run whose scripted capture model returns an empty list.
+          await session.prompt("Routine work with no durable decision.");
+          const captureDeadline = Date.now() + 3000;
+          while (
+            captureInputs.length === beforeCaptures &&
+            Date.now() < captureDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                /Forgetful capture skipped: no candidates\./.test(message),
+              ) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          // Assert: empty automatic capture is visible only at debug level.
+          assert.ok(
+            notifications
+              .slice(beforeNotifications)
+              .some(({ message, type }) =>
+                type === "info" &&
+                /Forgetful capture skipped: no candidates\./.test(message),
+              ),
+            notifications.map(({ message }) => message).join("\n"),
+          );
+        } finally {
+          skipExtraction = false;
+        }
+      },
+    );
+
+    await t.test(
+      "automatic capture feedback remains debug-only",
+      async () => {
+        try {
+          for (const verbosity of ["info", "warning", "error"] as const) {
+            await session.prompt(`/forgetful verbosity ${verbosity}`);
+            const beforeNotifications = notifications.length;
+            const beforeCreated = created.length;
+            await session.prompt(`Routine work at ${verbosity} verbosity.`);
+            const captureDeadline = Date.now() + 3000;
+            while (
+              created.length < beforeCreated + 1 &&
+              Date.now() < captureDeadline
+            ) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            assert.equal(created.length, beforeCreated + 1);
+            await session.prompt("/forgetful verbosity debug");
+            const beforeProbeNotifications = notifications.length;
+            const beforeProbeCreated = created.length;
+            await session.prompt(`Capture completion probe for ${verbosity}.`);
+            const probeDeadline = Date.now() + 3000;
+            while (
+              created.length < beforeProbeCreated + 1 &&
+              Date.now() < probeDeadline
+            ) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            const feedbackDeadline = Date.now() + 3000;
+            while (
+              !notifications
+                .slice(beforeProbeNotifications)
+                .some(({ message }) => /Forgetful capture saved 1 memory\./.test(message)) &&
+              Date.now() < feedbackDeadline
+            ) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            assert.ok(
+              notifications.slice(beforeProbeNotifications).some(({ message }) =>
+                /Forgetful capture saved 1 memory\./.test(message),
+              ),
+              "the debug probe must finish reporting before checking quiet capture output",
+            );
+            const output = notifications
+              .slice(beforeNotifications, beforeProbeNotifications)
+              .map(({ message }) => message)
+              .join("\n");
+            assert.doesNotMatch(output, /Forgetful capture(?::| (saved|skipped|failed))/);
+          }
+        } finally {
+          skipExtraction = false;
+          await session.prompt("/forgetful verbosity debug");
+        }
+      },
+    );
+
+    await t.test(
+      "a later checkpoint reports a live capture retry after it succeeds",
+      async () => {
+        const beforeNotifications = notifications.length;
+        const beforeCreated = created.length;
+        createConflict = false;
+        skipExtraction = false;
+        failCaptureSearch = true;
+        try {
+          await session.prompt("We decided that this capture should retry.");
+          const failureDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) => /retry pending/.test(message)) &&
+            Date.now() < failureDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          failCaptureSearch = false;
+          skipExtraction = true;
+          await session.prompt("We decided that the retry should complete now.");
+          const captureDeadline = Date.now() + 3000;
+          while (
+            created.length < beforeCreated + 1 &&
+            Date.now() < captureDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) => /saved 1 memory/.test(message)) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          assert.equal(created.length, beforeCreated + 1);
+          assert.ok(
+            notifications
+              .slice(beforeNotifications)
+              .some(({ message }) => /saved 1 memory/.test(message)),
+            notifications.map(({ message }) => message).join("\n"),
+          );
+        } finally {
+          skipExtraction = false;
+          failCaptureSearch = false;
+        }
+      },
+    );
+
+    await t.test(
+      "observe capture reports candidates without claiming a saved memory",
+      async () => {
+        const beforeNotifications = notifications.length;
+        const beforeCreated = created.length;
+        await session.prompt("/forgetful capture observe");
+        try {
+          await session.prompt("Observe this durable decision without writing it.");
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                /Forgetful capture observed 1 candidate\./.test(message),
+              ) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          assert.equal(created.length, beforeCreated);
+          assert.ok(
+            notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                /Forgetful capture observed 1 candidate\./.test(message),
+              ),
+            notifications.map(({ message }) => message).join("\n"),
+          );
+        } finally {
+          await session.prompt("/forgetful capture auto");
+        }
+      },
+    );
+
+    await t.test(
       "capture skip excludes the run from later captures too",
       async () => {
         // Arrange.
         const marker = "Transient marker to skip: dune-lark-63";
         const captureCount = captureInputs.length;
+        const beforeCreated = created.length;
         await session.prompt("/forgetful capture skip");
 
         // Act: skip one run, then carry out a normal decision in the same session.
@@ -447,12 +772,12 @@ test(
         assert.equal(captureInputs.length, captureCount);
         await session.prompt("We confirmed local storage for this project.");
         const deadline = Date.now() + 3000;
-        while (created.length < 2 && Date.now() < deadline) {
+        while (created.length < beforeCreated + 1 && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
 
         // Assert at the memory-model boundary: skipped text never returns as later evidence.
-        assert.equal(created.length, 2);
+        assert.equal(created.length, beforeCreated + 1);
         assert.ok(
           captureInputs
             .at(-1)
@@ -599,6 +924,60 @@ test(
         );
       },
     );
+
+    await t.test(
+      "debug reports a capture failure once while leaving retry state durable",
+      async () => {
+        const beforeNotifications = notifications.length;
+        const beforeCreated = created.length;
+        skipExtraction = false;
+        createConflict = false;
+        failCaptureSearch = true;
+        try {
+          // Act: the overlap API fails after the candidate has been checkpointed.
+          await session.prompt(
+            "We decided that the test project needs a temporary failure test.",
+          );
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                /Forgetful capture(?: failed|:.*failed)/.test(message),
+              ) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          // Assert: the failure is bounded, user-only, and not duplicated.
+          const feedback = notifications
+            .slice(beforeNotifications)
+            .filter(({ message }) =>
+              /Forgetful capture(?: failed|:.*failed)/.test(message),
+            );
+          assert.equal(
+            feedback.length,
+            1,
+            notifications.map(({ message }) => message).join("\n"),
+          );
+          assert.equal(feedback[0]?.type, "info");
+          assert.match(feedback[0]?.message ?? "", /retry pending/);
+          assert.match(feedback[0]?.message ?? "", /503/);
+          assert.equal(created.length, beforeCreated);
+          assert.doesNotMatch(
+            notifications
+              .slice(beforeNotifications)
+              .map(({ message }) => message)
+              .join("\n"),
+            /capture worker skipped/,
+          );
+        } finally {
+          failCaptureSearch = false;
+        }
+      },
+    );
+
   },
 );
 

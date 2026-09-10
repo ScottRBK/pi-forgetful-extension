@@ -11,6 +11,7 @@ import {
   type CaptureServicePort,
   type RecallServicePort,
 } from "../src/extension.ts";
+import type { CaptureCheckpointResult } from "../src/capture.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import type {
   CaptureSnapshot,
@@ -31,7 +32,11 @@ interface FakeCapture extends CaptureServicePort {
   stopped: Array<{ sessionId?: string; branchId?: string }>;
   conflicts: unknown[];
   resolutions: Array<{ id: string; value: unknown }>;
-  diagnostics: () => Promise<unknown>;
+  diagnostics: (options?: {
+    sessionId?: string;
+    branchId?: string;
+    jobId?: string;
+  }) => Promise<unknown>;
 }
 
 interface Harness {
@@ -137,7 +142,12 @@ async function harness(
     },
     async checkpoint(value = {}) {
       this.checkpoints.push(value);
-      return { processed: 0, paused: false, errors: [] };
+      return {
+        processed: 0,
+        processedJobIds: [],
+        paused: false,
+        errors: [],
+      };
     },
     async advanceWatermark(value) {
       this.advanced.push(value);
@@ -2114,6 +2124,470 @@ test("skip and off advance the range while observe enqueues evidence", async () 
     ]);
   } finally {
     await off.cleanup();
+  }
+});
+
+test("debug does not report an unprocessed capture as no candidates", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 0,
+      paused: true,
+      errors: [],
+    } as unknown as CaptureCheckpointResult);
+    fixture.entries.push(entry("pending-user", "root", "user", "pending work"));
+    fixture.entries.push(
+      entry("pending-assistant", "pending-user", "assistant", "done", "stop"),
+    );
+    fixture.capture.diagnostics = async () => ({
+      jobs: [
+        {
+          id: fixture.capture.enqueued[0]?.id,
+          status: "complete",
+          candidates: [],
+        },
+      ],
+      conflicts: [],
+    });
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(
+      fixture.notifications.some((message) =>
+        message.includes("Forgetful capture skipped: no candidates."),
+      ),
+      false,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug reports a completed job when another live job is paused", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let checkpointCount = 0;
+  let firstJobId: string | undefined;
+  let releaseFirstCheckpoint: (value: CaptureCheckpointResult) => void = () =>
+    undefined;
+  let markFirstCheckpoint: () => void = () => undefined;
+  const firstCheckpointBegun = new Promise<void>((resolve) => {
+    markFirstCheckpoint = resolve;
+  });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => {
+      if (checkpointCount++ === 0) {
+        firstJobId = fixture.capture.enqueued.at(-1)?.id;
+        markFirstCheckpoint();
+        return new Promise<CaptureCheckpointResult>((done) => {
+          releaseFirstCheckpoint = (value) => {
+            done(value);
+          };
+        });
+      }
+      return {
+        processed: 1,
+        processedJobIds: firstJobId ? [firstJobId] : [],
+        paused: true,
+        errors: [],
+      };
+    };
+    fixture.capture.diagnostics = async (options) => {
+      const id = options?.jobId;
+      return {
+        jobs: [
+          id === firstJobId
+            ? {
+                id,
+                status: "complete",
+                candidates: [{ id: "saved", stage: "created" }],
+              }
+            : { id, status: "pending", candidates: [] },
+        ],
+        conflicts: [],
+      };
+    };
+    fixture.entries.push(entry("first-user", "root", "user", "first work"));
+    fixture.entries.push(
+      entry("first-assistant", "first-user", "assistant", "done", "stop"),
+    );
+    const firstSettled = fixture.emit("agent_settled", {
+      type: "agent_settled",
+    });
+    await firstCheckpointBegun;
+
+    fixture.entries.push(entry("second-user", "first-assistant", "user", "second work"));
+    fixture.entries.push(
+      entry("second-assistant", "second-user", "assistant", "done", "stop"),
+    );
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    releaseFirstCheckpoint({
+      processed: 0,
+      processedJobIds: [],
+      paused: true,
+      errors: [],
+    });
+    await firstSettled;
+
+    const deadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) =>
+        message.includes("Forgetful capture saved 1 memory."),
+      ) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(
+      fixture.notifications.includes("Forgetful capture saved 1 memory."),
+      fixture.notifications.join("\n"),
+    );
+  } finally {
+    releaseFirstCheckpoint({
+      processed: 0,
+      processedJobIds: [],
+      paused: true,
+      errors: [],
+    });
+    await fixture.cleanup();
+  }
+});
+
+test("debug reports unavailable capture diagnostics without calling it a failure", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let diagnosticsCalled!: () => void;
+  const diagnosticsStarted = new Promise<void>((resolve) => {
+    diagnosticsCalled = resolve;
+  });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async () => {
+      diagnosticsCalled();
+      throw new Error("diagnostics transport contains private details");
+    };
+    fixture.entries.push(entry("diagnostic-user", "root", "user", "diagnostic work"));
+    fixture.entries.push(
+      entry("diagnostic-assistant", "diagnostic-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    await diagnosticsStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const feedback = fixture.notifications.join("\n");
+    assert.match(feedback, /Forgetful capture outcome unavailable/);
+    assert.doesNotMatch(feedback, /Forgetful capture failed/);
+    assert.doesNotMatch(feedback, /private details/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug reports observed capture candidates distinctly from saved memories", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async (options) => ({
+      jobs: [
+        {
+          id: options?.jobId,
+          status: "complete",
+          candidates: [{ id: "observed", stage: "observed" }],
+        },
+      ],
+      conflicts: [],
+    });
+    fixture.entries.push(entry("observed-user", "root", "user", "observe work"));
+    fixture.entries.push(
+      entry("observed-assistant", "observed-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const deadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) =>
+        message.includes("Forgetful capture observed 1 candidate."),
+      ) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(
+      fixture.notifications.includes("Forgetful capture observed 1 candidate."),
+      fixture.notifications.join("\n"),
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug includes saved candidates when a capture retry is pending", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async (options) => ({
+      jobs: [
+        {
+          id: options?.jobId,
+          status: "pending",
+          attempts: 1,
+          lastError: "temporary overlap failure",
+          candidates: [{ id: "saved", stage: "created" }],
+        },
+      ],
+      conflicts: [],
+    });
+    fixture.entries.push(entry("retry-user", "root", "user", "retry work"));
+    fixture.entries.push(
+      entry("retry-assistant", "retry-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const deadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) =>
+        message.includes("retry pending"),
+      ) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const feedback = fixture.notifications.join("\n");
+    assert.match(feedback, /saved 1 memory/);
+    assert.match(feedback, /retry pending/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug does not count a partial write again when its retry completes", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let diagnosticsCount = 0;
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued[0]?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async (options) => {
+      const retry = diagnosticsCount++ > 0;
+      return {
+        jobs: [
+          {
+            id: options?.jobId,
+            status: retry ? "complete" : "pending",
+            ...(retry ? {} : { lastError: "temporary overlap failure" }),
+            candidates: [{ id: "saved", stage: "created" }],
+          },
+        ],
+        conflicts: [],
+      };
+    };
+    fixture.entries.push(entry("partial-user", "root", "user", "partial work"));
+    fixture.entries.push(
+      entry("partial-assistant", "partial-user", "assistant", "done", "stop"),
+    );
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const firstDeadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) => message.includes("retry pending")) &&
+      Date.now() < firstDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const firstFeedback = fixture.notifications.join("\n");
+    assert.match(firstFeedback, /saved 1 memory/);
+    assert.match(firstFeedback, /retry pending/);
+
+    fixture.entries.push(entry("retry-user", "partial-assistant", "user", "retry work"));
+    fixture.entries.push(
+      entry("retry-assistant", "retry-user", "assistant", "done", "stop"),
+    );
+    const beforeRetryNotifications = fixture.notifications.length;
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const secondDeadline = Date.now() + 500;
+    while (
+      !fixture.notifications
+        .slice(beforeRetryNotifications)
+        .some((message) => message.includes("completed after retry")) &&
+      Date.now() < secondDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const retryFeedback = fixture.notifications
+      .slice(beforeRetryNotifications)
+      .join("\n");
+    assert.match(retryFeedback, /completed after retry/);
+    assert.doesNotMatch(retryFeedback, /saved 1 memory/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("late capture diagnostics failure is dropped after session navigation", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let markDiagnosticsStarted: () => void = () => undefined;
+  let rejectDiagnostics: (error: unknown) => void = () => undefined;
+  const diagnosticsStarted = new Promise<void>((resolve) => {
+    markDiagnosticsStarted = resolve;
+  });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async () => {
+      markDiagnosticsStarted();
+      return new Promise<unknown>((_resolve, reject) => {
+        rejectDiagnostics = reject;
+      });
+    };
+    fixture.entries.push(entry("late-user", "root", "user", "late work"));
+    fixture.entries.push(
+      entry("late-assistant", "late-user", "assistant", "done", "stop"),
+    );
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    await diagnosticsStarted;
+    await fixture.emit("session_tree", {
+      type: "session_tree",
+      oldLeafId: "root",
+      newLeafId: "branch-b",
+    });
+    rejectDiagnostics(new Error("stale diagnostics failure"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const feedback = fixture.notifications.join("\n");
+    assert.doesNotMatch(feedback, /Forgetful capture outcome unavailable/);
+    assert.doesNotMatch(feedback, /Forgetful capture failed/);
+  } finally {
+    rejectDiagnostics(new Error("test cleanup"));
+    await fixture.cleanup();
+  }
+});
+
+test("late capture feedback is dropped after branch navigation", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let releaseCheckpoint: (value: CaptureCheckpointResult) => void = () =>
+    undefined;
+  let releaseStop: () => void = () => undefined;
+  let markCheckpointBegun: () => void = () => undefined;
+  const checkpointBegun = new Promise<void>((resolve) => {
+    markCheckpointBegun = resolve;
+  });
+  let markStopBegun: () => void = () => undefined;
+  const stopBegun = new Promise<void>((resolve) => {
+    markStopBegun = resolve;
+  });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => {
+      markCheckpointBegun();
+      return new Promise<CaptureCheckpointResult>((done) => {
+        releaseCheckpoint = done;
+      });
+    };
+    fixture.capture.stop = async () => {
+      markStopBegun();
+      await new Promise<void>((done) => {
+        releaseStop = done;
+      });
+    };
+    fixture.capture.diagnostics = async () => ({
+      jobs: [
+        {
+          id: fixture.capture.enqueued[0]?.id,
+          status: "complete",
+          candidates: [],
+        },
+      ],
+      conflicts: [],
+    });
+    fixture.entries.push(entry("branch-user", "root", "user", "branch work"));
+    fixture.entries.push(
+      entry("branch-assistant", "branch-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    await checkpointBegun;
+    const jobId = fixture.capture.enqueued[0]?.id;
+    assert.ok(jobId);
+
+    fixture.setLeaf("branch-b");
+    const tree = fixture.emit("session_tree", {
+      type: "session_tree",
+      oldLeafId: "root",
+      newLeafId: "branch-b",
+    });
+    await stopBegun;
+    releaseCheckpoint({
+      processed: 1,
+      processedJobIds: [jobId],
+      paused: false,
+      errors: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(
+      fixture.notifications.some((message) =>
+        message.includes("Forgetful capture skipped: no candidates."),
+      ),
+      false,
+    );
+    releaseStop();
+    await tree;
+  } finally {
+    releaseCheckpoint({ processed: 0, processedJobIds: [], paused: true, errors: [] });
+    releaseStop();
+    await fixture.cleanup();
   }
 });
 

@@ -108,6 +108,7 @@ export interface CaptureServiceOptions {
 
 export interface CaptureCheckpointResult {
   processed: number;
+  processedJobIds: string[];
   paused: boolean;
   errors: string[];
 }
@@ -2231,6 +2232,7 @@ export class CaptureService {
       const job = await this.queue.claimNext(this.identity, branch);
       if (!job) break;
       result.processed += 1;
+      result.processedJobIds.push(job.id);
       if (!(await this.processBranchJob(job, result))) break;
     }
   }
@@ -2262,6 +2264,7 @@ export class CaptureService {
   ): Promise<CaptureCheckpointResult> {
     const result: CaptureCheckpointResult = {
       processed: 0,
+      processedJobIds: [],
       paused: false,
       errors: [],
     };
@@ -2279,7 +2282,7 @@ export class CaptureService {
     options?: CaptureSnapshot | { sessionId?: string; branchId?: string },
   ): Promise<CaptureCheckpointResult> {
     if (this.stopped || !(await this.isEnabled()))
-      return { processed: 0, paused: true, errors: [] };
+      return { processed: 0, processedJobIds: [], paused: true, errors: [] };
     const requestedSessionId =
       options && "context" in options
         ? options.context.sessionId
@@ -2321,6 +2324,7 @@ export class CaptureService {
       : allBranches;
     const total: CaptureCheckpointResult = {
       processed: 0,
+      processedJobIds: [],
       paused: false,
       errors: [],
     };
@@ -2329,6 +2333,7 @@ export class CaptureService {
       if (remaining <= 0) break;
       const result = await this.checkpointBranch(branch, remaining);
       total.processed += result.processed;
+      total.processedJobIds.push(...result.processedJobIds);
       total.paused ||= result.paused;
       total.errors.push(...result.errors);
       remaining -= result.processed;
@@ -2346,6 +2351,7 @@ export class CaptureService {
   async diagnostics(options?: {
     sessionId?: string;
     branchId?: string;
+    jobId?: string;
     limit?: number;
   }): Promise<CaptureDiagnostics> {
     const limit = Math.max(1, Math.min(20, options?.limit ?? 20));
@@ -2355,7 +2361,8 @@ export class CaptureService {
           (!options?.sessionId ||
             job.snapshot.context.sessionId === options.sessionId) &&
           (!options?.branchId ||
-            job.snapshot.context.branchId === options.branchId),
+            job.snapshot.context.branchId === options.branchId) &&
+          (!options?.jobId || job.id === options.jobId),
       )
       .slice(-limit);
     const diagnosticJobs = jobs.map((job): CaptureDiagnosticJob => {

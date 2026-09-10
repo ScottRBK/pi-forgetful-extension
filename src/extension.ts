@@ -28,7 +28,7 @@ import {
   initialiseProjectForAgent,
   ProjectInitError,
 } from "./project-init.ts";
-import { CaptureService } from "./capture.ts";
+import { CaptureService, type CaptureCheckpointResult } from "./capture.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
   DEFAULT_FORGETFUL_BASE_URL,
@@ -222,7 +222,7 @@ export interface CaptureServicePort {
   checkpoint?(options?: {
     sessionId?: string;
     branchId?: string;
-  }): unknown;
+  }): Promise<CaptureCheckpointResult>;
   advanceWatermark?(update: {
     sessionId: string;
     branchId: string;
@@ -238,6 +238,7 @@ export interface CaptureServicePort {
   diagnostics?(options?: {
     sessionId?: string;
     branchId?: string;
+    jobId?: string;
     limit?: number;
   }): Promise<unknown>;
   resolveConflict?(
@@ -310,6 +311,7 @@ interface RecallActivity {
 
 interface Runtime {
   sessionId: string;
+  generation: number;
   cwd: string;
   config: ForgetfulConfig;
   client?: ForgetfulClient;
@@ -320,6 +322,8 @@ interface Runtime {
   branchId: string;
   baselineEntryId: string | null;
   lastCaptureEntryId?: string;
+  pendingCaptureJobs: Map<string, CaptureFeedbackState>;
+  captureFeedbackFlush?: Promise<void>;
   lastRecall?: RecallActivity;
   skipNextCapture: boolean;
   notifiedConflictIds: Set<string>;
@@ -819,6 +823,237 @@ function diagnosticSummary(value: unknown): string {
   );
 }
 
+function captureJobId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const jobId = (value as { jobId?: unknown }).jobId;
+  return typeof jobId === "string" && jobId.length <= 200
+    ? sanitizeText(jobId)
+    : undefined;
+}
+
+function captureWasQueued(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { queued?: unknown }).queued === true,
+  );
+}
+
+function captureProcessedJobIds(
+  value: CaptureCheckpointResult | undefined,
+): string[] {
+  if (!value) return [];
+  const ids = value.processedJobIds;
+  if (!Array.isArray(ids)) return [];
+  return ids
+    .filter((id): id is string => typeof id === "string")
+    .map((id) => sanitizeText(id).slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+interface CaptureFeedbackState {
+  reportedCandidateKeys: Set<string>;
+  lastFailureKey?: string;
+  lastUnavailable: boolean;
+  retried: boolean;
+}
+
+interface AutomaticCaptureJobOutcome {
+  ready: boolean;
+  terminal: boolean;
+  noCandidates: boolean;
+  candidateStages: Array<{ key: string; stage: string }>;
+  failure?: { detail: string; retryPending: boolean; key: string };
+}
+
+function automaticCaptureJobOutcome(
+  value: unknown,
+  jobId: string,
+): AutomaticCaptureJobOutcome | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const jobs = (value as { jobs?: unknown }).jobs;
+  if (!Array.isArray(jobs)) return undefined;
+  const job = jobs.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      (item as { id?: unknown }).id === jobId,
+  );
+  if (!job || typeof job !== "object") return undefined;
+  const diagnostic = job as {
+    status?: unknown;
+    candidates?: unknown;
+    lastError?: unknown;
+  };
+  const status = diagnostic.status;
+  const lastError =
+    typeof diagnostic.lastError === "string"
+      ? boundedErrorDiagnostic(diagnostic.lastError)
+      : undefined;
+  const candidates = Array.isArray(diagnostic.candidates)
+    ? diagnostic.candidates
+    : [];
+  const seen = new Set<string>();
+  const candidateStages = candidates.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const id = (item as { id?: unknown }).id;
+    const stage = (item as { stage?: unknown }).stage;
+    if (
+      typeof id !== "string" ||
+      typeof stage !== "string" ||
+      !["created", "superseded", "skipped", "observed"].includes(stage)
+    )
+      return [];
+    const key = `${sanitizeText(id).slice(0, 100)}\u0000${stage}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, stage }];
+  });
+  if (status === "failed" || (status === "pending" && lastError)) {
+    return {
+      ready: true,
+      terminal: status === "failed",
+      noCandidates: false,
+      candidateStages,
+      failure: {
+        detail: lastError ?? "worker failed",
+        retryPending: status === "pending",
+        key: `${status}:${lastError ?? "worker failed"}`,
+      },
+    };
+  }
+  if (status !== "complete") {
+    return {
+      ready: false,
+      terminal: false,
+      noCandidates: false,
+      candidateStages: [],
+    };
+  }
+  return {
+    ready: true,
+    terminal: true,
+    noCandidates: candidates.length === 0,
+    candidateStages,
+  };
+}
+
+async function readCaptureOutcome(
+  capture: CaptureServicePort,
+  runtime: Runtime,
+  jobId: string,
+): Promise<AutomaticCaptureJobOutcome | undefined> {
+  try {
+    const diagnostics = await capture.diagnostics?.({
+      sessionId: runtime.sessionId,
+      branchId: runtime.branchId,
+      jobId,
+      limit: 1,
+    });
+    return automaticCaptureJobOutcome(diagnostics, jobId);
+  } catch {
+    // A diagnostics failure must not turn a completed capture into a failed capture.
+    return undefined;
+  }
+}
+
+interface CaptureFeedbackItem {
+  jobId: string;
+  state: CaptureFeedbackState;
+  outcome: AutomaticCaptureJobOutcome;
+}
+
+function recordCaptureRetry({ state, outcome }: CaptureFeedbackItem): {
+  failure?: NonNullable<AutomaticCaptureJobOutcome["failure"]>;
+  recovered: boolean;
+} {
+  if (!outcome.failure) {
+    state.lastFailureKey = undefined;
+    return { recovered: state.retried };
+  }
+  const failure = state.lastFailureKey !== outcome.failure.key
+    ? outcome.failure : undefined;
+  state.lastFailureKey = outcome.failure.key;
+  if (outcome.failure.retryPending) state.retried = true;
+  return { failure, recovered: false };
+}
+
+function collectCaptureFeedback(items: CaptureFeedbackItem[]) {
+  let saved = 0;
+  let skipped = 0;
+  let observed = 0;
+  let noCandidates = 0;
+  let recovered = 0;
+  const failures: Array<{ detail: string; retryPending: boolean }> = [];
+  const terminalJobIds: string[] = [];
+  const ready = items.filter(({ outcome }) => outcome.ready);
+  for (const item of ready) {
+    const { outcome, state } = item;
+    const fresh = outcome.candidateStages.filter(
+      ({ key }) => !state.reportedCandidateKeys.has(key),
+    );
+    for (const candidate of outcome.candidateStages)
+      state.reportedCandidateKeys.add(candidate.key);
+    saved += fresh.filter(
+      ({ stage }) => stage === "created" || stage === "superseded",
+    ).length;
+    skipped += fresh.filter(({ stage }) => stage === "skipped").length;
+    observed += fresh.filter(({ stage }) => stage === "observed").length;
+    if (outcome.noCandidates) noCandidates += 1;
+    const retry = recordCaptureRetry(item);
+    if (retry.failure) failures.push(retry.failure);
+    if (retry.recovered) recovered += 1;
+    if (outcome.terminal) terminalJobIds.push(item.jobId);
+  }
+  return { ready: ready.length, saved, skipped, observed, noCandidates,
+    recovered, failures, terminalJobIds };
+}
+
+function captureCount(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function captureFeedbackParts(summary: ReturnType<typeof collectCaptureFeedback>): string[] {
+  const { saved, skipped, observed, noCandidates, recovered, failures } = summary;
+  const parts: string[] = [];
+  if (saved > 0)
+    parts.push(`saved ${captureCount(saved, "memory", "memories")}`);
+  if (skipped > 0)
+    parts.push(`skipped ${captureCount(skipped, "candidate", "candidates")}`);
+  if (observed > 0)
+    parts.push(`observed ${captureCount(observed, "candidate", "candidates")}`);
+  if (noCandidates > 0)
+    parts.push(noCandidates === 1 ? "skipped: no candidates" :
+      `skipped ${noCandidates} jobs with no candidates`);
+  if (failures.length > 0) {
+    const retry = failures.some((failure) => failure.retryPending) ? " (retry pending)" : "";
+    const count = summary.ready === 1 && parts.length === 0
+      ? "" : `${captureCount(failures.length, "job", "jobs")} `;
+    parts.push(`${count}failed${retry}: ${failures[0].detail}`);
+  }
+  if (recovered > 0)
+    parts.push(recovered === 1 ? "completed after retry" :
+      `${recovered} jobs completed after retry`);
+  return parts;
+}
+
+function automaticCaptureFeedback(
+  items: CaptureFeedbackItem[],
+  unavailable: number,
+): { message?: string; terminalJobIds: string[] } {
+  const summary = collectCaptureFeedback(items);
+  const { terminalJobIds } = summary;
+  const parts = captureFeedbackParts(summary);
+  if (unavailable > 0)
+    parts.push(`outcome unavailable for ${captureCount(unavailable, "job", "jobs")}`);
+  if (parts.length === 0) return { terminalJobIds };
+  if (summary.ready === 0 && unavailable > 0)
+    return { message: "Forgetful capture outcome unavailable.", terminalJobIds };
+  const separator = summary.ready === 1 && parts.length === 1 ? " " : ": ";
+  return { message: `Forgetful capture${separator}${parts.join("; ")}.`, terminalJobIds };
+}
+
 export function createForgetfulExtension(
   options: ForgetfulExtensionOptions = {},
 ): ExtensionFactory {
@@ -833,6 +1068,11 @@ export function createForgetfulExtension(
   };
 
   return (pi) => {
+    const isCurrentRuntime = (runtime: Runtime, ctx: ExtensionContext) =>
+      state.runtime === runtime &&
+      state.generation === runtime.generation &&
+      ctx.sessionManager.getSessionId() === runtime.sessionId;
+
     const showWarningOnce = (
       ctx: ExtensionContext,
       config: ForgetfulConfig,
@@ -1192,6 +1432,7 @@ export function createForgetfulExtension(
         );
         const runtime: Runtime = {
           sessionId: prepared.sessionId,
+          generation,
           cwd: ctx.cwd,
           config: prepared.config,
           client: prepared.client,
@@ -1202,6 +1443,7 @@ export function createForgetfulExtension(
           branchId: prepared.branchId,
           baselineEntryId: prepared.currentLeaf,
           skipNextCapture: state.skipNextCapture,
+          pendingCaptureJobs: new Map(),
           notifiedConflictIds: new Set(),
         };
         if (state.generation !== generation) {
@@ -1214,6 +1456,7 @@ export function createForgetfulExtension(
           void Promise.resolve(capture.checkpoint())
             .then(() => handoffPendingConflicts(runtime, ctx))
             .catch((error) => {
+              if (!isCurrentRuntime(runtime, ctx)) return;
               logFailure(ctx, runtime.config, "Forgetful recovery skipped", error);
             });
         }
@@ -1421,6 +1664,58 @@ export function createForgetfulExtension(
       }
     };
 
+    const reportCaptureOutcome = async (
+      runtime: Runtime,
+      ctx: ExtensionContext,
+      capture: CaptureServicePort,
+      checkpointResult: CaptureCheckpointResult | undefined,
+    ): Promise<void> => {
+      if (!isCurrentRuntime(runtime, ctx)) return;
+      const processedLiveJobIds = captureProcessedJobIds(checkpointResult).filter(
+        (id) => runtime.pendingCaptureJobs.has(id),
+      );
+      if (processedLiveJobIds.length === 0) return;
+      if (runtime.config.verbosity !== "debug") {
+        for (const id of processedLiveJobIds)
+          runtime.pendingCaptureJobs.delete(id);
+        return;
+      }
+      const previous = runtime.captureFeedbackFlush ?? Promise.resolve();
+      const flush = previous.then(async () => {
+        if (!isCurrentRuntime(runtime, ctx) || runtime.config.verbosity !== "debug") return;
+        const jobIds = processedLiveJobIds.filter((id) =>
+          runtime.pendingCaptureJobs.has(id),
+        );
+        if (jobIds.length === 0) return;
+        let unavailable = 0;
+        const results = await Promise.all(
+          jobIds.map(async (jobId) => ({
+            jobId,
+            outcome: await readCaptureOutcome(capture, runtime, jobId),
+          })),
+        );
+        if (!isCurrentRuntime(runtime, ctx)) return;
+        const items: CaptureFeedbackItem[] = [];
+        for (const { jobId, outcome } of results) {
+          const stateForJob = runtime.pendingCaptureJobs.get(jobId);
+          if (!stateForJob) continue;
+          if (!outcome) {
+            if (!stateForJob.lastUnavailable) unavailable += 1;
+            stateForJob.lastUnavailable = true;
+            continue;
+          }
+          stateForJob.lastUnavailable = false;
+          items.push({ jobId, state: stateForJob, outcome });
+        }
+        const feedback = automaticCaptureFeedback(items, unavailable);
+        for (const id of feedback.terminalJobIds)
+          runtime.pendingCaptureJobs.delete(id);
+        if (feedback.message) log(ctx, runtime.config, feedback.message, "debug");
+      });
+      runtime.captureFeedbackFlush = flush.catch(() => undefined);
+      await flush;
+    };
+
     const enqueueSettledCapture = async (
       runtime: Runtime,
       ctx: ExtensionContext,
@@ -1444,7 +1739,17 @@ export function createForgetfulExtension(
             toolName === "edit" || toolName === "write",
         });
         if (result.status === "ready") {
-          await capture.enqueue(result.snapshot);
+          const enqueueResult = await capture.enqueue(result.snapshot);
+          const jobId = captureWasQueued(enqueueResult)
+            ? captureJobId(enqueueResult)
+            : undefined;
+          if (jobId && runtime.config.verbosity === "debug") {
+            runtime.pendingCaptureJobs.set(jobId, {
+              reportedCandidateKeys: new Set(),
+              lastUnavailable: false,
+              retried: false,
+            });
+          }
           runtime.lastCaptureEntryId = result.snapshot.finalEntryId;
           void Promise.resolve(
             capture.checkpoint?.({
@@ -1452,15 +1757,45 @@ export function createForgetfulExtension(
               branchId: context.branchId,
             }),
           )
-            .then(() => handoffPendingConflicts(runtime, ctx))
+            .then(async (checkpointResult) => {
+              await reportCaptureOutcome(
+                runtime,
+                ctx,
+                capture,
+                checkpointResult,
+              );
+              await handoffPendingConflicts(runtime, ctx);
+            })
             .catch((error) => {
-              logFailure(ctx, runtime.config, "Forgetful capture worker skipped", error);
+              if (!isCurrentRuntime(runtime, ctx)) return;
+              if (runtime.config.verbosity === "debug") {
+                log(
+                  ctx,
+                  runtime.config,
+                  `Forgetful capture failed: ${boundedErrorDiagnostic(error)}.`,
+                  "debug",
+                );
+              } else {
+                logFailure(
+                  ctx,
+                  runtime.config,
+                  "Forgetful capture worker skipped",
+                  error,
+                );
+              }
             });
         } else {
           await advanceSettledRange(runtime, ctx, context, result.finalEntryId);
         }
       } catch (error) {
-        logFailure(ctx, runtime.config, "Forgetful capture enqueue failed", error, "error");
+        if (isCurrentRuntime(runtime, ctx))
+          logFailure(
+            ctx,
+            runtime.config,
+            "Forgetful capture enqueue failed",
+            error,
+            "error",
+          );
       }
     };
 

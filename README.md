@@ -163,7 +163,7 @@ capture destination. Explicit repository encoding can initialise its project thr
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
-| `/forgetful verbosity debug` | Show recalled context, elapsed time and detailed failures. |
+| `/forgetful verbosity debug` | Show recall details and automatic capture outcomes. |
 | `/forgetful verbosity info` | Show brief recall summaries, warnings and errors. |
 | `/forgetful verbosity warning` | Show warnings and errors (default). |
 | `/forgetful verbosity error` | Show errors only. |
@@ -184,6 +184,12 @@ shows search queries and intent, bounded retrieved candidates, selected/rejected
 the memory model's selection reason, its final summary, and total recall time. Content already
 shortened for review stays shortened in this display. These are user-only notifications, not
 extra conversation messages or log files.
+At debug level, automatic capture reports each newly queued live job as saved, skipped, no
+candidates, or failed. Retryable failures say that retry is pending. These notices are user-only
+and do not enter model context; `/forgetful status` remains the detailed view for recovered or
+older queue jobs.
+Overlapping results are combined into one notice; observe mode reports observed candidates, and a
+later retry reports completion without counting an earlier partial write twice.
 Automated preflight context is transient; tool results and conflict messages follow normal Pi
 session persistence. `/forgetful status` reports the verbosity and latest recall result.
 
