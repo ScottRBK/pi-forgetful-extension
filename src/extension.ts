@@ -1276,6 +1276,7 @@ export function createForgetfulExtension(
       runtime.lastCaptureEntryId = finalEntryId ?? entryIds.at(-1);
     };
 
+    let visibleRecalls = 0;
     const runRecall = async (
       ctx: ExtensionContext,
       runtime: Runtime,
@@ -1290,32 +1291,42 @@ export function createForgetfulExtension(
           reason: "memory-model-not-configured",
         };
       }
-      const context = await workContext(ctx, runtime);
-      return runtime.recall.recall({
-        prompt,
-        context,
-        scope: runtime.config.scope,
-        classificationPolicy: policyText(
-          runtime.config,
-          options.policies ?? {},
-          "classification",
-        ),
-        recallPolicy: policyText(
-          runtime.config,
-          options.policies ?? {},
-          "recall",
-        ),
-        signal,
-        projects: context.projects,
-        sessionContext: recallContextEntries(ctx),
-        authorizeScope: async (scope, reason) => {
-          if (!ctx.hasUI) return false;
-          return ctx.ui.confirm(
-            "Forgetful scope override",
-            `The memory planner requested ${scope} recall for this operation. ${reason}`,
-          );
-        },
-      });
+      const showStatus = ctx.hasUI;
+      if (showStatus) {
+        visibleRecalls += 1;
+        ctx.ui.setStatus("forgetful-recall", "Forgetful: recalling...");
+      }
+      try {
+        const context = await workContext(ctx, runtime);
+        return await runtime.recall.recall({
+          prompt,
+          context,
+          scope: runtime.config.scope,
+          classificationPolicy: policyText(
+            runtime.config,
+            options.policies ?? {},
+            "classification",
+          ),
+          recallPolicy: policyText(
+            runtime.config,
+            options.policies ?? {},
+            "recall",
+          ),
+          signal,
+          projects: context.projects,
+          sessionContext: recallContextEntries(ctx),
+          authorizeScope: async (scope, reason) => {
+            if (!ctx.hasUI) return false;
+            return ctx.ui.confirm(
+              "Forgetful scope override",
+              `The memory planner requested ${scope} recall for this operation. ${reason}`,
+            );
+          },
+        });
+      } finally {
+        if (showStatus && --visibleRecalls === 0)
+          ctx.ui.setStatus("forgetful-recall", undefined);
+      }
     };
 
     const consumeQueuedRecall = (

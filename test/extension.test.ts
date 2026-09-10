@@ -47,6 +47,7 @@ interface Harness {
   sentMessages: Array<{ message: unknown; options: unknown }>;
   sentUserMessages: Array<{ content: unknown; options: unknown }>;
   notifications: string[];
+  statuses: Map<string, string>;
   tools: Map<string, any>;
   cleanup(): Promise<void>;
 }
@@ -104,6 +105,7 @@ async function harness(
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
   const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
   const notifications: string[] = [];
+  const statuses = new Map<string, string>();
   const tools = new Map<string, any>();
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<
@@ -179,6 +181,10 @@ async function harness(
     hasUI: true,
     isProjectTrusted: () => true,
     ui: {
+      setStatus: (key: string, text: string | undefined) => {
+        if (text === undefined) statuses.delete(key);
+        else statuses.set(key, text);
+      },
       notify: (message: string) => {
         notifications.push(message);
       },
@@ -258,6 +264,7 @@ async function harness(
     sentMessages,
     sentUserMessages,
     notifications,
+    statuses,
     tools,
     setLeaf(value) {
       leaf = value;
@@ -720,6 +727,145 @@ async function recallReviewHarness(
   });
   return { ...fixture, modelInputs, modelPolicies };
 }
+
+for (const path of ["normal", "queued"]) {
+  test(`${path} recall shows a temporary footer status even at error verbosity`, async () => {
+    // Arrange: hold the external reviewer open while observing Pi's visible footer.
+    let release!: (value: unknown) => void;
+    const response = new Promise((resolve) => { release = resolve; });
+    let started!: () => void;
+    const reviewing = new Promise<void>((resolve) => { started = resolve; });
+    const fixture = await recallReviewHarness(() => {
+      started();
+      return response;
+    }, { verbosity: "error" });
+    fixture.statuses.set("another-extension", "Keep this status");
+    let pending: Promise<unknown> | undefined;
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+      // Act: submit a normal or queued prompt, then finish review.
+      pending = path === "normal"
+        ? fixture.emit("before_agent_start", {
+          type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+        })
+        : fixture.emit("input", {
+          type: "input", text: "Context size?", source: "interactive",
+          streamingBehavior: "followUp",
+        });
+      await reviewing;
+
+      // Assert: the status is visible during recall, without becoming chat or model content.
+      assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+      assert.equal(fixture.notifications.length, 0);
+      release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
+      await pending;
+      assert.deepEqual([...fixture.statuses], [["another-extension", "Keep this status"]]);
+      assert.equal(fixture.sentMessages.length, 0);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+    } finally {
+      release({ summary: "", memoryIds: [], reason: "Nothing relevant." });
+      await pending;
+      await fixture.cleanup();
+    }
+  });
+}
+
+for (const path of ["normal", "queued"]) {
+  for (const outcome of ["empty", "failure", "timeout", "cancelled"]) {
+    test(`${path} recall clears its footer status after ${outcome}`, async () => {
+      // Arrange: control external review completion without replacing the recall service.
+      let release!: (value: unknown) => void;
+      let fail!: (error: Error) => void;
+      const response = new Promise((resolve, reject) => { release = resolve; fail = reject; });
+      let started!: () => void;
+      const reviewing = new Promise<void>((resolve) => { started = resolve; });
+      const fixture = await recallReviewHarness(() => {
+        started();
+        return response;
+      }, { deadlineMs: outcome === "timeout" ? 100 : 1_000, verbosity: "error" });
+      const controller = new AbortController();
+      fixture.ctx.signal = controller.signal;
+      let pending: Promise<unknown> | undefined;
+      try {
+        await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+        // Act: end recall through each supported non-success path.
+        pending = path === "normal"
+          ? fixture.emit("before_agent_start", {
+            type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+          })
+          : fixture.emit("input", {
+            type: "input", text: "Context size?", source: "interactive",
+            streamingBehavior: "followUp",
+          });
+        await reviewing;
+        assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+        if (outcome === "empty") release({ summary: "", memoryIds: [], reason: "Unrelated." });
+        if (outcome === "failure") fail(new Error("Review provider unavailable"));
+        if (outcome === "cancelled") controller.abort();
+        const result = await pending;
+
+        // Assert: no stale status or unreviewed context survives, including on queued prompts.
+        assert.equal(fixture.statuses.size, 0);
+        if (path === "normal") assert.equal(result, undefined);
+        assert.equal(await fixture.emit("context", {
+          type: "context", messages: [{ role: "user", content: "Context size?" }],
+        }), undefined);
+        assert.equal(fixture.sentMessages.length, 0);
+      } finally {
+        release({ summary: "", memoryIds: [], reason: "Finished." });
+        await pending;
+        await fixture.cleanup();
+      }
+    });
+  }
+}
+
+test("overlapping recalls keep the footer status until both finish", async () => {
+  // Arrange: two external model responses can finish independently.
+  const reviews = [0, 1].map(() => {
+    let release!: (value: unknown) => void;
+    let started!: () => void;
+    const response = new Promise((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    return { response, ready, release, started };
+  });
+  let nextReview = 0;
+  const fixture = await recallReviewHarness(() => {
+    const review = reviews[nextReview++];
+    review.started();
+    return review.response;
+  });
+  const empty = { summary: "", memoryIds: [], reason: "No relevant context." };
+  const pending: Promise<unknown>[] = [];
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+    // Act: a queued prompt begins recall before the original prompt's recall finishes.
+    pending.push(fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+    }));
+    await reviews[0].ready;
+    pending.push(fixture.emit("input", {
+      type: "input", text: "And the serving limit?", source: "interactive",
+      streamingBehavior: "followUp",
+    }));
+    await reviews[1].ready;
+    reviews[0].release(empty);
+    await pending[0];
+
+    // Assert: finishing one recall cannot hide the other recall's status.
+    assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+    reviews[1].release(empty);
+    await pending[1];
+    assert.equal(fixture.statuses.size, 0);
+  } finally {
+    for (const review of reviews) review.release(empty);
+    await Promise.all(pending);
+    await fixture.cleanup();
+  }
+});
 
 test("automatic recall injects only the memory model's selected summary", async () => {
   // Arrange: real model/REST adapters; only the external responses are controlled.

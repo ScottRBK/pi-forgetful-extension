@@ -174,6 +174,10 @@ Verbosity is saved in user settings and applies immediately, including to queued
 (including `/forgetful status`) and normal Pi tool results remain visible at every level.
 Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
 
+During automatic recall, Pi shows `Forgetful: recalling...` in the footer at every verbosity level.
+The status clears when recall finishes, including on failure or cancellation. It is not added to
+chat or model context; the main agent still waits for recall before starting.
+
 At info level, recall reports the number of selected memories and scope used. Debug additionally
 shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
 the memory model's selection reason, its final summary, and total recall time. Content already
