@@ -677,6 +677,7 @@ async function recallReviewHarness(
     verbosity?: string;
     fetchImpl?: typeof fetch;
     entities?: string[];
+    plan?: () => unknown | Promise<unknown>;
   } = {},
 ) {
   const modelInputs: string[] = [];
@@ -690,7 +691,8 @@ async function recallReviewHarness(
       const input = JSON.parse(String(context.messages[0]?.content));
       const output = input.availableSources
         ? await review(input, completionOptions?.signal)
-        : { search: true, queries: ["MiniCPM context size"], queryIntent: "Serving limits",
+        : options.plan ? await options.plan() : {
+          search: true, queries: ["MiniCPM context size"], queryIntent: "Serving limits",
           entities: options.entities ?? [] };
       return {
         role: "assistant", content: [{ type: "text", text: JSON.stringify(output) }],
@@ -1064,6 +1066,120 @@ for (const timeout of ["overall", "model"]) {
       await fixture.cleanup();
     }
   });
+}
+
+for (const path of ["normal", "queued", "foreground"]) {
+  for (const clockJumpMs of [-60_000, 60_000]) {
+    const name = `${path} recall reports elapsed time despite a ${clockJumpMs} ms clock jump`;
+    test(name, async (t) => {
+      // Arrange: real timers continue while the external wall clock changes mid-recall.
+      const wallNow = Date.now.bind(Date);
+      const stall = (signal?: AbortSignal | null) => {
+        t.mock.method(Date, "now", () => wallNow() + clockJumpMs);
+        return new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      const fixture = await recallReviewHarness((_input, signal) => stall(signal), {
+        deadlineMs: 200,
+        ...(path === "foreground" ? {
+          fetchImpl: async (_url: unknown, init?: RequestInit) => stall(init?.signal),
+        } : {}),
+      });
+      try {
+        await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+        // Act: let recall reach its deadline through each user-facing entry point.
+        const startedAt = performance.now();
+        if (path === "normal") {
+          assert.equal(await fixture.emit("before_agent_start", {
+            type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+          }), undefined);
+        } else if (path === "queued") {
+          await fixture.emit("input", {
+            type: "input", text: "Context size?", source: "interactive",
+            streamingBehavior: "followUp",
+          });
+          assert.equal(await fixture.emit("context", {
+            type: "context", messages: [{ role: "user", content: "Context size?" }],
+          }), undefined);
+        } else {
+          await assert.rejects(fixture.tools.get("forgetful_recall")!.execute(
+            "clock", { query: "Context size?" }, undefined, undefined, fixture.ctx,
+          ), /Forgetful recall is unavailable/);
+        }
+        const actualElapsedMs = performance.now() - startedAt;
+
+        // Assert: debug agrees with real elapsed time, not the changed wall clock.
+        const debug = fixture.notifications.join("\n");
+        assert.match(debug, /Overall recall deadline exceeded \(200 ms/);
+        assert.match(debug, /No memory context was supplied/);
+        const displayed = /Forgetful recall took (\d+) ms\./.exec(debug);
+        assert.ok(displayed, debug);
+        assert.ok(Number(displayed[1]) >= 150, debug);
+        assert.ok(Math.abs(Number(displayed[1]) - actualElapsedMs) < 100, debug);
+      } finally {
+        t.mock.restoreAll();
+        await fixture.cleanup();
+      }
+    });
+  }
+}
+
+for (const clockJumpMs of [-60_000, 60_000]) {
+  test(`scope approval preserves active recall budget after a ${clockJumpMs} ms clock jump`,
+    async (t) => {
+      // Arrange: planning uses half the budget; user approval takes longer than the whole budget.
+      const wallNow = Date.now.bind(Date);
+      let approvalElapsedMs = 0;
+      let reviewStarted = false;
+      const fixture = await recallReviewHarness((_input, signal) => {
+        reviewStarted = true;
+        return new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }, {
+        deadlineMs: 400,
+        modelTimeoutMs: 1_500,
+        plan: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          t.mock.method(Date, "now", () => wallNow() + clockJumpMs);
+          return {
+            search: true, queries: ["MiniCPM context size"], queryIntent: "Serving limits",
+            entities: [], scopeOverride: { scope: "project", reason: "Use local settings." },
+          };
+        },
+      });
+      fixture.ctx.ui.confirm = async () => {
+        const startedAt = performance.now();
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        approvalElapsedMs = performance.now() - startedAt;
+        return true;
+      };
+      try {
+        await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+        // Act: approve the narrower scope, then let review exhaust the remaining active budget.
+        const startedAt = performance.now();
+        const result = await fixture.emit("before_agent_start", {
+          type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+        });
+        const activeElapsedMs = performance.now() - startedAt - approvalElapsedMs;
+
+        // Assert: approval time is excluded, but planning time is not refunded on resume.
+        const debug = fixture.notifications.join("\n");
+        assert.equal(result, undefined);
+        assert.equal(reviewStarted, true, debug);
+        assert.ok(approvalElapsedMs >= 550);
+        assert.match(debug,
+          /recall review: TimeoutError: Overall recall deadline exceeded \(400 ms/);
+        assert.ok(activeElapsedMs >= 350 && activeElapsedMs < 500,
+          `Active recall took ${activeElapsedMs} ms.\n${debug}`);
+      } finally {
+        t.mock.restoreAll();
+        await fixture.cleanup();
+      }
+    });
 }
 
 for (const verbosity of ["debug", "info", "warning", "error"]) {

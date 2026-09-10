@@ -421,7 +421,7 @@ function recordRecallActivity(
   }
   if (result.debugTrace)
     log(ctx, config, sanitizeText(result.debugTrace).slice(0, 10_000), "debug");
-  log(ctx, config, `Forgetful recall took ${elapsedMs} ms.\n` +
+  log(ctx, config, `Forgetful recall took ${Math.round(elapsedMs)} ms.\n` +
     (result.text ? `Recalled context:\n${sanitizeText(result.text).slice(0, 6_000)}` :
       "No memory context was supplied."), "debug");
 }
@@ -1461,9 +1461,9 @@ export function createForgetfulExtension(
         const runtime = await loadRuntime(ctx);
         state.activeQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
         if (!runtime.config.enabled) return;
-        const startedAt = Date.now();
+        const startedAt = performance.now();
         const result = await runRecall(ctx, runtime, event.prompt, ctx.signal);
-        recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
+        recordRecallActivity(runtime, result, ctx, performance.now() - startedAt);
         if (!result.text) return;
         return { systemPrompt: `${event.systemPrompt}\n\n${result.text}` };
       } catch (error) {
@@ -1483,9 +1483,9 @@ export function createForgetfulExtension(
       try {
         const runtime = await loadRuntime(ctx);
         if (!runtime.config.enabled) return { action: "continue" as const };
-        const startedAt = Date.now();
+        const startedAt = performance.now();
         const result = await runRecall(ctx, runtime, event.text, ctx.signal);
-        recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
+        recordRecallActivity(runtime, result, ctx, performance.now() - startedAt);
         if (result.text) {
           const key = sessionKey(ctx, runtime.branchId);
           const pending = state.pendingQueuedRecall.get(key) ?? [];
@@ -1873,7 +1873,7 @@ export function createForgetfulExtension(
           checkSession();
           const context = await workContext(ctx, runtime);
           checkSession();
-          const startedAt = Date.now();
+          const startedAt = performance.now();
           const result = await runtime.recall.deeper({
             query: params.query,
             context,
@@ -1882,7 +1882,7 @@ export function createForgetfulExtension(
             projects: context.projects,
           });
           checkSession();
-          recordRecallActivity(runtime, result, ctx, Date.now() - startedAt);
+          recordRecallActivity(runtime, result, ctx, performance.now() - startedAt);
           const unavailable = !result.text && [
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");

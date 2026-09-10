@@ -309,7 +309,7 @@ function createDeadlineSignal(
   let expired = false;
   let paused = false;
   let remaining = deadlineMs;
-  let startedAt = Date.now();
+  let startedAt = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => controller.abort();
   if (callerSignal?.aborted) {
@@ -332,12 +332,12 @@ function createDeadlineSignal(
       if (paused || expired) return;
       paused = true;
       if (timer) clearTimeout(timer);
-      remaining = Math.max(0, remaining - (Date.now() - startedAt));
+      remaining = Math.max(0, remaining - (performance.now() - startedAt));
     },
     resume: () => {
       if (!paused || expired || controller.signal.aborted) return;
       paused = false;
-      startedAt = Date.now();
+      startedAt = performance.now();
       if (remaining <= 0) expire();
       else timer = setTimeout(expire, remaining);
     },
