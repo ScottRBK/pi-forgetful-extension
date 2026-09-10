@@ -132,7 +132,7 @@ test(
 );
 
 test(
-  "automatic recall appends rich graph context after the memory result",
+  "automatic recall reviews memory and rich graph context before injection",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -161,7 +161,10 @@ test(
     await client.knowledge.linkEntityMemory(entity.id, memory.id);
 
     const service = new RecallService(client, {
-      complete: async () => ({
+      complete: async (request) => request.purpose === "recall-review" ? {
+        summary: "The API request boundary validates requests; the API entity accepts them.",
+        memoryIds: [memory.id], entityIds: [entity.id], reason: "Both describe the API boundary.",
+      } : ({
         search: true,
         queries: ["API request boundary"],
         queryIntent: "Find the API boundary",
@@ -185,7 +188,7 @@ test(
 
     assert.deepEqual(result.memoryIds, [memory.id]);
     assert.match(result.text, /API request boundary/);
-    assert.match(result.text, new RegExp(`Entity #${entity.id}: API`));
+    assert.match(result.text, new RegExp(`Entity #${entity.id}`));
 
     const deeper = await service.deeper({
       query: "API",
@@ -231,7 +234,10 @@ test(
       branchId: "branch-1",
     };
     const service = new RecallService(client, {
-      complete: async () => ({
+      complete: async (request) => request.purpose === "recall-review" ? {
+        summary: "The API entity accepts requests.", memoryIds: [], entityIds: [entity.id],
+        reason: "The entity describes the requested API even without memory matches.",
+      } : ({
         search: true,
         queries: ["no stored memory matches this topic"],
         queryIntent: "Find an absent memory",
@@ -247,7 +253,7 @@ test(
       deadlineMs: 4_000,
     });
     assert.deepEqual(automatic.memoryIds, []);
-    assert.match(automatic.text, new RegExp(`Entity #${entity.id}: API`));
+    assert.match(automatic.text, new RegExp(`Entity #${entity.id}`));
 
     const deeper = await service.deeper({
       query: "API",
@@ -261,7 +267,7 @@ test(
 );
 
 test(
-  "optional rich recall failure and timeout preserve atomic memories",
+  "optional rich failure permits review but overall timeout never injects unreviewed memories",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -287,7 +293,11 @@ test(
       branchId: "branch-1",
     };
     const plan = {
-      complete: async () => ({
+      complete: async (request: import("../src/contracts.ts").ModelRequest) =>
+        request.purpose === "recall-review" ? {
+          summary: "Stable memory: the atomic result remains useful.", memoryIds: [memory.id],
+          reason: "The atomic result is relevant without optional enrichment.",
+        } : ({
         search: true,
         queries: ["Stable memory"],
         queryIntent: "Find the stable memory",
@@ -329,13 +339,14 @@ test(
       deadlineMs: 500,
     });
     client.knowledge.searchEntities = originalSearchEntities;
-    assert.deepEqual(timedOut.memoryIds, [memory.id]);
-    assert.match(timedOut.text, /Stable memory/);
+    assert.deepEqual(timedOut.memoryIds, []);
+    assert.equal(timedOut.text, "");
+    assert.equal(timedOut.reason, "deadline-exceeded");
   },
 );
 
 test(
-  "long memory results reserve visible rich context and policy space",
+  "long candidates yield a bounded summary with reviewed rich sources and policy",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -361,7 +372,7 @@ test(
       project_id: project.id,
     });
     const longContent = "long recall anchor ".repeat(70);
-    const memories = [];
+    const memories: Array<{ id: number }> = [];
     for (const index of [1, 2, 3]) {
       memories.push(await client.create({
         title: `Long recall anchor ${index}`,
@@ -375,7 +386,11 @@ test(
     }
     await client.knowledge.linkEntityMemory(entity.id, memories[0].id);
     const service = new RecallService(client, {
-      complete: async () => ({
+      complete: async (request) => request.purpose === "recall-review" ? {
+        summary: "Long architecture document: the API boundary is explained in the document.",
+        memoryIds: [memories[0].id], entityIds: [entity.id], documentIds: [document.id],
+        reason: "These sources describe the same API boundary.",
+      } : ({
         search: true,
         queries: ["long recall anchor"],
         queryIntent: "Find long recall context",
@@ -398,7 +413,7 @@ test(
     });
 
     assert.ok(result.memoryIds.length > 0);
-    assert.match(result.text, new RegExp(`Entity #${entity.id}: API`));
+    assert.match(result.text, new RegExp(`Entity #${entity.id}`));
     assert.match(result.text, /Long architecture document/);
     assert.match(result.text, /Recall handling policy/);
     assert.ok(result.text.length <= 6_000);

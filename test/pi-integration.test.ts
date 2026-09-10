@@ -181,7 +181,15 @@ test(
                     .join("")
                 : "{}";
           const input = JSON.parse(inputText) as Record<string, unknown>;
-          if (
+          if (input.availableSources) {
+            const prompt = (input.work as { prompt: string }).prompt;
+            decision = prompt === "queued request one"
+              ? { summary: "Queue one memory.", memoryIds: [43], reason: "First queued topic" }
+              : prompt === "queued request two"
+                ? { summary: "Queue two memory.", memoryIds: [44], reason: "Second queued topic" }
+                : { summary: "SQLite was chosen for durable state.", memoryIds: [42],
+                  reason: "The database decision answers the question." };
+          } else if (
             input.prompt === "queued request one" ||
             input.prompt === "queued request two"
           ) {
@@ -358,12 +366,15 @@ test(
 
     // Assert: the real provider sees recall, but the saved session does not contain that injection.
     assert.equal(mainContexts.length, 1, JSON.stringify(session.messages));
-    assert.equal(memoryContexts.length, 1);
-    assert.deepEqual(providerSessions.slice(0, 2), [
+    assert.equal(memoryContexts.length, 2);
+    assert.deepEqual(providerSessions.slice(0, 3), [
+      { model: "memory", sessionId: sessionManager.getSessionId() },
       { model: "memory", sessionId: sessionManager.getSessionId() },
       { model: "main", sessionId: sessionManager.getSessionId() },
     ]);
-    assert.ok(mainContexts[0]?.systemPrompt?.includes(memory.content));
+    assert.ok(mainContexts[0]?.systemPrompt?.includes("SQLite was chosen for durable state."));
+    assert.ok(!mainContexts[0]?.systemPrompt?.includes(memory.content));
+    assert.ok(JSON.stringify(memoryContexts[1]).includes(memory.content));
     assert.ok(
       JSON.stringify(memoryContexts[0]).includes(
         "Which database did we choose?",
@@ -372,6 +383,8 @@ test(
     assert.ok(
       !JSON.stringify(sessionManager.getEntries()).includes(memory.content),
     );
+    assert.ok(!JSON.stringify(sessionManager.getEntries())
+      .includes("SQLite was chosen for durable state."));
     assert.ok(session.getActiveToolNames().includes("forgetful_recall"));
     assert.ok(session.getActiveToolNames().includes("forgetful_resolve"));
     assert.equal(queries.length, 1);

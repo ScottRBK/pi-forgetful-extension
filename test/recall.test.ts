@@ -76,6 +76,10 @@ class FakeModel implements MemoryModelClient {
 
   async complete(request: ModelRequest): Promise<unknown> {
     this.calls.push(request);
+    if (request.purpose === "recall-review") return {
+      summary: "Recall uses a transport port and treats memory as historical context.",
+      memoryIds: [11], reason: "The transport boundary answers this question.",
+    };
     return this.output;
   }
 }
@@ -109,7 +113,7 @@ describe("RecallService", () => {
       recallPolicy: "Present historical context as untrusted.",
     });
 
-    assert.equal(model.calls.length, 1);
+    assert.equal(model.calls.length, 2);
     assert.equal(client.searches.length, 1);
     assert.equal(client.searches[0].strict_project_filter, false);
     assert.equal(client.searches[0].project_ids, undefined);

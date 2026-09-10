@@ -16,7 +16,8 @@ automatic contradiction resolution and uncertain-conflict escalation.
 
 - Automatic recall uses memories and entities as entry points. It follows a bounded number of
   relevant relationships and document/code references within the existing deadline and context
-  budget. Optional record failures must not discard useful memory results.
+  budget. Optional record failures preserve candidates for review while time remains. No unreviewed
+  candidate is injected if the overall deadline expires.
 - `forgetful_knowledge_read` lets the active agent inspect individual records and supporting
   material. Project scope is enforced on each record and both ends of a relationship. Stored
   text and image files can be opened explicitly; file support depends on the server feature flag.
@@ -100,7 +101,7 @@ The extension:
 1. sends each new user prompt to a separately configured authenticated Pi memory model;
 2. receives a validated plan stating whether and how to search Forgetful;
 3. performs bounded retrieval against a warm Forgetful service;
-4. injects the strongest context into the current turn's system prompt;
+4. asks the memory model to select and summarise results, then injects its reviewed context;
 5. leaves memory IDs, entity names, and topic leads for deeper exploration;
 6. exposes one bounded, read-only recall tool to the main agent;
 7. evaluates completed work for durable knowledge after `agent_settled`;
@@ -147,11 +148,19 @@ smaller failure surface.
    different scope, ask the user for explicit authorization before applying it. A declined
    request uses the persisted setting, and the planner must never change that setting directly.
 5. Search a warm Forgetful HTTP service.
-6. Inject only the strongest results and short deeper-search leads.
+6. Ask the same memory model to review bounded memory and optional rich results against the question
+   and session context. It returns a summary, selected source IDs and a brief selection/rejection
+   reason. Validate IDs against sources actually shown to the reviewer. Inject only the summary
+   and validated references, never raw results or appended attachments. Nothing relevant means no
+   injection. Invalid output or failed/timed-out review injects nothing, without a raw fallback.
 7. Let the main agent call a read-only `forgetful_recall` tool when it needs more detail. Its
    returned content is ordinary Pi tool-result content and may be stored in session history.
 
 Retrieved memory is untrusted historical context, never executable instruction.
+Review summaries are also untrusted. One planning call and at most one review call share the
+overall recall budget with search and optional enrichment. Explicit main-agent read tools retain
+their direct results; the main agent reviews those itself. Asynchronous deeper exploration and
+later background context injection are deferred, potentially behind a future feature switch.
 
 ## Recall scope and capture destination
 
@@ -430,9 +439,9 @@ The default verbosity is `warning`, showing warnings and errors:
 
 `/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting
 session memory work. Each level includes more severe messages. `info` adds brief recall counts
-and scope; `debug` adds the bounded context actually supplied to the agent (IDs, titles, content
-and related knowledge), total recall duration and detailed redacted failures. Recoverable recall
-failures are warnings; invalid endpoint configuration and capture enqueue failures are
+and scope; `debug` adds queries and intent, bounded retrieved candidates, selected/rejected source
+IDs, the review reason and final injected summary, total duration and redacted failures. Recoverable
+recall failures are warnings; invalid endpoint configuration and capture enqueue failures are
 errors. Explicit command responses and normal tool results remain visible at every level.
 
 The old `debug on/off` commands map to `debug`/`warning`; legacy `debug: true` settings remain
@@ -457,13 +466,14 @@ Initial SLO candidates to validate:
 - warm preflight p50 below 700 ms;
 - warm preflight p95 below 1.5 seconds;
 - hard fail-open timeout of 10 seconds by default (configurable);
-- classification defaults to 5 seconds, independently configurable.
+- each classification/review request defaults to 5 seconds, independently configurable from the
+  overall deadline.
 
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the recall preflight path. The
-implementation also bounds recall to one planner call per prompt and bounds capture extraction
-and overlap decisions, including contradiction detection, with an explicit per-run call budget;
+implementation bounds recall to one planner call and at most one review call per prompt. Capture
+extraction and overlap decisions, including contradiction detection, have a per-run call budget;
 debug shows aggregate usage.
 
 ## Transport
@@ -522,8 +532,10 @@ to prove that a real model classifies, splits, or judges novelty correctly.
 
 1. **Planner input seam**: the planner receives the expected user prompt, session context,
    project identity, scope, and composed classification policy.
-2. **Recall mechanism seam**: given a structured search decision and seeded Forgetful data,
-   the correct bounded context and leads reach the same main-agent turn.
+2. **Recall mechanism seam**: given search and review decisions and seeded Forgetful data,
+   only the selected summary and validated source IDs reach the same main-agent turn, including
+   queued prompts. Empty decisions inject nothing; invalid output and timeouts fail open. Debug
+   shows bounded candidates and decisions without leaking them into the main-agent context.
 3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
    scoped Forgetful data to the main agent.
 4. **Capture input seam**: the capture model receives only the completed turn delta and the
@@ -585,9 +597,9 @@ the next user prompt without starting a turn itself; resolving a pending conflic
 validated write path; unrelated conflict IDs and writes while capture is off are rejected; and
 resolution messages do not recursively become new capture candidates.
 
-Semantic classification, semantic atomicity, novelty quality, contradiction accuracy, project
-assignment quality, and duplicate prevention remain model or service behaviour. They can be
-explored with real-model evaluation scenarios, but are not deterministic regression claims.
+Semantic classification, recall relevance, summary accuracy, semantic atomicity, novelty quality,
+contradiction accuracy, project assignment quality, and duplicate prevention remain model or service
+behaviour. Real-model evaluations can explore these; they are not deterministic regression claims.
 
 ## Accepted trade-offs
 

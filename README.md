@@ -174,18 +174,19 @@ Verbosity is saved in user settings and applies immediately, including to queued
 (including `/forgetful status`) and normal Pi tool results remain visible at every level.
 Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
 
-At info level, recall reports the number of memories and scope used. Debug additionally shows
-the actual bounded context supplied to the agent: memory IDs, titles, content and any related
-knowledge, plus total recall time. Content already shortened for recall stays shortened in this
-display. These are user-only notifications, not extra conversation messages or log files.
+At info level, recall reports the number of selected memories and scope used. Debug additionally
+shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
+the memory model's selection reason, its final summary, and total recall time. Content already
+shortened for review stays shortened in this display. These are user-only notifications, not
+extra conversation messages or log files.
 Automated preflight context is transient; tool results and conflict messages follow normal Pi
 session persistence. `/forgetful status` reports the verbosity and latest recall result.
 
 Recoverable recall failures, including timeouts, are warnings; invalid endpoint configuration and
 capture enqueue failures are errors. Debug failure warnings name the failing step and exception.
-Overall recall timeouts show the configured `timeout_ms` limit, which planning and search share. Caller
-cancellations are reported separately with the supplied reason when available. Exception details
-are bounded and redacted; recalled text also passes through known-secret redaction.
+Overall recall timeouts show the `timeout_ms` limit shared by planning, search, enrichment and
+review. Caller cancellations are reported separately with their supplied reason when available.
+Details are bounded and redacted; recalled text also passes through known-secret redaction.
 
 The main model can search further with `forgetful_recall`, inspect records and supporting material
 with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_knowledge_write`.
@@ -203,15 +204,28 @@ its separate, bounded context budget.
 
 The memory model returns a validated plan with bounded topic queries, intent, entities, and an
 optional scope request. The extension resolves global or strict project scope, searches Forgetful,
-and injects the strongest results plus short leads for deeper exploration. A planner-requested
-scope change requires explicit approval for that operation and does not change the persisted
-preference.
+then asks the same memory model to review the bounded results against the current question and
+session context. The model rejects unrelated matches and returns a concise summary with source IDs.
+Only that summary and validated references reach the main agent, not the raw results or attachments.
+If nothing is relevant, nothing is injected. A planner-requested scope change requires explicit
+approval for that operation and does not change the persisted preference.
 
 Recall can follow entities, relationships and supporting documents or code artifacts within its
 time and output limits. The active agent can explicitly open supporting records for more detail,
 including stored files. Strict project scope also applies to linked records and relationship
 endpoints. Files require the server's optional file feature; an unavailable feature does not
 prevent ordinary memory recall.
+
+Review is one additional model request, within the existing overall deadline. Invalid review
+output, unknown source IDs, cancellation or a timeout inject nothing; raw results are never a
+fallback for failed review. Summaries remain untrusted historical context. The model can retain
+title-only memory links as leads, but must not invent their unseen contents.
+
+Explicit `forgetful_recall` and `forgetful_knowledge_read` calls still return read-only results
+directly to the main agent, which chooses what to use. They do not add a background review call.
+Optional asynchronous deeper exploration is deferred; this release adds no background injections.
+Regression tests cover structured decisions and failure handling, not real-model relevance or
+summary accuracy. Those require separate evaluations.
 
 ### Capture
 
@@ -232,7 +246,7 @@ Project scope is stored in `.pi/forgetful/settings.json` and requires Pi project
 scope setting means global recall. A malformed scope setting also uses global recall with a
 warning. Scope preference is independent of capture destination.
 
-`recall_model_timeout_ms` limits the background classification request (default 5,000 ms).
+`recall_model_timeout_ms` limits each classification and review request (default 5,000 ms).
 `timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
 10,000 ms). Both settings are positive integer milliseconds in the user settings file. The
 overall deadline still applies when the model deadline is longer. Capture and overlap retain

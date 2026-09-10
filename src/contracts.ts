@@ -200,7 +200,7 @@ export interface ForgetfulClient {
 }
 
 export interface ModelRequest {
-  purpose: "classification" | "capture" | "overlap";
+  purpose: "classification" | "recall-review" | "capture" | "overlap";
   policy: string;
   input: unknown;
   signal?: AbortSignal;

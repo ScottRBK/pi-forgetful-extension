@@ -419,6 +419,8 @@ function recordRecallActivity(
   } else {
     log(ctx, config, `Forgetful recall completed: ${recallActivitySummary(runtime.lastRecall)}.`);
   }
+  if (result.debugTrace)
+    log(ctx, config, sanitizeText(result.debugTrace).slice(0, 10_000), "debug");
   log(ctx, config, `Forgetful recall took ${elapsedMs} ms.\n` +
     (result.text ? `Recalled context:\n${sanitizeText(result.text).slice(0, 6_000)}` :
       "No memory context was supplied."), "debug");

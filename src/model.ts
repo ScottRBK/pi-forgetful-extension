@@ -40,7 +40,7 @@ const RESPONSE_LIMIT = 32_000;
 const CAPTURE_TIMEOUT_MS = 15_000;
 
 export interface PiMemoryModelOptions {
-  /** Classification deadline; capture and overlap retain their 15-second deadline. */
+  /** Per-call classification/review deadline; capture and overlap retain 15 seconds. */
   classificationTimeoutMs?: number;
   /** Compatibility alias for classificationTimeoutMs. */
   timeoutMs?: number;
@@ -184,7 +184,7 @@ function requestTimeout(
   request: ModelRequest,
   classificationTimeoutMs: number,
 ): number {
-  return request.purpose === "classification"
+  return request.purpose === "classification" || request.purpose === "recall-review"
     ? classificationTimeoutMs
     : CAPTURE_TIMEOUT_MS;
 }
