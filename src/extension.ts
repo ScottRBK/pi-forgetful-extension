@@ -13,7 +13,7 @@ import {
   ModelSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, UserMessage } from "@earendil-works/pi-ai";
-import { Text } from "@earendil-works/pi-tui";
+import { Loader, Text } from "@earendil-works/pi-tui";
 import type {
   CaptureSnapshot,
   EvidenceEntry,
@@ -63,6 +63,12 @@ import {
   KNOWLEDGE_READ_PARAMETERS, KNOWLEDGE_WRITE_PARAMETERS,
   executeKnowledgeRead, executeKnowledgeWrite,
 } from "./knowledge-tools.ts";
+
+class RecallLoader extends Loader {
+  dispose(): void {
+    this.stop();
+  }
+}
 
 const POLICY_CONTRACTS = {
   classification: [
@@ -1291,10 +1297,21 @@ export function createForgetfulExtension(
           reason: "memory-model-not-configured",
         };
       }
-      const showStatus = ctx.hasUI;
-      if (showStatus) {
+      const showWidget = ctx.mode === "tui";
+      if (showWidget) {
         visibleRecalls += 1;
-        ctx.ui.setStatus("forgetful-recall", "Forgetful: recalling...");
+        if (visibleRecalls === 1) {
+          ctx.ui.setWidget(
+            "forgetful-recall",
+            (tui, theme) => new RecallLoader(
+              tui,
+              (frame) => theme.fg("accent", frame),
+              (message) => theme.fg("muted", message),
+              "Forgetful: recalling...",
+            ),
+            { placement: "aboveEditor" },
+          );
+        }
       }
       try {
         const context = await workContext(ctx, runtime);
@@ -1324,8 +1341,8 @@ export function createForgetfulExtension(
           },
         });
       } finally {
-        if (showStatus && --visibleRecalls === 0)
-          ctx.ui.setStatus("forgetful-recall", undefined);
+        if (showWidget && --visibleRecalls === 0)
+          ctx.ui.setWidget("forgetful-recall", undefined);
       }
     };
 

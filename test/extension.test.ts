@@ -48,6 +48,9 @@ interface Harness {
   sentUserMessages: Array<{ content: unknown; options: unknown }>;
   notifications: string[];
   statuses: Map<string, string>;
+  widgets: Map<string, { content: unknown; placement?: string; component?: any }>;
+  widgetCalls: Array<{ key: string; content: unknown; placement?: string }>;
+  widgetRenderRequests: number;
   tools: Map<string, any>;
   cleanup(): Promise<void>;
 }
@@ -106,6 +109,13 @@ async function harness(
   const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
   const notifications: string[] = [];
   const statuses = new Map<string, string>();
+  const widgets = new Map<string, {
+    content: unknown;
+    placement?: string;
+    component?: any;
+  }>();
+  const widgetCalls: Array<{ key: string; content: unknown; placement?: string }> = [];
+  let widgetRenderRequests = 0;
   const tools = new Map<string, any>();
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<
@@ -184,6 +194,22 @@ async function harness(
       setStatus: (key: string, text: string | undefined) => {
         if (text === undefined) statuses.delete(key);
         else statuses.set(key, text);
+      },
+      setWidget: (key: string, content: unknown, options?: { placement?: string }) => {
+        const previous = widgets.get(key);
+        previous?.component?.dispose?.();
+        widgetCalls.push({ key, content, placement: options?.placement });
+        if (content === undefined) {
+          widgets.delete(key);
+          return;
+        }
+        const component = typeof content === "function"
+          ? content(
+            { requestRender() { widgetRenderRequests += 1; } },
+            { fg: (_color: string, text: string) => text },
+          )
+          : undefined;
+        widgets.set(key, { content, placement: options?.placement, component });
       },
       notify: (message: string) => {
         notifications.push(message);
@@ -265,6 +291,11 @@ async function harness(
     sentUserMessages,
     notifications,
     statuses,
+    widgets,
+    widgetCalls,
+    get widgetRenderRequests() {
+      return widgetRenderRequests;
+    },
     tools,
     setLeaf(value) {
       leaf = value;
@@ -278,7 +309,11 @@ async function harness(
     async command(args) {
       await commands.get("forgetful")?.(args, ctx);
     },
-    cleanup: () => rm(root, { recursive: true, force: true }),
+    async cleanup() {
+      for (const widget of widgets.values()) widget.component?.dispose?.();
+      widgets.clear();
+      await rm(root, { recursive: true, force: true });
+    },
   };
 }
 
@@ -725,12 +760,68 @@ async function recallReviewHarness(
     recallService: new RecallService(client, model, { deadlineMs: options.deadlineMs }),
     userSettings: { verbosity: options.verbosity ?? "debug" },
   });
-  return { ...fixture, modelInputs, modelPolicies };
+  return Object.assign(fixture, { modelInputs, modelPolicies });
+}
+
+for (const ending of ["completion", "widget removal"]) {
+  test(`recall animates above the prompt and stops after ${ending}`, async () => {
+    // Arrange: hold the external reviewer open while observing Pi's editor widget.
+    let release!: (value: unknown) => void;
+    const response = new Promise((resolve) => { release = resolve; });
+    let started!: () => void;
+    const reviewing = new Promise<void>((resolve) => { started = resolve; });
+    const fixture = await recallReviewHarness(() => {
+      started();
+      return response;
+    });
+    let pending: Promise<unknown> | undefined;
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+      // Act: start recall and inspect the live widget before review completes.
+      pending = fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+      });
+      await reviewing;
+
+      // Assert: the spinner is above the editor, animated, and not footer/model content.
+      const widget = fixture.widgets.get("forgetful-recall");
+      assert.ok(widget);
+      assert.equal(widget.placement, "aboveEditor");
+      assert.equal(fixture.statuses.has("forgetful-recall"), false);
+      const component = widget.component as { render(width: number): string[] };
+      const firstFrame = component.render(80).join("\n");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const nextFrame = component.render(80).join("\n");
+      assert.match(firstFrame, /Forgetful: recalling/);
+      assert.match(nextFrame, /Forgetful: recalling/);
+      assert.notEqual(firstFrame, nextFrame);
+      assert.equal(fixture.sentMessages.length, 0);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+
+      if (ending === "completion") {
+        release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
+        await pending;
+      } else {
+        // Pi removes/disposes widgets during clearing and reload, even while recall is pending.
+        fixture.ctx.ui.setWidget("forgetful-recall", undefined);
+      }
+      assert.equal(fixture.widgets.size, 0);
+      assert.ok(fixture.widgetRenderRequests > 0, "The live counter must observe animation");
+      const renderRequestsAfterClear = fixture.widgetRenderRequests;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(fixture.widgetRenderRequests, renderRequestsAfterClear);
+    } finally {
+      release({ summary: "", memoryIds: [], reason: "Finished." });
+      await pending;
+      await fixture.cleanup();
+    }
+  });
 }
 
 for (const path of ["normal", "queued"]) {
-  test(`${path} recall shows a temporary footer status even at error verbosity`, async () => {
-    // Arrange: hold the external reviewer open while observing Pi's visible footer.
+  test(`${path} recall shows a temporary editor widget even at error verbosity`, async () => {
+    // Arrange: hold the external reviewer open while observing Pi's editor widget.
     let release!: (value: unknown) => void;
     const response = new Promise((resolve) => { release = resolve; });
     let started!: () => void;
@@ -755,12 +846,14 @@ for (const path of ["normal", "queued"]) {
         });
       await reviewing;
 
-      // Assert: the status is visible during recall, without becoming chat or model content.
-      assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+      // Assert: the widget is above the editor, without becoming chat or model content.
+      assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
+      assert.equal(fixture.statuses.has("forgetful-recall"), false);
       assert.equal(fixture.notifications.length, 0);
       release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
       await pending;
       assert.deepEqual([...fixture.statuses], [["another-extension", "Keep this status"]]);
+      assert.equal(fixture.widgets.size, 0);
       assert.equal(fixture.sentMessages.length, 0);
       assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
     } finally {
@@ -773,7 +866,7 @@ for (const path of ["normal", "queued"]) {
 
 for (const path of ["normal", "queued"]) {
   for (const outcome of ["empty", "failure", "timeout", "cancelled"]) {
-    test(`${path} recall clears its footer status after ${outcome}`, async () => {
+    test(`${path} recall clears its editor widget after ${outcome}`, async () => {
       // Arrange: control external review completion without replacing the recall service.
       let release!: (value: unknown) => void;
       let fail!: (error: Error) => void;
@@ -800,13 +893,15 @@ for (const path of ["normal", "queued"]) {
             streamingBehavior: "followUp",
           });
         await reviewing;
-        assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+        assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
         if (outcome === "empty") release({ summary: "", memoryIds: [], reason: "Unrelated." });
         if (outcome === "failure") fail(new Error("Review provider unavailable"));
         if (outcome === "cancelled") controller.abort();
         const result = await pending;
 
-        // Assert: no stale status or unreviewed context survives, including on queued prompts.
+        // Assert: no stale widget/status or unreviewed context survives,
+        // including on queued prompts.
+        assert.equal(fixture.widgets.size, 0);
         assert.equal(fixture.statuses.size, 0);
         if (path === "normal") assert.equal(result, undefined);
         assert.equal(await fixture.emit("context", {
@@ -822,7 +917,7 @@ for (const path of ["normal", "queued"]) {
   }
 }
 
-test("overlapping recalls keep the footer status until both finish", async () => {
+test("overlapping recalls keep the editor widget until both finish", async () => {
   // Arrange: two external model responses can finish independently.
   const reviews = [0, 1].map(() => {
     let release!: (value: unknown) => void;
@@ -855,17 +950,50 @@ test("overlapping recalls keep the footer status until both finish", async () =>
     reviews[0].release(empty);
     await pending[0];
 
-    // Assert: finishing one recall cannot hide the other recall's status.
-    assert.equal(fixture.statuses.get("forgetful-recall"), "Forgetful: recalling...");
+    // Assert: finishing one recall cannot hide the other recall's widget.
+    assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
+    assert.equal(fixture.widgetCalls.filter(({ content }) => content !== undefined).length, 1);
     reviews[1].release(empty);
     await pending[1];
+    assert.equal(fixture.widgets.size, 0);
     assert.equal(fixture.statuses.size, 0);
+    assert.equal(fixture.widgetCalls.filter(({ content }) => content === undefined).length, 1);
   } finally {
     for (const review of reviews) review.release(empty);
     await Promise.all(pending);
     await fixture.cleanup();
   }
 });
+
+for (const mode of ["print", "json", "rpc"]) {
+  test(`${mode} recall does not create an editor widget`, async () => {
+    // Arrange: recall still runs without Pi's interactive UI.
+    const fixture = await recallReviewHarness(() => ({
+      summary: "MiniCPM is currently served with a 4096-token context.",
+      memoryIds: [42], reason: "The serving setting is relevant.",
+    }));
+    fixture.ctx.mode = mode;
+    fixture.ctx.hasUI = mode === "rpc";
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+      // Act.
+      const result = await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "What is MiniCPM's context size?",
+        systemPrompt: "base prompt",
+      });
+
+      // Assert: non-terminal modes have no widget work and no indicator text in model input.
+      assert.equal(fixture.widgetCalls.length, 0);
+      assert.equal(fixture.statuses.size, 0);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+      assert.match(String((result as { systemPrompt?: string } | undefined)?.systemPrompt),
+        /MiniCPM is currently served/);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
 
 test("automatic recall injects only the memory model's selected summary", async () => {
   // Arrange: real model/REST adapters; only the external responses are controlled.

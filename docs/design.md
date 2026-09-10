@@ -434,7 +434,7 @@ The default verbosity is `warning`, showing warnings and errors:
 - no preflight memory message is added to conversation history;
 - a `forgetful_recall` tool result may appear in normal Pi session history;
 - no success or empty-result popup;
-- optional transient footer status only;
+- a transient animated recall widget above the prompt editor in terminal UI mode;
 - compact rendering for agent-initiated deeper recall.
 
 `/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting
