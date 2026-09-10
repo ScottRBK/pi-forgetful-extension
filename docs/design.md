@@ -456,7 +456,7 @@ Initial SLO candidates to validate:
 
 - warm preflight p50 below 700 ms;
 - warm preflight p95 below 1.5 seconds;
-- hard fail-open timeout around 2 seconds.
+- hard fail-open timeout of 5 seconds by default (configurable).
 
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture

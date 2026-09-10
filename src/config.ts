@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import type { CaptureMode, Scope } from "./contracts.ts";
 
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
-export const DEFAULT_FORGETFUL_TIMEOUT_MS = 2_000;
-export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 1_500;
+export const DEFAULT_FORGETFUL_TIMEOUT_MS = 5_000;
+export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
 
 export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";

@@ -10,7 +10,7 @@ import type {
 } from "./contracts.ts";
 import { ApiKnowledgeClient, memoryMetadata } from "./http-knowledge.ts";
 
-const DEFAULT_TIMEOUT_MS = 1_500;
+const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
 const MEMORY_TITLE_MAX = 200;
 const MEMORY_CONTENT_MAX = 2_000;

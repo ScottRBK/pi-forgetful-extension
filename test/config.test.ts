@@ -28,6 +28,8 @@ test("fresh projects use global scope and the default service endpoint", async (
   assert.equal(config.captureMode, "auto");
   assert.equal(config.enabled, true);
   assert.equal(config.model, undefined);
+  assert.equal(config.instance.timeoutMs, 5_000);
+  assert.equal(config.recallModelTimeoutMs, 5_000);
 });
 
 test("trusted project scope stays separate from user settings", async () => {
@@ -194,7 +196,7 @@ test("recall model timeout is independently configurable from the overall timeou
   assert.equal(config.recallModelTimeoutMs, 3_500);
 });
 
-test("invalid recall model timeout retains its 1,500 ms default", async () => {
+test("invalid recall model timeout retains its 5,000 ms default", async () => {
   const root = await tempDirectory();
   await mkdir(join(root, "agent", "forgetful"), { recursive: true });
   await writeFile(
@@ -208,5 +210,5 @@ test("invalid recall model timeout retains its 1,500 ms default", async () => {
     trusted: true,
   });
 
-  assert.equal(config.recallModelTimeoutMs, 1_500);
+  assert.equal(config.recallModelTimeoutMs, 5_000);
 });

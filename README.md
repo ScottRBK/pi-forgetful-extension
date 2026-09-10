@@ -85,8 +85,8 @@ directory. The effective settings can also be represented as:
 {
   "base_url": "http://localhost:8020/api/v1",
   "token_env": "FORGETFUL_TOKEN",
-  "timeout_ms": 2000,
-  "recall_model_timeout_ms": 1500,
+  "timeout_ms": 5000,
+  "recall_model_timeout_ms": 5000,
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto"
@@ -214,9 +214,9 @@ Project scope is stored in `.pi/forgetful/settings.json` and requires Pi project
 scope setting means global recall. A malformed scope setting also uses global recall with a
 warning. Scope preference is independent of capture destination.
 
-`recall_model_timeout_ms` limits the background classification request (default 1,500 ms).
+`recall_model_timeout_ms` limits the background classification request (default 5,000 ms).
 `timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
-2,000 ms). Both settings are positive integer milliseconds in the user settings file. The
+5,000 ms). Both settings are positive integer milliseconds in the user settings file. The
 overall deadline still applies when the model deadline is longer. Capture and overlap retain
 their separate 15-second model budget. Select a memory model that fits these limits; changing
 them is optional. Restart or reload the extension after editing settings directly.

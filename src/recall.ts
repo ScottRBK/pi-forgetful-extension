@@ -14,7 +14,7 @@ import type {
   WorkContext,
 } from "./contracts.ts";
 
-const DEFAULT_DEADLINE_MS = 2_000;
+const DEFAULT_DEADLINE_MS = 5_000;
 const MAX_PLAN_INPUT_CHARS = 8_000;
 const MAX_PROMPT_CHARS = 4_000;
 const MAX_POLICY_CHARS = 8_000;
