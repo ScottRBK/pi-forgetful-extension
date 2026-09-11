@@ -204,6 +204,27 @@ export interface ModelRequest {
   policy: string;
   input: unknown;
   signal?: AbortSignal;
+  submission?: ModelSubmissionTool;
+}
+
+export interface ModelSubmissionTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+  validate(input: unknown): unknown;
+  /** Bounded rejection detail for debug output, including adapter-level failures. */
+  onRejection?(reason: string, input?: unknown): void;
+}
+
+export class ModelSubmissionError extends Error {
+  constructor(
+    message: string,
+    readonly rejectionReasons: string[] = [],
+  ) {
+    super(message, rejectionReasons.length > 0
+      ? { cause: new Error(rejectionReasons.slice(-3).join("; ")) }
+      : undefined);
+  }
 }
 
 export interface MemoryModelClient {

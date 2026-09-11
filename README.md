@@ -192,12 +192,12 @@ own recall job and context, including identical prompts matched by their user-en
 
 At info level, recall reports the number of selected memories and scope used. Debug additionally
 shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
-the memory model's selection reason, its final summary, and total recall time. Content already
-shortened for review stays shortened in this display. These are user-only notifications, not
-extra conversation messages or log files. Review validation failures also include the redacted,
-bounded reviewer JSON, available source IDs, and a mismatch direction when reliably known in the
-same final debug notice as elapsed/no-context text, so Pi's consecutive-status coalescing does
-not hide the evidence.
+review submission attempts, the memory model's selection reason, its final summary, and total
+recall time. Content already shortened for review stays shortened in this display. These are
+user-only notifications, not extra conversation messages or log files. Review validation failures
+also include the redacted, bounded reviewer JSON when available, available source IDs, and a
+mismatch direction when reliably known in the same final debug notice as elapsed/no-context text,
+so Pi's consecutive-status coalescing does not hide the evidence.
 At debug level, automatic capture reports each newly queued live job as saved, skipped, no
 candidates, or failed. Retryable failures say that retry is pending. These notices are user-only
 and do not enter model context; `/forgetful status` remains the detailed view for recovered or
@@ -245,9 +245,10 @@ advanced, the latest boundary renders retrieval-underway state instead. It then 
 bounded untrusted context or an explicit no-context or failure terminal state. The extension
 resolves global or strict project scope, searches Forgetful, then asks the same memory model to
 review bounded results against the current question and session context. The model rejects
-unrelated matches and returns a concise summary with source IDs. Only that summary and validated
-references reach the main agent, not raw results or attachments. A planner-requested scope change
-requires explicit approval for that operation and does not change the persisted preference.
+unrelated matches and submits a concise summary with source IDs through a private
+`submit_recall_review` tool. Only that summary and validated references reach the main agent, not
+raw results or attachments. A planner-requested scope change requires explicit approval for that
+operation and does not change the persisted preference.
 
 Recall can follow entities, relationships and supporting documents or code artifacts within its
 time and output limits. The active agent can explicitly open supporting records for more detail,
@@ -255,18 +256,24 @@ including stored files. Strict project scope also applies to linked records and 
 endpoints. Files require the server's optional file feature; an unavailable feature does not
 prevent ordinary memory recall.
 
-Review is one additional model request, within the existing overall deadline. Invalid review
-output, unknown source IDs, cancellation or a timeout inject nothing; raw results are never a
-fallback for failed review. Summaries remain untrusted historical context. The model can retain
-title-only memory links as leads, but must not invent their unseen contents.
+Review is one bounded model path within the existing overall deadline. The private review tool may
+retry invalid, unknown, duplicate, or semantically rejected submissions up to three total attempts.
+Rejected calls return an error tool result to the memory model; text-only replies get a correction
+message, not fallback JSON parsing. Redacted rejected arguments stay in the private review
+conversation so the model can correct them, not in main-agent context or Pi session history.
+Cancellation, timeout, or exhausted attempts inject nothing; raw
+results are never a fallback for failed review. Summaries remain untrusted historical context. The
+model can retain title-only memory links as leads, but must not invent their unseen contents.
 
 Explicit `forgetful_recall` and `forgetful_knowledge_read` calls still return read-only results
-directly to the main agent, which chooses what to use. They do not add a background review call.
+directly to the main agent, which chooses what to use. They do not add a background review path.
 Automatic recall is asynchronous, but it is bounded to one planner and one review path per job.
 Deeper exploration remains explicit through the read-only tools; it is not started recursively by
 recall lifecycle messages.
-Regression tests cover structured decisions and failure handling, not real-model relevance or
-summary accuracy. Those require separate evaluations.
+Deterministic regression tests cover structured decisions and failure handling, not real-model
+relevance or summary accuracy. The opt-in
+[live checks](CONTRIBUTING.md#live-recall-submission-checks) exercise the configured model
+and record submission failures, recovery, and summaries.
 
 ### Capture
 

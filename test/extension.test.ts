@@ -755,14 +755,23 @@ async function recallReviewHarness(
       modelInputs.push(String(context.messages[0]?.content));
       modelPolicies.push(context.systemPrompt ?? "");
       const input = JSON.parse(String(context.messages[0]?.content));
-      const output = input.availableSources
+      const reviewing = Boolean(input.availableSources);
+      const output = reviewing
         ? await review(input, completionOptions?.signal)
         : options.plan ? await options.plan() : {
           search: true, queries: ["MiniCPM context size"], queryIntent: "Serving limits",
           entities: options.entities ?? [] };
       return {
-        role: "assistant", content: [{ type: "text", text: JSON.stringify(output) }],
-        stopReason: "stop",
+        role: "assistant",
+        content: reviewing
+          ? [{
+            type: "toolCall",
+            id: `review-${modelInputs.length}`,
+            name: "submit_recall_review",
+            arguments: output,
+          }]
+          : [{ type: "text", text: JSON.stringify(output) }],
+        stopReason: reviewing ? "toolUse" : "stop",
       } as AssistantMessage;
     },
   }, selected, { classificationTimeoutMs: options.modelTimeoutMs });
@@ -1336,13 +1345,9 @@ test("debug captures rejected review JSON and its mismatch direction", async () 
     // Assert: evidence is debug-only and does not become recall context or lifecycle text.
     const notifications = fixture.notifications.join("\n");
     assert.match(notifications, /Forgetful recall failed during review validation/);
-    assert.ok(
-      fixture.notifications.some((message) =>
-        message ===
-          "Forgetful recall failed during review validation: Error: " +
-          "Recall review summary and sources must both be present or both empty",
-      ),
+    assert.match(
       notifications,
+      /Memory model submission failed; caused by Error: Recall review summary/,
     );
     assert.match(notifications, /Forgetful recall review validation debug:/);
     assert.match(notifications, /REJECTED_REVIEW_MARKER/);
@@ -1602,7 +1607,9 @@ for (const [label, output] of Object.entries({
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
       const notifications = fixture.notifications.join("\n");
       assert.match(notifications, /recall failed during review validation/);
-      assert.match(notifications, /Forgetful recall review validation debug:/);
+      if (label === "missing IDs" || label === "missing reason")
+        assert.match(notifications, /Review attempts: 3/);
+      else assert.match(notifications, /Forgetful recall review validation debug:/);
       if (label !== "unattributed summary" && label !== "empty selected summary")
         assert.doesNotMatch(notifications, /Mismatch direction:/);
       const terminal = latestRecallMessage(fixture, "completion");

@@ -612,9 +612,9 @@ function recordRecallActivity(
     log(ctx, config, `${result.reviewValidationDebug}\n${elapsedDebug}`, "debug");
     return;
   }
-  if (result.debugTrace)
-    log(ctx, config, sanitizeText(result.debugTrace).slice(0, 10_000), "debug");
-  log(ctx, config, elapsedDebug, "debug");
+  const trace = result.debugTrace ? sanitizeText(result.debugTrace).slice(0, 10_000) : undefined;
+  // Keep attempt reasons with the outcome; Pi may coalesce consecutive notices.
+  log(ctx, config, [trace, elapsedDebug].filter(Boolean).join("\n"), "debug");
 }
 
 function recallContextEntries(ctx: ExtensionContext): EvidenceEntry[] {

@@ -11,6 +11,8 @@ import type {
   SearchRequest,
   WorkContext,
 } from "../src/contracts.ts";
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { PiMemoryModel } from "../src/model.ts";
 import { RecallService } from "../src/recall.ts";
 
 const context: WorkContext = {
@@ -99,6 +101,38 @@ class FailingSearchClient extends FakeForgetfulClient {
   }
 }
 
+class SubmissionReviewModel implements MemoryModelClient {
+  readonly calls: ModelRequest[] = [];
+  readonly rejectionReasons: string[] = [];
+  private reviewIndex = 0;
+
+  constructor(private readonly reviews: unknown[]) {}
+
+  async complete(request: ModelRequest): Promise<unknown> {
+    this.calls.push(request);
+    if (request.purpose !== "recall-review") {
+      return {
+        search: true,
+        queries: ["recall transport"],
+        queryIntent: "Find the transport boundary",
+        entities: [],
+      };
+    }
+    assert.ok(request.submission, "recall review should provide a submission tool");
+    while (this.reviewIndex < this.reviews.length) {
+      const review = this.reviews[this.reviewIndex++];
+      try {
+        return request.submission.validate(review);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.rejectionReasons.push(reason);
+        request.submission.onRejection?.(reason);
+      }
+    }
+    throw new Error("review attempts exhausted");
+  }
+}
+
 describe("RecallService", () => {
   it("plans once, performs global search, and returns bounded untrusted context", async () => {
     const client = new FakeForgetfulClient();
@@ -122,6 +156,66 @@ describe("RecallService", () => {
     assert.match(result.text, /untrusted/i);
     assert.match(result.text, /transport port/);
     assert.ok(result.text.length <= 6_000);
+  });
+
+  it("review submission accepts an empty no-useful-context result", async () => {
+    // Arrange: the reviewer uses the private tool to explicitly reject every candidate.
+    const model = new SubmissionReviewModel([{
+      summary: "",
+      memoryIds: [],
+      reason: "The result is only a nearest match.",
+    }]);
+    const service = new RecallService(new FakeForgetfulClient(), model);
+
+    // Act.
+    const result = await service.recall({
+      prompt: "What did we decide about unrelated auth?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    // Assert.
+    assert.equal(result.text, "");
+    assert.equal(result.reason, "review-no-relevant-results");
+    assert.deepEqual(result.memoryIds, []);
+    assert.equal(model.rejectionReasons.length, 0);
+  });
+
+  it("review submission rejects semantic contradictions then accepts retry", async () => {
+    // Arrange: the first submission has the old summary/source contradiction.
+    const model = new SubmissionReviewModel([
+      {
+        summary: "Recall uses a transport port.",
+        memoryIds: [],
+        reason: "Selected nothing.",
+      },
+      {
+        summary: "Recall uses a transport port.",
+        memoryIds: [11],
+        reason: "The memory directly answers the question.",
+      },
+    ]);
+    const service = new RecallService(new FakeForgetfulClient(), model);
+
+    // Act.
+    const result = await service.recall({
+      prompt: "How should I retrieve memory?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    // Assert.
+    assert.match(result.text, /Recall uses a transport port/);
+    assert.deepEqual(result.memoryIds, [11]);
+    assert.deepEqual(model.rejectionReasons, [
+      "Recall review summary and sources must both be present or both empty",
+    ]);
+    assert.match(result.debugTrace ?? "", /Review attempts: 2/);
+    assert.match(result.debugTrace ?? "", /Rejected attempt 1:/);
   });
 
   it("returns debug evidence for an empty summary with selected sources", async () => {
@@ -543,4 +637,120 @@ describe("RecallService", () => {
     assert.equal((await service.recall(request)).reason, "recall-unavailable");
     assert.equal((await service.recall(request)).reason, "circuit-open");
   });
+});
+
+function reviewerWithResponses(contents: AssistantMessage["content"][]): PiMemoryModel {
+  const model = { provider: "fake", id: "memory" } as Model<any>;
+  let index = 0;
+  return new PiMemoryModel({
+    find: () => model,
+    async complete(_model, input) {
+      const content = input.tools ? contents[index++]! : [{ type: "text" as const,
+        text: JSON.stringify({ search: true, queries: ["recall transport"],
+          queryIntent: "Find the transport boundary", entities: [] }) }];
+      return {
+        role: "assistant", content, api: "openai-completions", provider: "fake", model: "memory",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: content.some((part) => part.type === "toolCall") ? "toolUse" : "stop",
+        timestamp: Date.now(),
+      };
+    },
+  }, model);
+}
+
+it("recall debug counts text and schema rejections after successful correction", async () => {
+  // Arrange: use the real adapter, simulating only external provider replies.
+  const model = reviewerWithResponses([
+    [{ type: "text", text: "{}" }],
+    [{ type: "toolCall", id: "missing-reason", name: "submit_recall_review",
+      arguments: { summary: "Recall uses a port.", memoryIds: [11] } }],
+    [{ type: "toolCall", id: "corrected", name: "submit_recall_review",
+      arguments: { summary: "Recall uses a port.", memoryIds: [11], reason: "Useful evidence" } }],
+  ]);
+  const service = new RecallService(new FakeForgetfulClient(), model);
+
+  // Act.
+  const result = await service.recall({
+    prompt: "How does recall work?", context, scope: "global",
+    classificationPolicy: "policy", recallPolicy: "policy",
+  });
+
+  // Assert: no retries are hidden in debug, and no rejection chatter enters recalled context.
+  assert.deepEqual(result.memoryIds, [11]);
+  assert.match(result.debugTrace ?? "", /Review attempts: 3/);
+  assert.match(result.debugTrace ?? "", /Rejected attempt 1:.*0 tool calls/);
+  assert.match(result.debugTrace ?? "", /Rejected attempt 2:/);
+  assert.match(result.debugTrace ?? "", /reason/);
+  assert.doesNotMatch(result.text, /Rejected attempt|0 tool calls/);
+});
+
+it("recall debug retains all rejection types when the three attempts are exhausted", async () => {
+  // Arrange: one adapter rejection, one semantic rejection, then an unknown tool.
+  const model = reviewerWithResponses([
+    [{ type: "text", text: "{}" }],
+    [{ type: "toolCall", id: "no-source", name: "submit_recall_review",
+      arguments: { summary: "Recall uses a port.", memoryIds: [], reason: "No source" } }],
+    [{ type: "toolCall", id: "wrong-tool", name: "unknown_tool", arguments: {} }],
+  ]);
+  const service = new RecallService(new FakeForgetfulClient(), model);
+
+  // Act.
+  const result = await service.recall({
+    prompt: "How does recall work?", context, scope: "global",
+    classificationPolicy: "policy", recallPolicy: "policy",
+  });
+
+  // Assert.
+  assert.equal(result.text, "");
+  assert.equal(result.reason, "recall-unavailable");
+  assert.match(result.debugTrace ?? "", /Review attempts: 3/);
+  assert.match(result.debugTrace ?? "", /Rejected attempt 1:.*0 tool calls/);
+  assert.match(result.debugTrace ?? "", /Rejected attempt 2:.*both be present/);
+  assert.match(result.debugTrace ?? "", /Rejected attempt 3:.*unknown_tool/);
+  assert.match(result.debugTrace ?? "", /attempts exhausted/);
+});
+
+it("recall retains bounded redacted evidence for tool schema rejections", async () => {
+  // Arrange: every provider response has a non-string summary, rejected before domain validation.
+  const model = reviewerWithResponses([1, 2, 3].map((attempt) => [{
+    type: "toolCall", id: `schema-${attempt}`, name: "submit_recall_review",
+    arguments: { summary: { text: "Invalid object" }, memoryIds: [11],
+      reason: "Bearer private-debug-value" },
+  }]));
+  const service = new RecallService(new FakeForgetfulClient(), model);
+
+  // Act.
+  const result = await service.recall({
+    prompt: "How does recall work?", context, scope: "global",
+    classificationPolicy: "policy", recallPolicy: "policy",
+  });
+
+  // Assert: schema errors are as diagnosable as unknown-ID errors, without exposing credentials.
+  assert.equal(result.text, "");
+  assert.match(result.reviewValidationDebug ?? "", /Returned reviewer JSON/);
+  assert.match(result.reviewValidationDebug ?? "", /Memory #11/);
+  assert.match(result.reviewValidationDebug ?? "", /redacted/);
+  assert.doesNotMatch(JSON.stringify(result), /private-debug-value/);
+});
+
+it("recall explains malformed source arrays without silently accepting Pi coercion", async () => {
+  // Arrange: Pi normalizes optional nulls, but the original domain contract rejects them.
+  const model = reviewerWithResponses([1, 2, 3].map((attempt) => [{
+    type: "toolCall", id: `null-${attempt}`, name: "submit_recall_review",
+    arguments: { summary: "Recall uses a port.", memoryIds: [11], entityIds: null,
+      reason: "Useful source" },
+  }]));
+  const service = new RecallService(new FakeForgetfulClient(), model);
+
+  // Act.
+  const result = await service.recall({
+    prompt: "How does recall work?", context, scope: "global",
+    classificationPolicy: "policy", recallPolicy: "policy",
+  });
+
+  // Assert.
+  assert.equal(result.text, "");
+  assert.match(result.debugTrace ?? "", /entityIds must be an integer array/);
+  assert.match(result.debugTrace ?? "", /Use \[\] for no sources/);
 });

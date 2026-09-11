@@ -259,7 +259,13 @@ test(
               emit(
                 message(
                   "memory",
-                  [{ type: "text", text: JSON.stringify(summary) }],
+                  [{
+                    type: "toolCall",
+                    id: `review-${String(recalledPrompt)}`,
+                    name: "submit_recall_review",
+                    arguments: summary,
+                  }],
+                  "toolUse",
                 ),
               );
             };

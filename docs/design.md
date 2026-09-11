@@ -170,10 +170,15 @@ smaller failure surface.
    renders retrieval-underway state if the result is not ready; this passive update does not steer
    or trigger a model turn.
 5. Ask the same memory model to review bounded memory and optional rich results against the question
-   and session context. It returns a summary, selected source IDs and a brief selection/rejection
-   reason. Validate IDs against sources actually shown to the reviewer. Inject only the summary
-   and validated references, never raw results or appended attachments. Nothing relevant means no
-   injection. Invalid output or failed/timed-out review injects nothing, without a raw fallback.
+   and session context. It submits a summary, selected source IDs and a brief
+   selection/rejection reason through a private `submit_recall_review` tool. Validate IDs against
+   sources actually shown to the reviewer. Invalid, unknown, duplicate, or semantically rejected
+   calls get an error tool result; text-only replies get a correction message. Both may retry,
+   up to three total attempts under the same deadline. The private correction history retains
+   redacted rejected arguments but never enters main-agent context or Pi session history.
+   Inject only the summary and validated references, never raw results or appended
+   attachments. Nothing relevant means no injection. Failed, timed-out, or exhausted review
+   injects nothing, without a raw fallback.
 6. Render exactly one current terminal state: bounded reviewed context, explicit no-context, or
    explicit failure. If completion was not consumed by the current boundary, send one hidden
    generic background-completion wake using Pi's steer seam; it steers an active run or triggers
@@ -188,10 +193,11 @@ progress text is trusted lifecycle protocol; recalled terminal text is untrusted
 summary remains bounded by the existing review contract (3,000 characters); the rendered context
 uses the existing 6,000-character recall-context bound. Only the rendered latest state is visible
 at a model-call boundary; persisted markers and tool results follow the persistence rules above.
-Review summaries are also untrusted. One planning call and at most one review call share the
-overall recall budget with search and optional enrichment. Explicit main-agent read tools retain
-their direct results; the main agent reviews those itself. Lifecycle delivery never recursively
-starts recall or capture.
+Review summaries are also untrusted. One planning call and one bounded review path share the
+overall recall budget with search and optional enrichment. The review path stops after the first
+valid private submission and never parses text-only review output as JSON. Explicit main-agent read
+tools retain their direct results; the main agent reviews those itself. Lifecycle delivery never
+recursively starts recall or capture.
 
 ## Recall scope and capture destination
 
@@ -473,9 +479,10 @@ The default verbosity is `warning`, showing warnings and errors:
 `/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting
 session memory work. Each level includes more severe messages. `info` adds brief recall counts
 and scope; `debug` adds queries and intent, bounded retrieved candidates, selected/rejected source
-IDs, the review reason and final injected summary, total duration and redacted failures. Recoverable
-recall failures are warnings; invalid endpoint configuration and capture enqueue failures are
-errors. Explicit command responses and normal tool results remain visible at every level.
+IDs, review attempts and rejection reasons, the review reason and final injected summary, total
+duration and redacted failures. Recoverable recall failures are warnings; invalid endpoint
+configuration and capture enqueue failures are errors. Explicit command responses and normal tool
+results remain visible at every level.
 
 The old `debug on/off` commands map to `debug`/`warning`; legacy `debug: true` settings remain
 supported unless an explicit `verbosity` is present. `/forgetful status` shows the current level
@@ -505,9 +512,9 @@ Initial SLO candidates to validate:
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the asynchronous recall path. The
-implementation bounds recall to one planner call and at most one review call per prompt. Capture
-extraction and overlap decisions, including contradiction detection, have a per-run call budget;
-debug shows aggregate usage.
+implementation bounds recall to one planner call and one review path per prompt, with at most three
+private review-submission attempts. Capture extraction and overlap decisions, including
+contradiction detection, have a per-run call budget; debug shows aggregate usage.
 
 ## Transport
 

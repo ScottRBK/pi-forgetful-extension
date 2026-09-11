@@ -185,6 +185,7 @@ test(
           queryIntent: "Recall database decisions",
           entities: [],
         };
+        let reviewDecision = false;
         if (model.id === "memory") {
           const last = context.messages.at(-1);
           const raw = last?.content;
@@ -199,6 +200,7 @@ test(
                 : "{}";
           const input = JSON.parse(inputText) as Record<string, unknown>;
           if (input.availableSources) {
+            reviewDecision = true;
             const prompt = (input.work as { prompt: string }).prompt;
             decision = prompt === "debug review evidence"
               ? { summary: "Rejected review marker REJECTED_PI_REVIEW", memoryIds: [],
@@ -306,8 +308,15 @@ test(
           api: "faux",
           provider: "test",
           model: model.id,
-          content: [{ type: "text", text }],
-          stopReason: "stop",
+          content: reviewDecision
+            ? [{
+              type: "toolCall",
+              id: "review-1",
+              name: "submit_recall_review",
+              arguments: decision as Record<string, any>,
+            }]
+            : [{ type: "text", text }],
+          stopReason: reviewDecision ? "toolUse" : "stop",
           timestamp: Date.now(),
           usage: {
             input: 1,
@@ -505,7 +514,7 @@ test(
     );
 
     await t.test(
-      "real Pi keeps rejected review evidence user-only",
+      "real Pi keeps review correction evidence out of the main model and session history",
       async () => {
         const beforeNotifications = notifications.length;
 
@@ -521,7 +530,8 @@ test(
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
 
-        // Assert: ctx.ui.notify gets bounded evidence, while Pi context/history does not.
+        // Assert: bounded debug reaches the user, not main-model context or session history.
+        // The private review conversation deliberately retains redacted correction evidence.
         const feedback = notifications
           .slice(beforeNotifications)
           .filter(({ message }) =>
@@ -543,12 +553,18 @@ test(
         assert.doesNotMatch(
           JSON.stringify({
             mainContexts,
-            memoryContexts,
             entries: sessionManager.getEntries(),
             messages: session.messages,
           }),
           /REJECTED_PI_REVIEW|pi-review-secret/,
         );
+        assert.doesNotMatch(JSON.stringify(memoryContexts), /pi-review-secret/);
+        const corrections = memoryContexts.filter((context) => context.messages.some((message) =>
+          message.role === "toolResult" && message.toolName === "submit_recall_review"));
+        assert.match(JSON.stringify(corrections), /REJECTED_PI_REVIEW/);
+        const otherMemoryCalls = memoryContexts.filter((context) =>
+          !context.tools?.some((tool) => tool.name === "submit_recall_review"));
+        assert.doesNotMatch(JSON.stringify(otherMemoryCalls), /REJECTED_PI_REVIEW/);
       },
     );
 

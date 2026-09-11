@@ -42,6 +42,34 @@ The integration suite also covers graph and artifact recall, interrupted rich ca
 scope, and repeated `/forgetful encode` runs through Pi's real command and tool boundaries.
 Stored-file fixtures are created only in the isolated server; the extension exposes no upload tool.
 
+### Live recall submission checks
+
+This opt-in test spends model credits using the configured Forgetful memory model and Pi's normal
+credentials. It uses the same isolated REST database above; it never writes production memories.
+
+```bash
+FORGETFUL_LIVE_RECALL=1 FORGETFUL_LIVE_ROUNDS=10 \
+  FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test test/live-recall-submission.test.ts
+```
+
+It checks useful, irrelevant, and incomplete evidence; three full planner/reviewer runs; and
+recovery after deliberately corrupting real model submissions. Rejection reasons must reach the
+next real provider call. Ordinary failures and deliberate rejection tests are counted separately.
+`FORGETFUL_LIVE_ROUNDS` defaults to 5 and accepts 1–10. Credentials are not printed.
+
+Results and synthetic response samples are written to the ignored
+`test-results/recall-submission-live.json`. Review the summaries as well as the counts: valid tool
+arguments do not guarantee relevant facts. A small passing batch is not a production failure-rate
+estimate. See [the acceptance record](docs/recall-submission-acceptance.md).
+
+If parallel REST tests stall on a constrained machine, run the same deterministic tests serially:
+
+```bash
+FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test --test-concurrency=1 test/*.test.ts
+```
+
 ## Documentation and architecture
 
 The README hero is rendered from the architecture source at

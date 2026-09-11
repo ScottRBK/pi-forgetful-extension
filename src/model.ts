@@ -5,8 +5,13 @@ import type {
   ModelsSimpleStreamOptions,
   ProviderHeaders,
   TextContent,
+  Tool,
+  ToolCall,
+  ToolResultMessage,
 } from "@earendil-works/pi-ai";
+import { validateToolCall } from "@earendil-works/pi-ai";
 import type { MemoryModelClient, ModelRequest } from "./contracts.ts";
+import { ModelSubmissionError, type ModelSubmissionTool } from "./contracts.ts";
 import {
   DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
   type ModelSelection,
@@ -38,6 +43,9 @@ const CAPTURE_OUTPUT_LIMIT = 6_000;
 const INPUT_LIMIT = 32_000;
 const RESPONSE_LIMIT = 32_000;
 const CAPTURE_TIMEOUT_MS = 15_000;
+const MAX_SUBMISSION_ATTEMPTS = 3;
+const MAX_REJECTION_CHARS = 800;
+const MAX_HISTORY_TEXT_CHARS = 2_000;
 
 export interface PiMemoryModelOptions {
   /** Per-call classification/review deadline; capture and overlap retain 15 seconds. */
@@ -112,22 +120,31 @@ function parseCompletionResponse(
   request: ModelRequest,
   timedOut: boolean,
 ): unknown {
-  if (request.signal?.aborted || response.stopReason === "aborted") {
-    throw new Error("Memory model request aborted");
-  }
-  if (timedOut) throw new Error("Memory model timeout");
-  if (response.stopReason !== "stop") {
-    const detail = sanitizeText(
-      response.errorMessage || response.stopReason,
-    ).slice(0, 500);
-    throw new Error(`Memory model request failed: ${detail}`);
-  }
+  ensureCompletionFinished(response, request, timedOut, false);
   const text = sanitizeText(textContent(response));
   if (Buffer.byteLength(text, "utf8") > RESPONSE_LIMIT) {
     throw new Error("Memory model response too large");
   }
   if (request.signal?.aborted) throw new Error("Memory model request aborted");
   return parseModelResponse(text);
+}
+
+function ensureCompletionFinished(
+  response: AssistantMessage,
+  request: ModelRequest,
+  timedOut: boolean,
+  allowToolUse: boolean,
+): void {
+  if (request.signal?.aborted || response.stopReason === "aborted") {
+    throw new Error("Memory model request aborted");
+  }
+  if (timedOut) throw new Error("Memory model timeout");
+  if (response.stopReason === "stop") return;
+  if (allowToolUse && response.stopReason === "toolUse") return;
+  const detail = sanitizeText(
+    response.errorMessage || response.stopReason,
+  ).slice(0, 500);
+  throw new Error(`Memory model request failed: ${detail}`);
 }
 
 export function parseModelResponse(text: string): unknown {
@@ -220,6 +237,56 @@ function requestOptions(
   };
 }
 
+function textBlock(text: string): TextContent {
+  return { type: "text", text };
+}
+
+function submissionTool(submission: ModelSubmissionTool): Tool {
+  return {
+    name: submission.name,
+    description: submission.description,
+    parameters: submission.parameters as Tool["parameters"],
+  };
+}
+
+function toolCalls(message: AssistantMessage): ToolCall[] {
+  return message.content.filter((part): part is ToolCall => part.type === "toolCall");
+}
+
+function rejectionText(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return sanitizeText(detail).slice(0, MAX_REJECTION_CHARS);
+}
+
+function sanitizedAssistantForHistory(message: AssistantMessage): AssistantMessage {
+  return {
+    ...message,
+    content: message.content.map((part) => {
+      if (part.type === "text") {
+        return textBlock(sanitizeText(part.text).slice(0, MAX_HISTORY_TEXT_CHARS));
+      }
+      if (part.type === "toolCall") {
+        return {
+          ...part,
+          arguments: sanitizeValue(part.arguments) as Record<string, any>,
+        };
+      }
+      return part;
+    }),
+  };
+}
+
+function errorToolResult(call: ToolCall, error: string): ToolResultMessage {
+  return {
+    role: "toolResult",
+    toolCallId: call.id,
+    toolName: call.name,
+    content: [textBlock(error)],
+    isError: true,
+    timestamp: Date.now(),
+  };
+}
+
 interface RequestDeadline {
   controller: AbortController;
   callerAbort: Promise<never>;
@@ -267,6 +334,7 @@ function requestDeadline(
 }
 
 function throwRequestFailure(error: unknown, request: ModelRequest): never {
+  if (error instanceof ModelSubmissionError) throw error;
   if (
     error instanceof Error &&
     error.message === "Memory model request aborted"
@@ -325,27 +393,37 @@ export class PiMemoryModel implements MemoryModelClient {
       requestTimeout(request, this.classificationTimeoutMs),
     );
     try {
-      const response = await Promise.race([
-        this.registry.complete(
-          model,
+      const context: Context = {
+        systemPrompt: sanitizeText(request.policy).slice(0, INPUT_LIMIT),
+        messages: [
           {
-            systemPrompt: sanitizeText(request.policy).slice(0, INPUT_LIMIT),
-            messages: [
-              {
-                role: "user",
-                content: trimInput(request.input),
-                timestamp: Date.now(),
-              },
-            ],
+            role: "user",
+            content: trimInput(request.input),
+            timestamp: Date.now(),
           },
-          requestOptions(
-            model,
-            this.sessionId,
-            this.transformHeaders,
-            requestOutputLimit(request),
-            deadline.controller.signal,
-          ),
-        ),
+        ],
+        ...(request.submission
+          ? { tools: [submissionTool(request.submission)] }
+          : {}),
+      };
+      const options = requestOptions(
+        model,
+        this.sessionId,
+        this.transformHeaders,
+        requestOutputLimit(request),
+        deadline.controller.signal,
+      );
+      if (request.submission) {
+        return await this.completeWithSubmission(
+          model,
+          context,
+          options,
+          request,
+          deadline,
+        );
+      }
+      const response = await Promise.race([
+        this.registry.complete(model, context, options),
         deadline.callerAbort,
         deadline.timeout,
       ]);
@@ -356,6 +434,75 @@ export class PiMemoryModel implements MemoryModelClient {
     } finally {
       deadline.cleanup();
     }
+  }
+
+  private async completeWithSubmission(
+    model: Model<any>,
+    context: Context,
+    options: ModelsSimpleStreamOptions,
+    request: ModelRequest,
+    deadline: RequestDeadline,
+  ): Promise<unknown> {
+    const submission = request.submission!;
+    const tool = submissionTool(submission);
+    const rejections: string[] = [];
+    const recordRejection = (reason: string, input?: unknown): void => {
+      const bounded = rejectionText(reason);
+      rejections.push(bounded);
+      submission.onRejection?.(bounded, input);
+    };
+    for (let attempt = 1; attempt <= MAX_SUBMISSION_ATTEMPTS; attempt++) {
+      const response = await Promise.race([
+        this.registry.complete(model, context, options),
+        deadline.callerAbort,
+        deadline.timeout,
+      ]);
+      ensureCompletionFinished(response, request, deadline.timedOut, true);
+      // Bound the whole response before validating or retaining any provider-generated history.
+      if (Buffer.byteLength(JSON.stringify(response.content), "utf8") > RESPONSE_LIMIT) {
+        throw new Error("Memory model response too large");
+      }
+
+      const calls = toolCalls(response);
+      if (calls.length !== 1) {
+        const base = `Call ${submission.name} exactly one time; received ` +
+          `${calls.length} tool calls.`;
+        recordRejection(base);
+        if (calls.length > 0) {
+          context.messages.push(sanitizedAssistantForHistory(response));
+          for (const call of calls) {
+            const reason = call.name === submission.name
+              ? base
+              : `${base} Tool "${sanitizeText(call.name)}" not found.`;
+            context.messages.push(errorToolResult(call, rejectionText(reason)));
+          }
+        } else {
+          context.messages.push({
+            role: "user",
+            content: `Call ${submission.name} exactly once with the review result. ` +
+              "Do not answer with JSON text.",
+            timestamp: Date.now(),
+          });
+        }
+        continue;
+      }
+
+      const call = calls[0]!;
+      try {
+        validateToolCall([tool], call);
+        // Pi may coerce types or remove optional nulls. Domain rules validate the original input.
+        return submission.validate(call.arguments);
+      } catch (error) {
+        const reason = rejectionText(error);
+        recordRejection(reason, call.arguments);
+        context.messages.push(sanitizedAssistantForHistory(response));
+        context.messages.push(errorToolResult(call, reason));
+      }
+    }
+    throw new ModelSubmissionError(
+      "Memory model submission failed",
+      rejections.slice(-MAX_SUBMISSION_ATTEMPTS),
+    );
   }
 }
 
