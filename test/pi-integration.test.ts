@@ -239,20 +239,22 @@ test(
             const user = input.entries.find(
               (e: { role: string }) => e.role === "user",
             );
-            decision = {
-              candidates: [
-                {
-                  id: "storage",
-                  title: "Use local storage",
-                  content: "The test project uses local storage.",
-                  context: "Explicit user decision.",
-                  keywords: ["storage"],
-                  tags: ["decision"],
-                  sourceEntryIds: [user.id],
-                  evidenceType: "userDecision",
-                },
-              ],
-            };
+            decision = user
+              ? {
+                candidates: [
+                  {
+                    id: "storage",
+                    title: "Use local storage",
+                    content: "The test project uses local storage.",
+                    context: "Explicit user decision.",
+                    keywords: ["storage"],
+                    tags: ["decision"],
+                    sourceEntryIds: [user.id],
+                    evidenceType: "userDecision",
+                  },
+                ],
+              }
+              : { candidates: [] };
             if (skipExtraction) decision = { candidates: [] };
             if (holdNextCapture) {
               holdNextCapture = false;
@@ -289,7 +291,13 @@ test(
         };
         if (model.id === "main" && resolveOnNextMain) {
           resolveOnNextMain = false;
-          const details = handoffs.at(-1)?.details as { conflictIds: string[] };
+          const details = handoffs
+            .filter(({ details }) =>
+              Array.isArray(
+                (details as { conflictIds?: unknown } | undefined)?.conflictIds,
+              ),
+            )
+            .at(-1)?.details as { conflictIds: string[] };
           message.content = [
             {
               type: "toolCall",
@@ -305,7 +313,9 @@ test(
           message.stopReason = "toolUse";
         }
         const latestUser = context.messages.findLast(
-          (item) => item.role === "user",
+          (item) =>
+            item.role === "user" &&
+            !JSON.stringify(item.content).includes("[Forgetful "),
         );
         if (
           model.id === "main" &&
@@ -405,27 +415,46 @@ test(
     // Act.
     await session.prompt("Which database did we choose?");
 
-    // Assert: the real provider sees recall, but the saved session does not contain that injection.
-    assert.equal(mainContexts.length, 1, JSON.stringify(session.messages));
+    // Assert: the first boundary carries current progress; completion replaces it later.
+    assert.equal(mainContexts.length, 2, JSON.stringify(session.messages));
     assert.equal(memoryContexts.length, 2);
-    assert.deepEqual(providerSessions.slice(0, 3), [
-      { model: "memory", sessionId: sessionManager.getSessionId() },
-      { model: "memory", sessionId: sessionManager.getSessionId() },
-      { model: "main", sessionId: sessionManager.getSessionId() },
-    ]);
-    assert.ok(mainContexts[0]?.systemPrompt?.includes("SQLite was chosen for durable state."));
+    assert.equal(
+      providerSessions.filter(({ model }) => model === "memory").length,
+      2,
+    );
+    assert.equal(
+      providerSessions.filter(({ model }) => model === "main").length,
+      mainContexts.length,
+    );
+    assert.match(JSON.stringify(mainContexts[0]), /retrieval underway/);
+    assert.doesNotMatch(JSON.stringify(mainContexts[0]), /SQLite was chosen/);
     assert.ok(!mainContexts[0]?.systemPrompt?.includes(memory.content));
+    assert.match(JSON.stringify(mainContexts[1]), /SQLite was chosen for durable state/);
+    assert.doesNotMatch(JSON.stringify(mainContexts[1]), /retrieval underway/);
+    assert.doesNotMatch(JSON.stringify(mainContexts[1]), /memory-decision-pending/);
     assert.ok(JSON.stringify(memoryContexts[1]).includes(memory.content));
     assert.ok(
       JSON.stringify(memoryContexts[0]).includes(
         "Which database did we choose?",
       ),
     );
+        const recallEntries = sessionManager.getEntries().filter((entry) =>
+          entry.type === "custom_message" &&
+          entry.customType === "forgetful_recall_async",
+        );
+        assert.equal(recallEntries.length, 2);
+        const persistedLifecycle = recallEntries.map((entry) => JSON.stringify(entry));
+        assert.ok(persistedLifecycle.some((text) => text.includes("memory-decision-pending")));
+        assert.equal(
+          persistedLifecycle.filter((text) => text.includes('"content":""')).length,
+          1,
+        );
+        assert.doesNotMatch(persistedLifecycle.join("\n"), /retrieval underway|SQLite was chosen/);
     assert.ok(
-      !JSON.stringify(sessionManager.getEntries()).includes(memory.content),
+      recallEntries.every(
+        (entry) => "display" in entry && entry.display === false,
+      ),
     );
-    assert.ok(!JSON.stringify(sessionManager.getEntries())
-      .includes("SQLite was chosen for durable state."));
     assert.ok(session.getActiveToolNames().includes("forgetful_recall"));
     assert.ok(session.getActiveToolNames().includes("forgetful_resolve"));
     assert.equal(queries.length, 1);
@@ -438,6 +467,7 @@ test(
       "the capture command enables real automatic capture after settlement",
       async () => {
         // Arrange: use the public command; all files and memories are isolated test fixtures.
+        const beforeCreated = created.length;
         await session.prompt("/forgetful capture auto");
 
         // Act: normal work settles; capture should write through the real service wiring.
@@ -461,16 +491,20 @@ test(
         // Assert through the external write boundary.
         assert.equal(
           created.length,
-          1,
+          beforeCreated + 1,
           JSON.stringify(memoryContexts.map((c) => c.messages)),
         );
+        const saved = created.find((candidate) =>
+          candidate.content === "The test project uses local storage.",
+        );
+        assert.ok(saved);
         assert.equal(
-          created[0]?.content,
+          saved.content,
           "The test project uses local storage.",
         );
-        assert.deepEqual(created[0]?.project_ids, [7]);
+        assert.deepEqual(saved.project_ids, [7]);
         const savedFeedback = notifications.find(({ message }) =>
-          /Forgetful capture saved 1 memory\./.test(message),
+          /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
         );
         assert.ok(
           savedFeedback,
@@ -483,7 +517,7 @@ test(
             memoryContexts,
             entries: sessionManager.getEntries(),
           }),
-          /Forgetful capture saved 1 memory\./,
+          /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/,
         );
         const overlap = memoryContexts.find((context) =>
           JSON.stringify(context.messages).includes('\\"candidate\\":'),
@@ -545,7 +579,21 @@ test(
             .filter(({ message }) =>
               /Forgetful capture(?::| (saved|skipped|failed))/.test(message),
             );
-          assert.equal(created.length, beforeCreated + 2);
+          assert.equal(
+            created.length,
+            beforeCreated + 2,
+            JSON.stringify({
+              created: created.slice(beforeCreated),
+              captureInputs: captureInputs.slice(-5).map((input) => ({
+                entries: input.entries.map((entry) => `${entry.role}:${entry.text}`),
+              })),
+              memoryContexts: memoryContexts.slice(-8).map((context) => ({
+                systemPrompt: context.systemPrompt?.slice(0, 80),
+                last: context.messages.at(-1),
+              })),
+              notifications: notifications.slice(beforeNotifications),
+            }),
+          );
           assert.equal(
             feedback.length,
             1,
@@ -591,7 +639,7 @@ test(
             !notifications
               .slice(beforeNotifications)
               .some(({ message }) =>
-                /Forgetful capture skipped: no candidates\./.test(message),
+                /Forgetful capture: skipped \d+ jobs with no candidates\./.test(message),
               ) &&
             Date.now() < feedbackDeadline
           ) {
@@ -604,7 +652,7 @@ test(
               .slice(beforeNotifications)
               .some(({ message, type }) =>
                 type === "info" &&
-                /Forgetful capture skipped: no candidates\./.test(message),
+                /Forgetful capture: skipped \d+ jobs with no candidates\./.test(message),
               ),
             notifications.map(({ message }) => message).join("\n"),
           );
@@ -646,14 +694,16 @@ test(
             while (
               !notifications
                 .slice(beforeProbeNotifications)
-                .some(({ message }) => /Forgetful capture saved 1 memory\./.test(message)) &&
+                .some(({ message }) =>
+                  /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
+                ) &&
               Date.now() < feedbackDeadline
             ) {
               await new Promise((resolve) => setTimeout(resolve, 20));
             }
             assert.ok(
               notifications.slice(beforeProbeNotifications).some(({ message }) =>
-                /Forgetful capture saved 1 memory\./.test(message),
+                /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
               ),
               "the debug probe must finish reporting before checking quiet capture output",
             );
@@ -736,7 +786,7 @@ test(
             !notifications
               .slice(beforeNotifications)
               .some(({ message }) =>
-                /Forgetful capture observed 1 candidate\./.test(message),
+                /Forgetful capture: observed \d+ candidates?(?:\.|;)/.test(message),
               ) &&
             Date.now() < feedbackDeadline
           ) {
@@ -748,7 +798,7 @@ test(
             notifications
               .slice(beforeNotifications)
               .some(({ message }) =>
-                /Forgetful capture observed 1 candidate\./.test(message),
+                /Forgetful capture: observed \d+ candidates?(?:\.|;)/.test(message),
               ),
             notifications.map(({ message }) => message).join("\n"),
           );
@@ -782,6 +832,7 @@ test(
           captureInputs
             .at(-1)
             ?.entries.every((entry) => !entry.text.includes(marker)),
+          JSON.stringify(captureInputs.slice(captureCount)),
         );
       },
     );
@@ -792,6 +843,8 @@ test(
         // Arrange: hold an external provider response while the user queues two requests.
         await session.prompt("/forgetful capture off");
         const firstContext = mainContexts.length;
+        const firstMemoryContext = memoryContexts.length;
+        const firstQuery = queries.length;
         const held = new Promise<void>((done) => {
           onHeldMain = done;
         });
@@ -815,15 +868,50 @@ test(
 
         // Assert: both topics reach the model alongside their request without entering
         // saved history.
+        assert.equal(
+          mainContexts.length,
+          firstContext + 4,
+          JSON.stringify(mainContexts.slice(firstContext).map((context) => context.messages)),
+        );
+        assert.equal(memoryContexts.length, firstMemoryContext + 6);
+        assert.equal(queries.length, firstQuery + 4);
         const continuations = mainContexts
           .slice(firstContext + 1)
           .map((c) => JSON.stringify(c.messages));
+        assert.equal(continuations.length, 3);
         assert.ok(
           continuations.some(
             (text) =>
               text.includes("queued request one") &&
               text.includes("Queue one memory."),
           ),
+          JSON.stringify({
+            contexts: mainContexts.slice(firstContext + 1).map((context) => ({
+              users: context.messages
+                .filter((item) => item.role === "user")
+                .map((item) => JSON.stringify(item.content).slice(0, 90))
+                .slice(-3),
+              hasQueueOne: JSON.stringify(context).includes("Queue one memory."),
+              hasQueueTwo: JSON.stringify(context).includes("Queue two memory."),
+            })),
+            memoryInputs: memoryContexts.map((context) => {
+              const raw = context.messages.at(-1)?.content;
+              const text = typeof raw === "string"
+                ? raw
+                : JSON.stringify(raw ?? "");
+              try {
+                const input = JSON.parse(text) as Record<string, unknown>;
+                return {
+                  prompt: input.prompt,
+                  workPrompt: (input.work as { prompt?: unknown } | undefined)?.prompt,
+                  queries: input.queries,
+                  availableSources: Boolean(input.availableSources),
+                };
+              } catch {
+                return { invalid: text.slice(0, 80) };
+              }
+            }),
+          }),
         );
         assert.ok(
           continuations.some(
@@ -831,36 +919,71 @@ test(
               text.includes("queued request two") &&
               text.includes("Queue two memory."),
           ),
+          JSON.stringify(continuations),
         );
         const firstRequestContexts = mainContexts
           .slice(firstContext + 1)
           .filter((context) =>
-            JSON.stringify(
-              context.messages.findLast((item) => item.role === "user")
+              JSON.stringify(
+              context.messages.findLast(
+                (item) =>
+                  item.role === "user" &&
+                  !JSON.stringify(item.content).includes("[Forgetful "),
+              )
                 ?.content,
             ).includes("queued request one"),
           );
-        assert.equal(
-          firstRequestContexts.length,
-          2,
-          "queued work continues after the tool result",
+        assert.equal(firstRequestContexts.length, 2, "queued work continues after the tool result");
+        const firstRecallContexts = firstRequestContexts.filter((context) =>
+          JSON.stringify(context.messages).includes("Queue one memory."),
         );
+        assert.equal(firstRecallContexts.length, 1, "queued recall must reach one later boundary");
         assert.ok(
-          firstRequestContexts.every((context) =>
-            JSON.stringify(context.messages).includes("Queue one memory."),
+          firstRecallContexts.some((context) =>
+            JSON.stringify(context.messages).includes('"toolName":"forgetful_recall"'),
           ),
           "queued recall must remain available through the tool continuation",
         );
         assert.ok(
-          !JSON.stringify(sessionManager.getEntries()).includes(
-            "Queue one memory.",
+          firstRecallContexts.every((context) =>
+            !JSON.stringify(context.messages).includes("Queue two memory."),
           ),
+          "queued request one must not receive request two's recall",
         );
+        const secondRequestContexts = mainContexts
+          .slice(firstContext + 1)
+          .filter((context) =>
+            JSON.stringify(
+              context.messages.findLast(
+                (item) =>
+                  item.role === "user" &&
+                  !JSON.stringify(item.content).includes("[Forgetful "),
+              )?.content,
+            ).includes("queued request two"),
+          );
+        const secondRecallContexts = secondRequestContexts.filter((context) =>
+          JSON.stringify(context.messages).includes("Queue two memory."),
+        );
+        assert.equal(secondRequestContexts.length, 1);
+        assert.equal(secondRecallContexts.length, 1, "queued request two must reach one boundary");
         assert.ok(
-          !JSON.stringify(sessionManager.getEntries()).includes(
-            "Queue two memory.",
+          secondRecallContexts.every((context) =>
+            !JSON.stringify(context.messages).includes("Queue one memory."),
           ),
+          "queued request two must retain only its own recall",
         );
+        const queuedRecallEntries = sessionManager.getEntries().filter((entry) => {
+          if (
+            entry.type !== "custom_message" ||
+            entry.customType !== "forgetful_recall_async"
+          )
+            return false;
+          const text = JSON.stringify(entry);
+          return text.includes("Queue one memory.") ||
+            text.includes("Queue two memory.");
+        });
+        assert.equal(queuedRecallEntries.length, 0,
+          "reviewed summaries are transient context overlays");
       },
     );
 
@@ -878,11 +1001,15 @@ test(
 
         // Act: let the durable capture worker deliver through Pi's actual nextTurn mechanism.
         const deadline = Date.now() + 3000;
-        while (handoffs.length === 0 && Date.now() < deadline) {
+        const conflictHandoffs = () => handoffs.filter(({ details }) =>
+          Array.isArray((details as { conflictIds?: unknown } | undefined)?.conflictIds),
+        );
+        while (conflictHandoffs().length === 0 && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
+        const conflictHandoff = conflictHandoffs()[0];
         assert.equal(
-          handoffs.length,
+          conflictHandoffs().length,
           1,
           "settled capture must reach its originating live session",
         );
@@ -892,8 +1019,8 @@ test(
           "handoff must not start a model turn",
         );
         assert.equal(created.length, before);
-        assert.match(String(handoffs[0].content), /SQLite/);
-        assert.match(String(handoffs[0].content), /local storage/);
+        assert.match(String(conflictHandoff?.content), /SQLite/);
+        assert.match(String(conflictHandoff?.content), /local storage/);
 
         // The main model uses the bounded resolver after a real user clarification.
         skipExtraction = true;
@@ -1063,7 +1190,9 @@ test(
             }
           : undefined;
         const latestUser = context.messages.findLast(
-          (message) => message.role === "user",
+          (message) =>
+            message.role === "user" &&
+            !JSON.stringify(message.content).includes("[Forgetful "),
         );
         const promptKey = JSON.stringify(latestUser?.content ?? "");
         const shouldCall = model.id === "main" && !mainPrompts.has(promptKey);

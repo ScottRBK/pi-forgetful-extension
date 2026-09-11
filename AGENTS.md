@@ -4,8 +4,10 @@ A seamless persistent-memory extension for the Pi coding agent.
 
 The intended experience requires no memory commands during normal work:
 
-- a separately configured memory model decides whether each prompt needs memory;
-- relevant Forgetful context is injected into the same agent turn;
+- a separately configured memory model decides whether each prompt needs memory asynchronously;
+- recall lifecycle messages and bounded context reach the main model only at model-call boundaries;
+- the rendered latest recall state is transient; automatic pending and empty-wake markers persist;
+- `forgetful_recall_wait` results use normal Pi tool-result persistence;
 - the main agent receives bounded leads it can explore through a read-only recall tool;
   normal Pi tool-result persistence is accepted and documented;
 - durable knowledge is captured quietly after successful work settles through a durable queue;
@@ -32,7 +34,7 @@ not used by this extension.
 flowchart TB
   subgraph PI["Pi extension boundary"]
     E["ForgetfulExtension\nhooks, commands, tool registration"]
-    R["Recall hooks\nbefore_agent_start + queued input/context"]
+    R["Recall hooks\nasync jobs + model boundaries + queued input/context"]
     S["SettledHook\nagent_settled: snapshot and enqueue"]
     T["forgetful_recall\nbounded read-only tool"]
     U["forgetful_resolve\nbounded pending-conflict tool"]

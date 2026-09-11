@@ -3,21 +3,22 @@
 Automatic persistent memory for the [Pi coding agent](https://pi.dev/), using the existing
 [Forgetful REST service](https://github.com/ScottRBK/forgetful).
 
-A separately selected memory model recalls relevant context before normal work and captures
-durable, evidenced knowledge after work settles. Clear contradictions automatically supersede
-old memories while preserving their history. Uncertain conflicts return to the originating
-session for resolution through a bounded tool.
+A separately selected memory model plans relevant context while normal work starts immediately,
+then captures durable, evidenced knowledge after work settles. Recall lifecycle messages reach
+the main model only at model-call boundaries. Clear contradictions automatically supersede old
+memories while preserving their history. Uncertain conflicts return to the originating session
+for resolution through a bounded tool.
 
 ![Pi Forgetful architecture](docs/assets/architecture.png)
 
 ## Architecture
 
-Pi sends ordinary prompts and completed work to the extension. Recall asks the separately
-configured memory model whether to search, performs a bounded request against a warm Forgetful
-HTTP service, and injects only the strongest context into the active turn. Capture snapshots the
-settled session branch, persists it in a durable queue, and processes candidates through
-query-before-create, supersession, or conflict escalation. Memory failures are failure-open and
-must not block the user's task.
+Pi sends ordinary prompts and completed work to the extension. Recall starts a separate planner
+job, performs bounded requests against a warm Forgetful HTTP service, and reports pending,
+retrieval, and terminal states at model-call boundaries. Capture snapshots the settled session
+branch, persists it in a durable queue, and processes candidates through query-before-create,
+supersession, or conflict escalation. Memory failures are failure-open and must not block the
+user's task.
 
 HTTP is the MVP transport. The application services depend on a transport-neutral Forgetful client
 port, leaving room for a future CLI adapter without changing recall, capture, or scope policy.
@@ -143,11 +144,12 @@ background memory model. File uploads are outside this workflow.
 
 ## Usage
 
-Normal work needs no memory commands. Recall runs before the active turn, and capture runs after a
-successful `agent_settled` event. Recall searches globally by default. Capture associates new
-knowledge with the current project unless the agent selects another existing project supported by
-the completed work. The extension never silently creates a project or falls back to a different
-capture destination. Explicit repository encoding can initialise its project through the agent tool.
+Normal work needs no memory commands. Recall starts alongside the active turn, and capture runs
+after a successful `agent_settled` event. Recall searches globally by default. Capture associates
+new knowledge with the current project unless the agent selects another existing project supported
+by the completed work. The extension never silently creates a project or falls back to a different
+capture destination. Explicit repository encoding can initialise its project through the agent
+tool.
 
 | Command | Effect |
 | --- | --- |
@@ -176,8 +178,17 @@ Existing `debug: true` settings select debug verbosity unless `verbosity` is exp
 
 During automatic recall, Pi shows `Forgetful: recalling...` with a small spinner above the prompt
 editor at every verbosity level. The widget clears when recall finishes, including on failure or
-cancellation. It is not added to chat or model context; the main agent still waits for recall before
-starting.
+cancellation. The main model starts with an explicit memory-decision-pending lifecycle message,
+so independent work is not blocked. A single latest-state renderer shows retrieval progress or a
+bounded terminal result at later model-call boundaries; progress is passive and never creates a
+progress-only model turn.
+
+The main model should use `forgetful_recall_wait` once when a memory-dependent answer or action
+cannot proceed independently. The wait has the configured finite recall deadline; a wait timeout
+does not cancel the recall, and a later completion may steer the current run or trigger one idle
+follow-up. A normal stop does not cancel the planner; a real Pi abort, memory-off command, session
+replacement, or branch change does. Queued follow-up prompts return immediately and each keeps its
+own recall job and context, including identical prompts matched by their user-entry boundary.
 
 At info level, recall reports the number of selected memories and scope used. Debug additionally
 shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
@@ -190,8 +201,15 @@ and do not enter model context; `/forgetful status` remains the detailed view fo
 older queue jobs.
 Overlapping results are combined into one notice; observe mode reports observed candidates, and a
 later retry reports completion without counting an earlier partial write twice.
-Automated preflight context is transient; tool results and conflict messages follow normal Pi
-session persistence. `/forgetful status` reports the verbosity and latest recall result.
+The context hook renders one latest recall state for the current model call and removes stale
+recall rows from that boundary. That rendered state, including the reviewed summary, is transient;
+it is not a persisted session entry. The automatic hook's initial pending marker and its empty
+completion wake marker are hidden Pi custom entries and are persisted normally. They are not a
+privacy boundary: later model calls may receive them, so lifecycle text must contain no secrets.
+Queued lifecycle states are rendered transiently. `forgetful_recall_wait` returns an ordinary Pi
+tool result and follows normal tool-result persistence. Capture excludes lifecycle entries and
+memory-operation results from eligible evidence. Conflict messages follow normal Pi persistence;
+`/forgetful status` reports the verbosity and latest recall result.
 
 Recoverable recall failures, including timeouts, are warnings; invalid endpoint configuration and
 capture enqueue failures are errors. Debug failure warnings name the failing step and exception.
@@ -214,12 +232,15 @@ its separate, bounded context budget.
 ### Recall
 
 The memory model returns a validated plan with bounded topic queries, intent, entities, and an
-optional scope request. The extension resolves global or strict project scope, searches Forgetful,
-then asks the same memory model to review the bounded results against the current question and
-session context. The model rejects unrelated matches and returns a concise summary with source IDs.
-Only that summary and validated references reach the main agent, not the raw results or attachments.
-If nothing is relevant, nothing is injected. A planner-requested scope change requires explicit
-approval for that operation and does not change the persisted preference.
+optional scope request. The extension starts that job without holding the main model call. The
+automatic hook starts with pending state and a stable protocol; if the planner has already
+advanced, the latest boundary renders retrieval-underway state instead. It then renders either
+bounded untrusted context or an explicit no-context or failure terminal state. The extension
+resolves global or strict project scope, searches Forgetful, then asks the same memory model to
+review bounded results against the current question and session context. The model rejects
+unrelated matches and returns a concise summary with source IDs. Only that summary and validated
+references reach the main agent, not raw results or attachments. A planner-requested scope change
+requires explicit approval for that operation and does not change the persisted preference.
 
 Recall can follow entities, relationships and supporting documents or code artifacts within its
 time and output limits. The active agent can explicitly open supporting records for more detail,
@@ -234,7 +255,9 @@ title-only memory links as leads, but must not invent their unseen contents.
 
 Explicit `forgetful_recall` and `forgetful_knowledge_read` calls still return read-only results
 directly to the main agent, which chooses what to use. They do not add a background review call.
-Optional asynchronous deeper exploration is deferred; this release adds no background injections.
+Automatic recall is asynchronous, but it is bounded to one planner and one review path per job.
+Deeper exploration remains explicit through the read-only tools; it is not started recursively by
+recall lifecycle messages.
 Regression tests cover structured decisions and failure handling, not real-model relevance or
 summary accuracy. Those require separate evaluations.
 

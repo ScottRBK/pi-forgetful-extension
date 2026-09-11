@@ -44,6 +44,8 @@ interface Harness {
   agentDir: string;
   ctx: any;
   entries: any[];
+  lastPrompt?: string;
+  contextResults: unknown[];
   setLeaf(value: string | null): void;
   emit(name: string, event: any): Promise<unknown>;
   command(args: string): Promise<void>;
@@ -113,6 +115,8 @@ async function harness(
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
   const sentUserMessages: Array<{ content: unknown; options: unknown }> = [];
   const notifications: string[] = [];
+  let lastPrompt: string | undefined;
+  const contextResults: unknown[] = [];
   const statuses = new Map<string, string>();
   const widgets = new Map<string, {
     content: unknown;
@@ -307,13 +311,23 @@ async function harness(
       return widgetRenderRequests;
     },
     tools,
+    get lastPrompt() {
+      return lastPrompt;
+    },
+    contextResults,
     setLeaf(value) {
       leaf = value;
     },
     async emit(name, event) {
+      if (name === "before_agent_start" && typeof event.prompt === "string")
+        lastPrompt = event.prompt;
+      if (name === "input" && event.source !== "extension" &&
+          typeof event.text === "string")
+        lastPrompt = event.text;
       let result: unknown;
       for (const handler of handlers.get(name) ?? [])
         result = await handler(event, ctx);
+      if (name === "context") contextResults.push(result);
       return result;
     },
     async command(args) {
@@ -773,6 +787,75 @@ async function recallReviewHarness(
   return Object.assign(fixture, { modelInputs, modelPolicies });
 }
 
+async function waitForCondition(
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!condition() && performance.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(condition(), description);
+}
+
+function recallMessages(fixture: Harness): Array<Record<string, any>> {
+  const messages: Array<Record<string, any>> = [];
+  for (const result of fixture.contextResults) {
+    const contextMessages = (result as { messages?: unknown } | undefined)?.messages;
+    if (!Array.isArray(contextMessages)) continue;
+    for (const message of contextMessages) {
+      if (typeof message !== "object" || message === null) continue;
+      const content = (message as { content?: unknown }).content;
+      if (typeof content !== "string" || !content.startsWith("[Forgetful ")) continue;
+      const phase = content.includes("terminal state") ? "completion" :
+        content.includes("retrieval underway") ? "retrieval" : "pending";
+      const status = content.includes("context available") ? "context" :
+        content.includes("no-context") ? "no-context" :
+          content.includes("failure") ? "failure" : undefined;
+      messages.push({
+        customType: "forgetful_recall_async",
+        content,
+        display: false,
+        details: { phase, ...(status ? { status } : {}) },
+      });
+    }
+  }
+  return messages;
+}
+
+async function renderCurrentRecallContext(fixture: Harness): Promise<unknown> {
+  assert.ok(fixture.lastPrompt, "a recall prompt should be active");
+  return fixture.emit("context", {
+    type: "context",
+    messages: [{ role: "user", content: fixture.lastPrompt }],
+  });
+}
+
+async function waitForRecallTerminal(
+  fixture: Harness,
+  count = 1,
+): Promise<void> {
+  let latest: unknown;
+  const deadline = performance.now() + 2_000;
+  while (performance.now() < deadline) {
+    latest = await renderCurrentRecallContext(fixture);
+    if (JSON.stringify(latest).match(/\[Forgetful [^\]]+ terminal state:/)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`expected terminal recall context ${count}: ${JSON.stringify(latest)}`);
+}
+
+function latestRecallMessage(
+  fixture: Harness,
+  phase: "retrieval" | "completion",
+): Record<string, any> {
+  const message = [...recallMessages(fixture)].reverse().find((item) =>
+    (item.details as Record<string, unknown> | undefined)?.phase === phase,
+  );
+  assert.ok(message, `expected an asynchronous ${phase} message`);
+  return message;
+}
+
 for (const ending of ["completion", "widget removal"]) {
   test(`recall animates above the prompt and stops after ${ending}`, async () => {
     // Arrange: hold the external reviewer open while observing Pi's editor widget.
@@ -806,7 +889,8 @@ for (const ending of ["completion", "widget removal"]) {
       assert.match(firstFrame, /Forgetful: recalling/);
       assert.match(nextFrame, /Forgetful: recalling/);
       assert.notEqual(firstFrame, nextFrame);
-      assert.equal(fixture.sentMessages.length, 0);
+      const progressMessages = recallMessages(fixture);
+      assert.equal(progressMessages.length, 0);
       assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
 
       if (ending === "completion") {
@@ -815,7 +899,10 @@ for (const ending of ["completion", "widget removal"]) {
       } else {
         // Pi removes/disposes widgets during clearing and reload, even while recall is pending.
         fixture.ctx.ui.setWidget("forgetful-recall", undefined);
+        release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
+        await pending;
       }
+      await waitForRecallTerminal(fixture);
       assert.equal(fixture.widgets.size, 0);
       assert.ok(fixture.widgetRenderRequests > 0, "The live counter must observe animation");
       const renderRequestsAfterClear = fixture.widgetRenderRequests;
@@ -861,10 +948,25 @@ for (const path of ["normal", "queued"]) {
       assert.equal(fixture.statuses.has("forgetful-recall"), false);
       assert.equal(fixture.notifications.length, 0);
       release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
-      await pending;
+      if (path === "normal") {
+        await pending;
+        await waitForRecallTerminal(fixture);
+      } else {
+        await pending;
+        await waitForCondition(
+          () => fixture.widgets.size === 0,
+          "queued recall should finish before activation",
+        );
+        fixture.entries.push(entry("queued-user", "root", "user", "Context size?"));
+        const context = await fixture.emit("context", {
+          type: "context", messages: [{ role: "user", content: "Context size?" }],
+        });
+        assert.match(JSON.stringify(context), /historical context/);
+      }
       assert.deepEqual([...fixture.statuses], [["another-extension", "Keep this status"]]);
       assert.equal(fixture.widgets.size, 0);
-      assert.equal(fixture.sentMessages.length, 0);
+      assert.equal(recallMessages(fixture).length, path === "normal" ? 2 : 1);
+      assert.ok(recallMessages(fixture).every((message) => message.display === false));
       assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
     } finally {
       release({ summary: "", memoryIds: [], reason: "Nothing relevant." });
@@ -887,8 +989,6 @@ for (const path of ["normal", "queued"]) {
         started();
         return response;
       }, { deadlineMs: outcome === "timeout" ? 100 : 1_000, verbosity: "error" });
-      const controller = new AbortController();
-      fixture.ctx.signal = controller.signal;
       let pending: Promise<unknown> | undefined;
       try {
         await fixture.emit("session_start", { type: "session_start", reason: "new" });
@@ -898,26 +998,44 @@ for (const path of ["normal", "queued"]) {
           ? fixture.emit("before_agent_start", {
             type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
           })
-          : fixture.emit("input", {
+        : fixture.emit("input", {
             type: "input", text: "Context size?", source: "interactive",
-            streamingBehavior: "followUp",
-          });
+          streamingBehavior: "followUp",
+        });
         await reviewing;
         assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
+        if (path === "queued") {
+          fixture.entries.push(entry("queued-user", "root", "user", "Context size?"));
+          await fixture.emit("context", {
+            type: "context", messages: [{ role: "user", content: "Context size?" }],
+          });
+        }
         if (outcome === "empty") release({ summary: "", memoryIds: [], reason: "Unrelated." });
         if (outcome === "failure") fail(new Error("Review provider unavailable"));
-        if (outcome === "cancelled") controller.abort();
-        const result = await pending;
+        if (outcome === "cancelled") {
+          await fixture.emit("agent_end", {
+            type: "agent_end",
+            messages: [{ role: "assistant", stopReason: "aborted" }],
+          });
+          release({ summary: "", memoryIds: [], reason: "Aborted." });
+        }
+        await pending;
+        await waitForCondition(
+          () => fixture.widgets.size === 0,
+          `${path} ${outcome} recall should reach a terminal result`,
+        );
 
         // Assert: no stale widget/status or unreviewed context survives,
         // including on queued prompts.
         assert.equal(fixture.widgets.size, 0);
         assert.equal(fixture.statuses.size, 0);
-        if (path === "normal") assert.equal(result, undefined);
-        assert.equal(await fixture.emit("context", {
+        const context = await fixture.emit("context", {
           type: "context", messages: [{ role: "user", content: "Context size?" }],
-        }), undefined);
-        assert.equal(fixture.sentMessages.length, 0);
+        });
+        if (outcome !== "cancelled") assert.match(JSON.stringify(context), /terminal state:/);
+        else assert.equal(context, undefined);
+        if (outcome === "cancelled")
+          assert.equal(recallMessages(fixture).length, path === "queued" ? 1 : 0);
       } finally {
         release({ summary: "", memoryIds: [], reason: "Finished." });
         await pending;
@@ -957,14 +1075,27 @@ test("overlapping recalls keep the editor widget until both finish", async () =>
       streamingBehavior: "followUp",
     }));
     await reviews[1].ready;
+    fixture.entries.push(entry("queued-overlap", "root", "user", "And the serving limit?"));
+    fixture.setLeaf("queued-overlap");
     reviews[0].release(empty);
     await pending[0];
+    const progress = await renderCurrentRecallContext(fixture);
+    assert.match(JSON.stringify(progress), /retrieval underway/);
+    assert.doesNotMatch(JSON.stringify(progress), /terminal state:/);
 
     // Assert: finishing one recall cannot hide the other recall's widget.
     assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
     assert.equal(fixture.widgetCalls.filter(({ content }) => content !== undefined).length, 1);
     reviews[1].release(empty);
     await pending[1];
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "the queued recall should clear the shared widget after finishing",
+    );
+    const context = await fixture.emit("context", {
+      type: "context", messages: [{ role: "user", content: "And the serving limit?" }],
+    });
+    assert.match(JSON.stringify(context), /terminal state:/);
     assert.equal(fixture.widgets.size, 0);
     assert.equal(fixture.statuses.size, 0);
     assert.equal(fixture.widgetCalls.filter(({ content }) => content === undefined).length, 1);
@@ -988,17 +1119,20 @@ for (const mode of ["print", "json", "rpc"]) {
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
 
       // Act.
-      const result = await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "What is MiniCPM's context size?",
         systemPrompt: "base prompt",
       });
 
-      // Assert: non-terminal modes have no widget work and no indicator text in model input.
+      // Assert: non-terminal modes have no widget work and start with pending state.
       assert.equal(fixture.widgetCalls.length, 0);
       assert.equal(fixture.statuses.size, 0);
       assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
-      assert.match(String((result as { systemPrompt?: string } | undefined)?.systemPrompt),
-        /MiniCPM is currently served/);
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
+      await waitForRecallTerminal(fixture);
+      const terminal = latestRecallMessage(fixture, "completion");
+      assert.match(String(terminal.content), /MiniCPM is currently served/);
+      assert.equal(terminal.display, false);
     } finally {
       await fixture.cleanup();
     }
@@ -1014,18 +1148,22 @@ test("automatic recall injects only the memory model's selected summary", async 
   try {
     // Act.
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "What is MiniCPM's context size?",
       systemPrompt: "base prompt",
-    }) as { systemPrompt: string };
+    }) as { systemPrompt: string; message: Record<string, unknown> };
+    await waitForRecallTerminal(fixture);
 
-    // Assert: the review sees both candidates; the main agent sees only its selected summary.
-    assert.match(fixture.modelInputs[1] ?? "", /What is MiniCPM's context size/);
-    assert.match(fixture.modelInputs[1] ?? "", /VLLM_MAX_MODEL_LEN=4096/);
-    assert.match(fixture.modelInputs[1] ?? "", /CRM owns tenant isolation/);
-    assert.match(result.systemPrompt, /MiniCPM is currently served with a 4096-token context/);
-    assert.match(result.systemPrompt, /Memory #42/);
-    assert.doesNotMatch(result.systemPrompt, /CRM|VLLM_MAX_MODEL_LEN|Memory #63/);
+    // Assert: the review sees both candidates; the terminal message sees only its summary.
+    const reviewInput = fixture.modelInputs.find((input) => input.includes("availableSources"));
+    assert.match(reviewInput ?? "", /What is MiniCPM's context size/);
+    assert.match(reviewInput ?? "", /VLLM_MAX_MODEL_LEN=4096/);
+    assert.match(reviewInput ?? "", /CRM owns tenant isolation/);
+    assert.match(initial.systemPrompt, /automatic recall protocol/);
+    assert.doesNotMatch(initial.systemPrompt, /MiniCPM is currently served/);
+    const terminal = latestRecallMessage(fixture, "completion");
+    assert.match(String(terminal.content), /MiniCPM is currently served/);
+    assert.doesNotMatch(String(terminal.content), /CRM|VLLM_MAX_MODEL_LEN|Memory #63/);
     const debug = fixture.notifications.join("\n");
     assert.match(debug, /CRM architecture/);
     assert.match(debug, /Rejected: Memory #63/);
@@ -1047,18 +1185,26 @@ test("review can reject every result in normal and queued prompts", async () => 
       const result = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "What is the weather?", systemPrompt: "base",
       });
-      assert.equal(result, undefined);
+      assert.match(JSON.stringify(result), /memory-decision-pending/);
+      await waitForRecallTerminal(fixture, index + 1);
     }
     await fixture.emit("input", {
       type: "input", source: "interactive", text: "What is the weather?",
       streamingBehavior: "followUp",
     });
+    const pendingContext = await fixture.emit("context", {
+      type: "context", messages: [{ role: "user", content: "What is the weather?" }],
+    });
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "queued rejection should finish before terminal context is checked",
+    );
     const queued = await fixture.emit("context", {
       type: "context", messages: [{ role: "user", content: "What is the weather?" }],
     });
     // Assert.
-    assert.equal(queued, undefined);
-    assert.equal(fixture.sentMessages.length, 0);
+    assert.match(JSON.stringify(pendingContext), /memory-decision-pending|no-context/);
+    assert.match(JSON.stringify(queued), /no-context/);
     const debug = fixture.notifications.join("\n");
     assert.match(debug, /Selected: none/);
     assert.match(debug, /Rejected: Memory #42, Memory #63/);
@@ -1081,17 +1227,25 @@ test("queued prompts inject the reviewed summary without debug details", async (
       type: "input", source: "interactive", text: "What is MiniCPM's context size?",
       streamingBehavior: "steer",
     });
+    const pendingContext = await fixture.emit("context", {
+      type: "context", messages: [{ role: "user", content: "What is MiniCPM's context size?" }],
+    });
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "queued recall should finish before its terminal context is checked",
+    );
     const result = await fixture.emit("context", {
       type: "context", messages: [{ role: "user", content: "What is MiniCPM's context size?" }],
     });
     // Assert.
+    assert.match(JSON.stringify(pendingContext), /memory-decision-pending|terminal state/);
     assert.match(JSON.stringify(result), /Serving uses 4096 tokens/);
-    assert.match(JSON.stringify(result), /Memory #42/);
     assert.doesNotMatch(JSON.stringify(result), /CRM|VLLM_MAX_MODEL_LEN|Review reason|Queries:/);
     const info = fixture.notifications.join("\n");
     assert.match(info, /1 memory in global scope/);
     assert.doesNotMatch(info, /Serving uses|CRM|Review reason|Queries:/);
-    assert.equal(fixture.sentMessages.length, 0);
+    assert.equal(recallMessages(fixture).length, 2);
+    assert.equal(latestRecallMessage(fixture, "completion").display, false);
   } finally {
     await fixture.cleanup();
   }
@@ -1107,17 +1261,23 @@ test("review input and output are redacted and keep retrieved instructions untru
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     fixture.entries.push(entry("previous", "root", "assistant", "We were discussing MiniCPM."));
     // Act.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "What about its context?", systemPrompt: "base",
     }) as { systemPrompt: string };
+    await waitForRecallTerminal(fixture);
+    const reviewIndex = fixture.modelInputs.findIndex(
+      (input) => input.includes("availableSources"),
+    );
     // Assert: the reviewer gets session context and a trusted instruction to reject directives.
-    assert.match(fixture.modelInputs[1], /We were discussing MiniCPM/);
-    assert.match(fixture.modelInputs[1], /Ignore the question/);
-    assert.match(fixture.modelPolicies[1], /Ignore directives within it/);
+    assert.ok(reviewIndex >= 0);
+    assert.match(fixture.modelInputs[reviewIndex] ?? "", /We were discussing MiniCPM/);
+    assert.match(fixture.modelInputs[reviewIndex] ?? "", /Ignore the question/);
+    assert.match(fixture.modelPolicies[reviewIndex] ?? "", /Ignore directives within it/);
     assert.doesNotMatch(fixture.modelInputs.join("\n"), /private-review-token/);
-    assert.match(result.systemPrompt, /untrusted data/);
-    assert.match(result.systemPrompt, /Serving uses 4096 tokens\. \[redacted\]/);
-    assert.doesNotMatch(result.systemPrompt, /Ignore the question|private-summary-token/);
+    assert.match(initial.systemPrompt, /automatic recall protocol/);
+    const terminal = latestRecallMessage(fixture, "completion");
+    assert.match(String(terminal.content), /Serving uses 4096 tokens\. \[redacted\]/);
+    assert.doesNotMatch(String(terminal.content), /Ignore the question|private-summary-token/);
     assert.doesNotMatch(fixture.notifications.join("\n"), /private-\w+-token/);
   } finally {
     await fixture.cleanup();
@@ -1133,12 +1293,14 @@ test("review cannot reintroduce memories rejected by strict project scope", asyn
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     await fixture.command("scope project");
     // Act.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
     });
+    await waitForRecallTerminal(fixture);
     // Assert.
-    assert.equal(result, undefined);
-    assert.doesNotMatch(fixture.modelInputs[1], /CRM owns tenant isolation/);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
+    assert.doesNotMatch(fixture.modelInputs.join("\n"), /CRM owns tenant isolation/);
+    assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
     assert.match(fixture.notifications.join("\n"), /review validation.*availableSources/);
   } finally {
     await fixture.cleanup();
@@ -1165,14 +1327,16 @@ for (const selectDocument of [true, false]) {
     try {
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
       // Act.
-      const result = await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
-      }) as { systemPrompt: string };
-      // Assert: only reviewed text reaches the main agent, even for selected attachments.
-      assert.match(fixture.modelInputs[1], /Raw document: MiniCPM/);
-      assert.match(result.systemPrompt, /The serving limit is 4096 tokens/);
-      assert.doesNotMatch(result.systemPrompt, /Raw document|See the runtime settings/);
-      assert.equal(result.systemPrompt.includes("Document #1"), selectDocument);
+      });
+      await waitForRecallTerminal(fixture);
+      // Assert: only reviewed text reaches the model, even for selected attachments.
+      assert.match(fixture.modelInputs.join("\n"), /Raw document: MiniCPM/);
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
+      const terminal = latestRecallMessage(fixture, "completion");
+      assert.match(String(terminal.content), /The serving limit is 4096 tokens/);
+      assert.doesNotMatch(String(terminal.content), /Raw document|See the runtime settings/);
       if (!selectDocument)
         assert.match(fixture.notifications.join("\n"), /Rejected: Document #1/);
     } finally {
@@ -1192,12 +1356,14 @@ test("empty search skips review and injects nothing", async () => {
   try {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     // Act.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
     });
+    await waitForRecallTerminal(fixture);
     // Assert: no unnecessary external review request when there is nothing to judge.
-    assert.equal(result, undefined);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
     assert.equal(reviewed, false);
+    assert.match(String(latestRecallMessage(fixture, "completion").content), /no-context/);
     assert.match(fixture.notifications.join("\n"), /no-matches/);
   } finally {
     await fixture.cleanup();
@@ -1231,14 +1397,16 @@ test("review can retain a visible entity-linked memory as a deeper-search lead",
   try {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     // Act.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "MiniCPM context limits?", systemPrompt: "base",
-    }) as { systemPrompt: string } | undefined;
-    // Assert.
-    assert.match(fixture.modelInputs[1] ?? "", /Entity memory #71/);
-    assert.match(result?.systemPrompt ?? "", /available for further reading/);
-    assert.match(result?.systemPrompt ?? "", /Memory #71/);
-    assert.doesNotMatch(result?.systemPrompt ?? "", /Full detail not injected/);
+    });
+    await waitForRecallTerminal(fixture);
+    // Assert: the lead reaches review, while its unseen full contents stay out of context.
+    assert.match(fixture.modelInputs.join("\n"), /Entity memory #71/);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
+    const terminal = latestRecallMessage(fixture, "completion");
+    assert.match(String(terminal.content), /available for further reading/);
+    assert.doesNotMatch(String(terminal.content), /Full detail not injected/);
   } finally {
     await fixture.cleanup();
   }
@@ -1246,24 +1414,37 @@ test("review can retain a visible entity-linked memory as a deeper-search lead",
 
 test("caller cancellation during review drops even a subsequently returned summary", async () => {
   // Arrange.
-  const controller = new AbortController();
+  let release!: (value: unknown) => void;
+  let markReviewStarted!: () => void;
+  const response = new Promise((resolve) => { release = resolve; });
+  const reviewing = new Promise<void>((resolve) => { markReviewStarted = resolve; });
   const fixture = await recallReviewHarness(() => {
-    controller.abort("Session ended");
-    return { summary: "Late summary", memoryIds: [42], reason: "Previously useful" };
+    markReviewStarted();
+    return response;
   });
-  fixture.ctx.signal = controller.signal;
   try {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     // Act.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
     });
+    await reviewing;
+    await fixture.emit("agent_end", {
+      type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }],
+    });
+    release({ summary: "Late summary", memoryIds: [42], reason: "Previously useful" });
+    await initial;
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "cancelled recall should release its widget after the provider settles",
+    );
     // Assert.
-    assert.equal(result, undefined);
-    assert.match(fixture.notifications.join("\n"), /recall review.*Recall cancelled by caller/);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
     assert.doesNotMatch(fixture.notifications.join("\n"), /Late summary/);
-    assert.equal(fixture.sentMessages.length, 0);
+    assert.equal(recallMessages(fixture).filter((message) =>
+      message.details?.phase === "completion").length, 0);
   } finally {
+    release({ summary: "", memoryIds: [], reason: "Finished." });
     await fixture.cleanup();
   }
 });
@@ -1287,13 +1468,16 @@ for (const [label, output] of Object.entries({
     try {
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
       // Act.
-      const result = await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
       });
+      await waitForRecallTerminal(fixture);
       // Assert: there is never a raw-result fallback.
-      assert.equal(result, undefined);
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
       assert.match(fixture.notifications.join("\n"), /recall failed during review validation/);
-      assert.equal(fixture.sentMessages.length, 0);
+      const terminal = latestRecallMessage(fixture, "completion");
+      assert.equal(terminal.details?.status, "failure");
+      assert.doesNotMatch(String(terminal.content), /Invented|Unexplained|Serving|x{100}/);
     } finally {
       await fixture.cleanup();
     }
@@ -1309,9 +1493,11 @@ test("review failures accumulate until the recall circuit opens", async () => {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     // Act.
     for (let index = 0; index < 4; index++) {
-      assert.equal(await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
-      }), undefined);
+      });
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
+      await waitForRecallTerminal(fixture, index + 1);
     }
     // Assert.
     assert.match(fixture.notifications.join("\n"), /recall failed during recall review/);
@@ -1335,17 +1521,18 @@ for (const timeout of ["overall", "model"]) {
     try {
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
       // Act.
-      const result = await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
       });
+      await waitForRecallTerminal(fixture);
       // Assert.
-      assert.equal(result, undefined);
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
       assert.equal(aborted, true);
       const debug = fixture.notifications.join("\n");
       assert.match(debug, /recall failed during recall review/);
       assert.match(debug,
         timeout === "overall" ? /Overall recall deadline exceeded/ : /model timeout/);
-      assert.equal(fixture.sentMessages.length, 0);
+      assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
     } finally {
       await fixture.cleanup();
     }
@@ -1376,17 +1563,22 @@ for (const path of ["normal", "queued", "foreground"]) {
         // Act: let recall reach its deadline through each user-facing entry point.
         const startedAt = performance.now();
         if (path === "normal") {
-          assert.equal(await fixture.emit("before_agent_start", {
+          await fixture.emit("before_agent_start", {
             type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
-          }), undefined);
+          });
+          await waitForRecallTerminal(fixture);
         } else if (path === "queued") {
           await fixture.emit("input", {
             type: "input", text: "Context size?", source: "interactive",
             streamingBehavior: "followUp",
           });
-          assert.equal(await fixture.emit("context", {
+          await fixture.emit("context", {
             type: "context", messages: [{ role: "user", content: "Context size?" }],
-          }), undefined);
+          });
+          await waitForCondition(
+            () => fixture.widgets.size === 0,
+            "queued recall should finish before elapsed time is checked",
+          );
         } else {
           await assert.rejects(fixture.tools.get("forgetful_recall")!.execute(
             "clock", { query: "Context size?" }, undefined, undefined, fixture.ctx,
@@ -1445,14 +1637,14 @@ for (const clockJumpMs of [-60_000, 60_000]) {
 
         // Act: approve the narrower scope, then let review exhaust the remaining active budget.
         const startedAt = performance.now();
-        const result = await fixture.emit("before_agent_start", {
+        await fixture.emit("before_agent_start", {
           type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
         });
+        await waitForRecallTerminal(fixture);
         const activeElapsedMs = performance.now() - startedAt - approvalElapsedMs;
 
         // Assert: approval time is excluded, but planning time is not refunded on resume.
         const debug = fixture.notifications.join("\n");
-        assert.equal(result, undefined);
         assert.equal(reviewStarted, true, debug);
         assert.ok(approvalElapsedMs >= 550);
         assert.match(debug,
@@ -1506,8 +1698,19 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
       await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
       });
+      await waitForRecallTerminal(fixture);
       await fixture.emit("input", {
         type: "input", source: "interactive", text: "Which database?", streamingBehavior: "steer",
+      });
+      await fixture.emit("context", {
+        type: "context", messages: [{ role: "user", content: "Which database?" }],
+      });
+      await waitForCondition(
+        () => fixture.widgets.size === 0,
+        "queued verbosity recall should finish before foreground recall",
+      );
+      await fixture.emit("context", {
+        type: "context", messages: [{ role: "user", content: "Which database?" }],
       });
       await fixture.tools.get("forgetful_recall")!.execute(
         "details", { query: "database" }, undefined, undefined, fixture.ctx,
@@ -1516,7 +1719,11 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
       // Assert: debug reveals the actual bounded context; info reveals only summaries.
       const output = fixture.notifications.join("\n");
       const summaries = fixture.notifications.filter((message) => /recall completed/.test(message));
-      assert.equal(summaries.length, verbosity === "debug" || verbosity === "info" ? 3 : 0);
+      assert.equal(
+        summaries.length,
+        verbosity === "debug" || verbosity === "info" ? 3 : 0,
+        fixture.notifications.join("\n"),
+      );
       if (verbosity === "debug") {
         assert.match(output, /Memory #42: Database decision/);
         assert.match(output, /Use SQLite\. \[redacted\]/);
@@ -1527,14 +1734,18 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
         assert.doesNotMatch(output, /Database decision|Use SQLite|Related storage|recall took/);
       }
       assert.doesNotMatch(output, /private-memory-token/);
-      assert.equal(fixture.sentMessages.length, 0);
+      assert.equal(recallMessages(fixture).length, 4);
+      assert.ok(recallMessages(fixture).every((message) => message.display === false));
 
       // Act: the external planner fails on the next prompt.
       fail = true;
       fixture.notifications.splice(0);
+      const terminalCount = recallMessages(fixture).filter((message) =>
+        message.details?.phase === "completion").length;
       await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
       });
+      await waitForRecallTerminal(fixture, terminalCount + 1);
 
       // Assert: recoverable failures remain warnings and are suppressed only at error level.
       const warnings = fixture.notifications.join("\n");
@@ -1586,16 +1797,18 @@ test("debug reports automated recall activity and status keeps the latest result
     await fixture.command("debug on");
     fixture.notifications.splice(0);
 
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start",
       prompt: "Which database did we choose?",
       systemPrompt: "base system prompt",
     });
+    await waitForRecallTerminal(fixture);
 
     assert.match(
-      String((result as { systemPrompt?: unknown } | undefined)?.systemPrompt),
+      String(latestRecallMessage(fixture, "completion").content),
       /historical context/,
     );
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
     assert.ok(
       fixture.notifications.some((message) =>
         message.includes("Forgetful recall completed: 1 memory in global scope."),
@@ -1632,16 +1845,21 @@ test("warnings stay brief while debug exposes redacted recall exceptions", async
 
     // Act and assert: default warnings stay brief, debug exposes the redacted exception.
     fixture.notifications.splice(0);
-    assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
+    const initial = await fixture.emit("before_agent_start", prompt);
+    await waitForRecallTerminal(fixture);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
     assert.match(fixture.notifications.join("\n"), /recall failed during planning/);
     assert.doesNotMatch(fixture.notifications.join("\n"), /Provider rejected|private-test-token/);
     await fixture.command("debug on");
     fixture.notifications.splice(0);
-    assert.equal(await fixture.emit("before_agent_start", prompt), undefined);
+    const secondInitial = await fixture.emit("before_agent_start", prompt);
+    await waitForRecallTerminal(fixture, 2);
+    assert.match(JSON.stringify(secondInitial), /memory-decision-pending/);
     assert.match(fixture.notifications.join("\n"),
       /planning.*Error: Provider rejected request: \[redacted\]/);
     assert.doesNotMatch(fixture.notifications.join("\n"), /private-test-token/);
-    assert.equal(fixture.sentMessages.length, 0);
+    assert.equal(recallMessages(fixture).length, 4);
+    assert.ok(recallMessages(fixture).every((message) => message.display === false));
   } finally {
     await fixture.cleanup();
   }
@@ -1676,9 +1894,11 @@ for (const queryIntent of ["", "   "]) {
 
         // Act: repeat beyond the failure threshold, then request a real memory search.
         for (let index = 0; index < 4; index += 1) {
-          await fixture.emit("before_agent_start", {
+          const initial = await fixture.emit("before_agent_start", {
             type: "before_agent_start", prompt: "Thanks", systemPrompt: "base prompt",
           });
+          assert.match(JSON.stringify(initial), /memory-decision-pending/);
+          await waitForRecallTerminal(fixture, index + 1);
         }
 
         // Assert: skipping is a successful decision, not a failed plan or service outage.
@@ -1691,6 +1911,7 @@ for (const queryIntent of ["", "   "]) {
         await fixture.emit("before_agent_start", {
           type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
         });
+        await waitForRecallTerminal(fixture, 5);
         assert.equal(searches, 1, "valid no-search decisions must not open the failure circuit");
       } finally {
         await fixture.cleanup();
@@ -1719,13 +1940,15 @@ test("search plans require intent and debug identifies the search decision", asy
       fixture.notifications.splice(0);
 
       // Act.
-      const result = await fixture.emit("before_agent_start", {
+      const initial = await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
       });
+      await waitForRecallTerminal(fixture);
 
       // Assert: malformed search plans cannot reach the external memory service.
-      assert.equal(result, undefined);
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
       assert.equal(searches, 0);
+      assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
       assert.match(fixture.notifications.join("\n"), /queryIntent.*search=true.*non-empty string/);
     } finally {
       await fixture.cleanup();
@@ -1749,9 +1972,11 @@ test("debug reports search exceptions for automatic and manual recall", async ()
 
     // Act: automatic recall fails without blocking the normal turn.
     fixture.notifications.splice(0);
-    assert.equal(await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
-    }), undefined);
+    });
+    await waitForRecallTerminal(fixture);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
 
     // Assert: the failure names the step, exception and HTTP status.
     assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
@@ -1789,15 +2014,16 @@ test("debug explains the overall deadline during automatic and manual recall", a
     fixture.notifications.splice(0);
 
     // Act: automatic recall reaches the deadline without blocking the main turn.
-    const result = await fixture.emit("before_agent_start", {
+    const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
     });
+    await waitForRecallTerminal(fixture);
 
     // Assert: the warning explains the limit and that planning shares the search budget.
-    assert.equal(result, undefined);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
     assert.match(fixture.notifications.join("\n"),
       /memory search.*overall recall deadline exceeded.*30 ms.*timeout_ms.*planning and search/i);
-    assert.equal(fixture.sentMessages.length, 0);
+    assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
 
     // Act: the foreground tool reaches the same limit.
     fixture.notifications.splice(0);
@@ -1835,14 +2061,15 @@ for (const reason of [new Error("Session ended: Bearer private-abort-token"),
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
       fixture.notifications.splice(0);
 
-      // Act.
-      const result = await fixture.emit("before_agent_start", {
-        type: "before_agent_start", prompt: "What did we decide?", systemPrompt: "base prompt",
-      });
+      // Act: foreground recall uses the active Pi signal and reports cancellation.
+      const tool = fixture.tools.get("forgetful_recall")!;
+      await assert.rejects(
+        tool.execute("cancel", { query: "decisions" }, undefined, undefined, fixture.ctx),
+        /Forgetful recall is unavailable/,
+      );
 
       // Assert: caller cancellation is distinct from a timeout and stays out of the prompt.
       const warning = fixture.notifications.join("\n");
-      assert.equal(result, undefined);
       assert.match(warning, /memory search.*Recall cancelled by caller/);
       if (reason !== undefined) assert.match(warning, /Session ended: \[redacted\]/);
       assert.doesNotMatch(warning, /deadline exceeded|private-abort-token/);
@@ -1902,7 +2129,11 @@ test("manual recall cancels a pending external search with the session signal", 
     userSettings: { base_url: baseUrl },
     recallService: new RecallService(
       new ApiForgetfulClient({ baseUrl, timeoutMs: 5_000 }),
-      { async complete() { return { search: false, queries: [], queryIntent: "", entities: [] }; } },
+      {
+        async complete() {
+          return { search: false, queries: [], queryIntent: "", entities: [] };
+        },
+      },
     ),
   });
   const sessionAbort = new AbortController();
@@ -1948,48 +2179,69 @@ test("manual recall cancels a pending external search with the session signal", 
   }
 });
 
-test("debug recall catch diagnostics are redacted and bounded for automatic and queued input", async () => {
-  const longFailure = `Bearer external-test-secret ${"x".repeat(1_000)}`;
-  const fixture = await harness({
-    userSettings: { debug: true },
-    recallService: {
-      async recall(): Promise<RecallResult> {
-        throw new Error(longFailure);
+test(
+  "debug recall catch diagnostics are redacted and bounded for automatic and queued input",
+  async () => {
+    const longFailure = `Bearer external-test-secret ${"x".repeat(1_000)}`;
+    const fixture = await harness({
+      userSettings: { debug: true },
+      recallService: {
+        async recall(): Promise<RecallResult> {
+          throw new Error(longFailure);
+        },
+        async deeper(): Promise<RecallResult> {
+          return { text: "unused", memoryIds: [], scope: "global" };
+        },
       },
-      async deeper(): Promise<RecallResult> {
-        return { text: "unused", memoryIds: [], scope: "global" };
-      },
-    },
-  });
-  try {
-    await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    fixture.notifications.splice(0);
-
-    await fixture.emit("before_agent_start", {
-      type: "before_agent_start",
-      prompt: "automatic diagnostic",
-      systemPrompt: "base",
     });
-    const automatic = fixture.notifications.at(-1) ?? "";
-    assert.match(automatic, /Forgetful recall skipped: Error: \[redacted\]/);
-    assert.doesNotMatch(automatic, /external-test-secret/);
-    assert.ok(automatic.length <= "Forgetful recall skipped: ".length + 500);
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+      fixture.notifications.splice(0);
 
-    fixture.notifications.splice(0);
-    await fixture.emit("input", {
-      type: "input",
-      text: "queued diagnostic",
-      source: "interactive",
-      streamingBehavior: "followUp",
-    });
-    const queued = fixture.notifications.at(-1) ?? "";
-    assert.match(queued, /Forgetful queued recall skipped: Error: \[redacted\]/);
-    assert.doesNotMatch(queued, /external-test-secret/);
-    assert.ok(queued.length <= "Forgetful queued recall skipped: ".length + 500);
-  } finally {
-    await fixture.cleanup();
-  }
-});
+      const initial = await fixture.emit("before_agent_start", {
+        type: "before_agent_start",
+        prompt: "automatic diagnostic",
+        systemPrompt: "base",
+      });
+      await waitForRecallTerminal(fixture);
+      const automatic = fixture.notifications.join("\n");
+      assert.match(JSON.stringify(initial), /memory-decision-pending/);
+      assert.match(automatic, /Forgetful recall failed during Error: \[redacted\]/);
+      assert.doesNotMatch(automatic, /external-test-secret/);
+      const automaticFailure = automatic.split("\n").find((line) =>
+        line.includes("Forgetful recall failed during"),
+      );
+      assert.ok(automaticFailure);
+      assert.ok(
+        automaticFailure.length <= "Forgetful recall failed during ".length + 500,
+      );
+
+      fixture.notifications.splice(0);
+      await fixture.emit("input", {
+        type: "input",
+        text: "queued diagnostic",
+        source: "interactive",
+        streamingBehavior: "followUp",
+      });
+      await waitForCondition(
+        () => fixture.widgets.size === 0,
+        "queued diagnostic recall should finish",
+      );
+      const queued = fixture.notifications.join("\n");
+      assert.match(queued, /Forgetful recall failed during Error: \[redacted\]/);
+      assert.doesNotMatch(queued, /external-test-secret/);
+      const queuedFailure = queued.split("\n").find((line) =>
+        line.includes("Forgetful recall failed during"),
+      );
+      assert.ok(queuedFailure);
+      assert.ok(
+        queuedFailure.length <= "Forgetful recall failed during ".length + 500,
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  },
+);
 
 test("model command uses Pi's searchable picker for a large model catalogue", async () => {
   const fixture = await harness();
@@ -2636,29 +2888,38 @@ test("queued recalls wait for their matching user message and preserve two promp
       undefined,
     );
 
-    const second = (await fixture.emit("context", {
-      type: "context",
-      messages: [
-        { role: "user", content: "second queued", timestamp: Date.now() },
-      ],
-    })) as { messages: Array<{ content?: unknown }> };
     const first = (await fixture.emit("context", {
       type: "context",
       messages: [
         { role: "user", content: "first queued", timestamp: Date.now() },
       ],
     })) as { messages: Array<{ content?: unknown }> };
+    const second = (await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: "second queued", timestamp: Date.now() },
+      ],
+    })) as { messages: Array<{ content?: unknown }> };
     assert.match(String(second.messages[0]?.content), /second queued/);
     assert.match(String(first.messages[0]?.content), /first queued/);
-    assert.equal(
-      await fixture.emit("context", {
-        type: "context",
-        messages: [
-          { role: "user", content: "first queued", timestamp: Date.now() },
-        ],
-      }),
-      undefined,
-    );
+    const firstContinuation = (await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: "first queued", timestamp: Date.now() },
+        { role: "toolResult", content: "first tool", timestamp: Date.now() },
+      ],
+    })) as { messages: Array<{ content?: unknown }> };
+    const secondContinuation = (await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: "second queued", timestamp: Date.now() },
+        { role: "toolResult", content: "second tool", timestamp: Date.now() },
+      ],
+    })) as { messages: Array<{ content?: unknown }> };
+    assert.match(String(firstContinuation.messages[0]?.content), /first queued/);
+    assert.doesNotMatch(String(firstContinuation.messages[0]?.content), /second queued/);
+    assert.match(String(secondContinuation.messages[0]?.content), /second queued/);
+    assert.doesNotMatch(String(secondContinuation.messages[0]?.content), /first queued/);
     assert.deepEqual(fixture.recallCalls.slice(-2), [
       "first queued",
       "second queued",
@@ -2711,6 +2972,17 @@ test("queued recall survives tool continuations and clears for the next user req
         { role: "user", content: "queued with tools", timestamp: Date.now() },
       ],
     })) as { messages: Array<{ content?: unknown }> };
+    assert.match(String(initial.messages[0]?.content), /memory-decision-pending/);
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "queued tool continuation recall should finish",
+    );
+    const terminal = (await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: "queued with tools", timestamp: Date.now() },
+      ],
+    })) as { messages: Array<{ content?: unknown }> };
     const continuation = (await fixture.emit("context", {
       type: "context",
       messages: [
@@ -2718,7 +2990,7 @@ test("queued recall survives tool continuations and clears for the next user req
         { role: "toolResult", content: "tool output", timestamp: Date.now() },
       ],
     })) as { messages: Array<{ content?: unknown }> };
-    assert.match(String(initial.messages[0]?.content), /historical context/);
+    assert.match(String(terminal.messages[0]?.content), /historical context/);
     assert.match(
       String(continuation.messages[0]?.content),
       /historical context/,
@@ -2737,6 +3009,95 @@ test("queued recall survives tool continuations and clears for the next user req
       undefined,
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("recall wait times out without cancelling recall and cleans its listeners", async () => {
+  let release!: (value: RecallResult) => void;
+  const recallResult = new Promise<RecallResult>((resolve) => { release = resolve; });
+  let recallCancelled = false;
+  const fixture = await harness({
+    userSettings: { timeout_ms: 20 },
+    recallService: {
+      async recall(request) {
+        request.signal?.addEventListener(
+          "abort",
+          () => {
+            recallCancelled = true;
+          },
+          { once: true },
+        );
+        return recallResult;
+      },
+      async deeper() {
+        return { text: "unused", memoryIds: [], scope: "global" as const };
+      },
+    },
+  });
+  let added = 0;
+  let removed = 0;
+  const waitSignal = {
+    aborted: false,
+    addEventListener() { added += 1; },
+    removeEventListener() { removed += 1; },
+  } as unknown as AbortSignal;
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.entries.push(entry("wait-user", "root", "user", "wait for memory"));
+    const initial = await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "wait for memory", systemPrompt: "base",
+    });
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
+
+    const startedAt = performance.now();
+    const timedOut = await fixture.tools.get("forgetful_recall_wait")!.execute(
+      "wait-timeout", {}, waitSignal, undefined, fixture.ctx,
+    );
+    assert.ok(performance.now() - startedAt < 500);
+    assert.equal(timedOut.details.status, "failure");
+    assert.equal(timedOut.details.reason, "wait-timeout");
+    assert.equal(added, 1);
+    assert.equal(removed, 1);
+    assert.equal(recallCancelled, false, "wait timeout must not abort recall");
+    assert.equal(fixture.widgets.size, 1, "recall remains live after wait timeout");
+
+    fixture.ctx.isIdle = () => true;
+    release({
+      text: "historical context after the wait",
+      memoryIds: [42],
+      scope: "global",
+    });
+    await waitForRecallTerminal(fixture);
+    await waitForCondition(
+      () => fixture.widgets.size === 0,
+      "recall should finish after the caller's wait timed out",
+    );
+    const queued = await fixture.tools.get("forgetful_recall_wait")!.execute(
+      "wait-before-boundary", {}, undefined, undefined, fixture.ctx,
+    );
+    assert.match(String(queued.content[0]?.text), /already delivered/);
+    const completion = latestRecallMessage(fixture, "completion");
+    await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: "wait for memory" },
+        {
+          role: "custom",
+          customType: completion.customType,
+          content: completion.content,
+          details: completion.details,
+        },
+      ],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const alreadyDelivered = await fixture.tools.get("forgetful_recall_wait")!.execute(
+      "wait-already-terminal", {}, undefined, undefined, fixture.ctx,
+    );
+    assert.equal(alreadyDelivered.details.status, "context");
+    assert.match(String(alreadyDelivered.content[0]?.text), /already delivered/);
+  } finally {
+    release({ text: "", memoryIds: [], scope: "global" });
     await fixture.cleanup();
   }
 });
@@ -2868,6 +3229,90 @@ test("startup recovery and escalation handoff stay on the originating branch", a
     });
   } finally {
     await fixture.cleanup();
+  }
+});
+
+test("resolver checkpoint waiting is bounded and cannot enter stale capture", async () => {
+  for (const mode of ["abort", "timeout", "navigation"] as const) {
+    const fixture = await harness({
+      userSettings: mode === "timeout" ? { timeout_ms: 20 } : {},
+      conflicts: [{
+        id: "held-conflict",
+        sessionId: "session-1",
+        branchId: "session-1:root",
+        sourceEntryIds: ["held-user"],
+        oldMemory: { content: "old claim" },
+        candidate: { title: "new claim", content: "new claim" },
+      }],
+    });
+    let releaseCheckpoint!: (value: CaptureCheckpointResult) => void;
+    let markCheckpointStarted!: () => void;
+    const checkpointStarted = new Promise<void>((resolve) => {
+      markCheckpointStarted = resolve;
+    });
+    const checkpoint = new Promise<CaptureCheckpointResult>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    let toolRun: Promise<unknown> | undefined;
+    try {
+      await fixture.emit("session_start", {
+        type: "session_start",
+        reason: "new",
+      });
+      fixture.capture.checkpoint = async () => {
+        markCheckpointStarted();
+        return checkpoint;
+      };
+      fixture.entries.push(entry("held-user", "root", "user", "settle this"));
+      fixture.entries.push(
+        entry("held-assistant", "held-user", "assistant", "done", "stop"),
+      );
+      const settled = fixture.emit("agent_settled", { type: "agent_settled" });
+      await checkpointStarted;
+
+      const tool = fixture.tools.get("forgetful_resolve");
+      assert.ok(tool);
+      const controller = new AbortController();
+      toolRun = Promise.resolve(tool.execute(
+        "held-call",
+        { conflict_id: "held-conflict", action: "skip" },
+        mode === "abort" ? controller.signal : undefined,
+        undefined,
+        fixture.ctx,
+      ));
+      if (mode === "abort") controller.abort();
+      if (mode === "navigation") {
+        fixture.setLeaf("branch-b");
+        await fixture.emit("session_tree", {
+          type: "session_tree",
+          oldLeafId: "root",
+          newLeafId: "branch-b",
+        });
+      }
+      const outcome = await Promise.race([
+        toolRun.then(() => "resolved", () => "rejected"),
+        new Promise<"deadline">((resolve) => setTimeout(() => resolve("deadline"), 250)),
+      ]);
+      assert.equal(outcome, "rejected", `${mode} resolver wait must fail open promptly`);
+      assert.equal(fixture.capture.resolutions.length, 0);
+      releaseCheckpoint({
+        processed: 0,
+        processedJobIds: [],
+        paused: false,
+        errors: [],
+      });
+      await settled;
+      await toolRun.catch(() => undefined);
+    } finally {
+      releaseCheckpoint({
+        processed: 0,
+        processedJobIds: [],
+        paused: true,
+        errors: [],
+      });
+      await toolRun?.catch(() => undefined);
+      await fixture.cleanup();
+    }
   }
 });
 

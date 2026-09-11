@@ -78,6 +78,8 @@ export interface RecallRequest {
   /** Existing project choices supplied by the active Pi work context. */
   projects?: Project[];
   sessionContext?: EvidenceEntry[];
+  /** Called after the planner has selected retrieval, before scope/search work. */
+  onPlan?: (plan: RecallPlan) => void;
 }
 
 export interface DeeperRecallRequest {
@@ -666,6 +668,7 @@ export class RecallService {
         return parsePlan(value, request.scope);
       });
       this.ensureLive(deadline);
+      request.onPlan?.(plan);
       stage = "scope resolution";
       const plannedScope = await this.applyScopeOverrides(
         request,

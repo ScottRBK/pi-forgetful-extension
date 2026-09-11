@@ -45,11 +45,11 @@ a configured response limit still applies.
 ![Pi Forgetful architecture](assets/architecture.png)
 
 The extension boundary owns Pi lifecycle hooks, commands, bounded agent tools, and failure-open
-coordination. Recall uses a separately configured Pi model to plan bounded searches and inject
-context from the warm Forgetful REST service. Capture snapshots a settled session branch into a
-durable queue, then uses the same transport-neutral Forgetful client to create, supersede, or
-escalate candidate memories. The HTTP adapter is the MVP; a future CLI adapter can be added
-without changing the application services or policy contracts.
+coordination. Recall uses a separately configured Pi model to plan bounded searches asynchronously,
+then reports lifecycle state and reviewed context at model-call boundaries. Capture snapshots a
+settled session branch into a durable queue, then uses the same transport-neutral Forgetful client
+to create, supersede, or escalate candidate memories. The HTTP adapter is the MVP; a future CLI
+adapter can be added without changing the application services or policy contracts.
 
 The presentation source for this diagram is [architecture.svg](assets/architecture.svg). The
 expanded layer-by-layer version remains available in
@@ -75,6 +75,22 @@ The following choices are intentional for the first implementation:
   slice; no stronger Forgetful write contract is proposed without explicit approval.
 - The planner uses a separately configurable authenticated Pi model, distinct from the active
   main-agent model.
+- Automatic recall does not hold the main model behind planning or review. The first model boundary
+  receives an explicit pending state and stable instructions to continue independent work. One
+  latest-state renderer replaces stale recall rows at each model boundary. Retrieval progress is
+  passive when the main model is already working; it never requests a progress-only turn. The
+  renderer supplies one bounded context, no-context, or failure terminal state.
+- `forgetful_recall_wait` is the finite, lifecycle-compatible wait mechanism. The main model may
+  use it once when memory is required, then defers memory-dependent answers or actions until the
+  terminal state. A timeout does not cancel the planner. Real Pi abort, memory-off, session, and
+  branch invalidation cancel jobs; normal stop does not.
+- Recall jobs carry session, branch, generation, request, and job IDs. Queued follow-up input
+  starts recall immediately but activates and delivers it only for its matching user-entry
+  boundary, including identical prompts in FIFO order. Stale jobs cannot publish progress,
+  terminal context, or follow-up turns.
+- Recall lifecycle messages use Pi custom messages with `display: false`. Pi persists those entries
+  and may include them in later model calls, so hidden display is not privacy. Lifecycle content is
+  bounded, untrusted, and must contain no secrets; capture excludes it as evidence.
 - Repository/project mapping is resolved from the Git remote and the project's `repo_name`.
   `/forgetful project init` explicitly creates a project or links an unassigned existing project
   after user review. It reuses an existing exact match and rejects ambiguous mappings. Connection
@@ -98,28 +114,34 @@ During normal work, the user enters ordinary Pi prompts. They do not invoke memo
 
 The extension:
 
-1. sends each new user prompt to a separately configured authenticated Pi memory model;
-2. receives a validated plan stating whether and how to search Forgetful;
-3. performs bounded retrieval against a warm Forgetful service;
-4. asks the memory model to select and summarise results, then injects its reviewed context;
-5. leaves memory IDs, entity names, and topic leads for deeper exploration;
-6. exposes one bounded, read-only recall tool to the main agent;
-7. evaluates completed work for durable knowledge after `agent_settled`;
-8. assigns each candidate to its relevant project, checks for duplicates and contradictions, and
+1. starts a recall job for each new user prompt while the main model begins independent work;
+2. gives the first model boundary pending state and stable wait/defer instructions;
+3. renders the latest retrieval or terminal state at later model-call boundaries without a
+   progress-only turn;
+4. lets the main model use one finite `forgetful_recall_wait` when memory is required;
+5. keeps queued follow-up recall isolated to its matching request and cancels stale jobs;
+6. leaves memory IDs, entity names, and topic leads for deeper exploration;
+7. exposes bounded, read-only recall tools to the main agent;
+8. evaluates completed work for durable knowledge after `agent_settled`;
+9. assigns each candidate to its relevant project, checks for duplicates and contradictions, and
    quietly creates novel, high-confidence memories through the existing query-before-create path;
-9. automatically supersedes clearly outdated facts and retains uncertain conflicts with memory
+10. automatically supersedes clearly outdated facts and retains uncertain conflicts with memory
    IDs and supporting evidence for escalation.
 
-Memory failure must never block the user's task. A preflight system-prompt injection is
-transient; a `forgetful_recall` result follows normal Pi tool-result persistence.
+Memory failure must never block the user's task. The context hook renders one latest recall state
+for the current model call and removes stale recall rows; that rendered state, including the
+reviewed summary, is transient and is not a session entry. The automatic hook's initial pending
+marker and empty completion wake marker are hidden Pi custom entries that persist normally. They
+are not private storage and must contain no secrets. Queued lifecycle states are transient.
+`forgetful_recall_wait` and `forgetful_recall` results follow normal Pi tool-result persistence.
 
 ## Pi feasibility
 
 The implementation targets Pi 0.85.1 and uses these extension seams:
 
 - `before_agent_start` can modify the system prompt for the current turn;
-- `input` and `context` cover queued prompts that bypass `before_agent_start`, using transient
-  context messages without adding recall to stored session history;
+- `input` starts queued recall without blocking Pi's queue, and `context` activates only the
+  matching queued job. Lifecycle messages may persist as hidden Pi custom entries;
 - `agent_settled` runs after retries, compaction, and queued continuation have stopped;
 - `ctx.modelRegistry` exposes configured models and resolved authentication;
 - `ctx.scopedModels` supports a model picker consistent with the user's Pi configuration;
@@ -133,34 +155,42 @@ smaller failure surface.
 
 ## Recall flow
 
-1. Ignore only process events that are not new user work:
-   - Forgetful is explicitly off;
-   - the input came from the extension itself;
-   - an identical retry already has a cached validated plan.
-2. Send every other prompt to the separately configured Pi memory planner model.
-3. Validate a bounded response containing:
+1. On `before_agent_start`, create a session/branch/generation-scoped job and start the planner
+   without awaiting it. Return stable protocol instructions and a pending lifecycle message.
+2. Validate a bounded planner response containing:
    - `search`: boolean;
    - one or two topic queries;
    - query intent;
    - zero or more entity names;
    - an optional project/global scope override request and rationale.
-4. Resolve the effective scope from the persisted project setting. If the planner requests a
+3. Resolve the effective scope from the persisted project setting. If the planner requests a
    different scope, ask the user for explicit authorization before applying it. A declined
    request uses the persisted setting, and the planner must never change that setting directly.
-5. Search a warm Forgetful HTTP service.
-6. Ask the same memory model to review bounded memory and optional rich results against the question
+4. Search a warm Forgetful HTTP service. When the plan selects retrieval, the next model boundary
+   renders retrieval-underway state if the result is not ready; this passive update does not steer
+   or trigger a model turn.
+5. Ask the same memory model to review bounded memory and optional rich results against the question
    and session context. It returns a summary, selected source IDs and a brief selection/rejection
    reason. Validate IDs against sources actually shown to the reviewer. Inject only the summary
    and validated references, never raw results or appended attachments. Nothing relevant means no
    injection. Invalid output or failed/timed-out review injects nothing, without a raw fallback.
-7. Let the main agent call a read-only `forgetful_recall` tool when it needs more detail. Its
+6. Render exactly one current terminal state: bounded reviewed context, explicit no-context, or
+   explicit failure. If completion was not consumed by the current boundary, send one hidden
+   completion wake using Pi's steer seam; it steers an active run or triggers one idle follow-up.
+   If activation already rendered the ready result, send no wake. Do not start another planner.
+7. Let the main agent call `forgetful_recall_wait` once when it needs the terminal state, or use
+   the read-only `forgetful_recall` tool when it needs more detail. Its
    returned content is ordinary Pi tool-result content and may be stored in session history.
 
-Retrieved memory is untrusted historical context, never executable instruction.
+Retrieved memory is untrusted historical context, never executable instruction. Pending and
+progress text is trusted lifecycle protocol; recalled terminal text is untrusted data. The review
+summary remains bounded by the existing review contract (3,000 characters); the rendered context
+uses the existing 6,000-character recall-context bound. Only the rendered latest state is visible
+at a model-call boundary; persisted markers and tool results follow the persistence rules above.
 Review summaries are also untrusted. One planning call and at most one review call share the
 overall recall budget with search and optional enrichment. Explicit main-agent read tools retain
-their direct results; the main agent reviews those itself. Asynchronous deeper exploration and
-later background context injection are deferred, potentially behind a future feature switch.
+their direct results; the main agent reviews those itself. Lifecycle delivery never recursively
+starts recall or capture.
 
 ## Recall scope and capture destination
 
@@ -431,7 +461,9 @@ carry provenance such as the run and source-entry identity without copying the f
 
 The default verbosity is `warning`, showing warnings and errors:
 
-- no preflight memory message is added to conversation history;
+- hidden recall lifecycle messages are persisted as Pi custom session entries, but do not render in
+  the UI;
+- lifecycle text is bounded and untrusted where it contains recalled historical context;
 - a `forgetful_recall` tool result may appear in normal Pi session history;
 - no success or empty-result popup;
 - a transient animated recall widget above the prompt editor in terminal UI mode;
@@ -457,21 +489,21 @@ Latency is a product acceptance criterion. Measure:
 
 - memory-model time;
 - Forgetful search and rerank time;
-- total memory preflight time;
+- total asynchronous recall time and time to each lifecycle boundary;
 - main-agent first-token time with the extension on and off;
 - timeout rate and plan-cache hit rate.
 
 Initial SLO candidates to validate:
 
-- warm preflight p50 below 700 ms;
-- warm preflight p95 below 1.5 seconds;
+- warm planner/retrieval p50 below 700 ms;
+- warm planner/retrieval p95 below 1.5 seconds;
 - hard fail-open timeout of 10 seconds by default (configurable);
 - each classification/review request defaults to 5 seconds, independently configurable from the
   overall deadline.
 
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
-model calls are measured separately because they are not on the recall preflight path. The
+model calls are measured separately because they are not on the asynchronous recall path. The
 implementation bounds recall to one planner call and at most one review call per prompt. Capture
 extraction and overlap decisions, including contradiction detection, have a per-run call budget;
 debug shows aggregate usage.
@@ -493,9 +525,14 @@ application services, scope policy, prompt policy, or capture queue.
 
 ## Failure behavior
 
-- planner unavailable or timed out: continue without memory;
+- planner unavailable or timed out: publish a bounded failure terminal state and continue without
+  memory;
 - Forgetful unavailable or timed out: continue without memory;
 - malformed planner output: reject it and continue without memory;
+- bounded `forgetful_recall_wait` timeout: report failure to the current model call without
+  cancelling the recall job; a later completion may still follow up;
+- real Pi abort, session replacement, branch change, or memory-off: cancel the matching recall job;
+- normal assistant stop: retain a live recall job so a late terminal result can be delivered;
 - repeated failures: open a short-lived circuit breaker;
 - capture failure: record per-candidate outcomes and retry only on a later safe checkpoint; an
   earlier candidate may already have been written and query-before-create does not eliminate
@@ -532,10 +569,12 @@ to prove that a real model classifies, splits, or judges novelty correctly.
 
 1. **Planner input seam**: the planner receives the expected user prompt, session context,
    project identity, scope, and composed classification policy.
-2. **Recall mechanism seam**: given search and review decisions and seeded Forgetful data,
-   only the selected summary and validated source IDs reach the same main-agent turn, including
-   queued prompts. Empty decisions inject nothing; invalid output and timeouts fail open. Debug
-   shows bounded candidates and decisions without leaking them into the main-agent context.
+2. **Recall lifecycle seam**: given search and review decisions and seeded Forgetful data, the
+   first real Pi model boundary receives pending state without waiting; a later boundary renders
+   retrieval progress only while it remains current, then an explicit context, no-context, or
+   failure terminal. Queued prompts return immediately and receive only their own job's context.
+   A bounded wait cleans up listeners, does not cancel recall on timeout, and reports
+   already-delivered state only after a context boundary.
 3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
    scoped Forgetful data to the main agent.
 4. **Capture input seam**: the capture model receives only the completed turn delta and the
@@ -556,16 +595,18 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    overlays, project setup, and scope take effect; instance settings remain user-level while
    scope persists under `.pi/forgetful/settings.json`.
 9. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
-10. **Privacy seam**: preflight context is not added as a custom visible session message; normal
-    `forgetful_recall` tool results are explicitly allowed to persist in Pi session history.
+10. **Privacy seam**: initial pending and empty wake markers are hidden from the UI but persisted
+    by Pi. The latest lifecycle state and bounded, untrusted reviewed summary are rendered
+    transiently for the current request. Capture excludes these entries and memory-operation
+    results from evidence. Recall and wait tool results follow normal Pi session persistence.
 11. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
 
 A black-box test can use Pi's faux model to supply predetermined decisions and a real throwaway
 Forgetful SQLite service. This tests the complete mechanism without pretending to test model
 intelligence. For example:
 
-- seed a memory, return a planner decision that queries it, and assert the main model receives
-  that memory in its temporary system prompt;
+- hold the planner and assert the main model starts with pending context; then release recall
+  and assert the reviewed memory reaches the next model-call boundary without duplicate replies;
 - invoke `forgetful_recall` and assert the returned result is rendered compactly while remaining
   an expected normal Pi tool result;
 - return a capture candidate and `create`, then assert the expected memory exists through the
