@@ -204,6 +204,8 @@ and do not enter model context; `/forgetful status` remains the detailed view fo
 older queue jobs.
 Skipped candidates include a short grouped breakdown, for example:
 `Forgetful capture skipped 3 candidates (2: already known; 1: reason unavailable).`
+Extraction validation skips identify the failed check, such as assistant-only evidence, a missing
+field, an unknown evidence entry, sensitive data, or an invalid destination.
 Overlapping results are combined into one notice; observe mode reports observed candidates, and a
 later retry reports completion without counting an earlier partial write twice.
 The context hook renders one latest recall state for the current model call and removes stale

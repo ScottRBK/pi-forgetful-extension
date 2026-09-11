@@ -392,37 +392,55 @@ interface CandidateFields {
   kind: CaptureCandidate["evidenceType"];
 }
 
-function candidateEvidenceIsEligible(
+type CandidateValidation<T> =
+  | { valid: true; value: T }
+  | { valid: false; reason: string };
+
+function invalidCandidate<T>(reason: string): CandidateValidation<T> {
+  return { valid: false, reason };
+}
+
+function validCandidate<T>(value: T): CandidateValidation<T> {
+  return { valid: true, value };
+}
+
+function candidateEvidenceIneligibilityReason(
   source: EvidenceEntry[],
   kind: CaptureCandidate["evidenceType"],
-): boolean {
-  if (source.some((entry) => entry.role === "assistant")) return false;
+): string | undefined {
+  if (source.some((entry) => entry.role === "assistant"))
+    return "assistant messages are not eligible evidence";
+  if (source.some((entry) => isMemoryOperation(entry.toolName ?? "")))
+    return "memory operations are not eligible evidence";
   if (
     source.some(
       (entry) =>
         entry.role === "toolResult" &&
-        (!kind ||
-          kind !== "verifiedToolChange" ||
-          !entry.toolName ||
-          isMemoryOperation(entry.toolName)),
+        (!kind || kind !== "verifiedToolChange" || !entry.toolName),
     )
   ) {
-    return false;
+    return "tool results require evidenceType verifiedToolChange and a named tool";
   }
-  if (source.some((entry) => isMemoryOperation(entry.toolName ?? "")))
-    return false;
   if (
     kind === "verifiedToolChange" &&
     source.some((entry) => entry.role !== "toolResult")
-  )
-    return false;
-  return true;
+  ) {
+    return "verified tool changes require only tool result evidence";
+  }
+  return undefined;
+}
+
+function candidateEvidenceIsEligible(
+  source: EvidenceEntry[],
+  kind: CaptureCandidate["evidenceType"],
+): boolean {
+  return candidateEvidenceIneligibilityReason(source, kind) === undefined;
 }
 
 function candidateFields(
   item: Record<string, unknown>,
   snapshot: CaptureSnapshot,
-): CandidateFields | undefined {
+): CandidateValidation<CandidateFields> {
   const title = stringValue(item.title, 200);
   const content = stringValue(item.content, 2_000);
   const context = stringValue(item.context, 500);
@@ -431,23 +449,37 @@ function candidateFields(
     8,
     200,
   );
-  if (!title || !content || !context || sourceEntryIds.length === 0)
-    return undefined;
+  if (!title)
+    return invalidCandidate("title is missing, empty, or longer than 200 characters");
+  if (!content) {
+    return invalidCandidate(
+      "content is missing, empty, or longer than 2000 characters",
+    );
+  }
+  if (!context) {
+    return invalidCandidate(
+      "context is missing, empty, or longer than 500 characters",
+    );
+  }
+  if (sourceEntryIds.length === 0)
+    return invalidCandidate("sourceEntryIds has no valid evidence entry IDs");
   const source = sourceEvidence(
     { id: "", title, content, context, keywords: [], tags: [], sourceEntryIds },
     snapshot,
   );
-  if (source.length !== sourceEntryIds.length) return undefined;
+  if (source.length !== sourceEntryIds.length)
+    return invalidCandidate("sourceEntryIds references unknown evidence");
   const kind = evidenceType(item.evidenceType ?? item.evidence_type);
-  if (!candidateEvidenceIsEligible(source, kind)) return undefined;
+  const evidenceReason = candidateEvidenceIneligibilityReason(source, kind);
+  if (evidenceReason) return invalidCandidate(evidenceReason);
   if (
     hasSensitiveData(title) ||
     hasSensitiveData(content) ||
     hasSensitiveData(context)
   ) {
-    return undefined;
+    return invalidCandidate("candidate contains sensitive data");
   }
-  return { title, content, context, sourceEntryIds, kind };
+  return validCandidate({ title, content, context, sourceEntryIds, kind });
 }
 
 interface CandidateDestination {
@@ -458,7 +490,7 @@ interface CandidateDestination {
 
 function candidateDestination(
   item: Record<string, unknown>,
-): CandidateDestination | undefined {
+): CandidateValidation<CandidateDestination> {
   const destination = record(item.destination);
   const projectIdValue = projectId(
     item.destinationProjectId ??
@@ -486,13 +518,16 @@ function candidateDestination(
     "targetProjectName",
     "destination",
   ].some((key) => key in item);
-  if (hasDestinationInput && projectIdValue === undefined && !projectName)
-    return undefined;
-  return {
+  if (hasDestinationInput && projectIdValue === undefined && !projectName) {
+    return invalidCandidate(
+      "destination project requires a positive ID or non-empty name",
+    );
+  }
+  return validCandidate({
     ...(projectIdValue === undefined ? {} : { projectId: projectIdValue }),
     ...(projectName ? { projectName: sanitizeText(projectName) } : {}),
     ...(rationale ? { rationale: sanitizeText(rationale) } : {}),
-  };
+  });
 }
 
 function resourceInput(item: Record<string, unknown>): Record<string, unknown> {
@@ -786,8 +821,7 @@ function buildCandidate(
     candidate,
     richResources(item, fields.sourceEntryIds, snapshot, fields.kind),
   );
-  if (candidate.id.length === 0 || hasSensitiveData(JSON.stringify(candidate)))
-    return undefined;
+  if (hasSensitiveData(JSON.stringify(candidate))) return undefined;
   return candidate;
 }
 
@@ -795,15 +829,25 @@ function eligibleCandidate(
   value: unknown,
   snapshot: CaptureSnapshot,
   index: number,
-): CaptureCandidate | undefined {
+): CandidateValidation<CaptureCandidate> {
   const item = record(value);
-  if (!item) return undefined;
-  if (hasSensitiveData(JSON.stringify(item))) return undefined;
+  if (!item) return invalidCandidate("candidate must be a JSON object");
+  if (hasSensitiveData(JSON.stringify(item)))
+    return invalidCandidate("candidate contains sensitive data");
   const fields = candidateFields(item, snapshot);
-  if (!fields) return undefined;
+  if (!fields.valid) return fields;
   const destination = candidateDestination(item);
-  if (!destination) return undefined;
-  return buildCandidate(item, index, fields, destination, snapshot);
+  if (!destination.valid) return destination;
+  const candidate = buildCandidate(
+    item,
+    index,
+    fields.value,
+    destination.value,
+    snapshot,
+  );
+  return candidate
+    ? validCandidate(candidate)
+    : invalidCandidate("candidate contains sensitive data after normalization");
 }
 
 interface CandidateExtraction {
@@ -832,13 +876,9 @@ function parseCandidates(
       continue;
     }
     seenIds.add(id);
-    const candidate = eligibleCandidate(raw, snapshot, index);
-    if (candidate) candidates.push(candidate);
-    else
-      skipped.push({
-        id,
-        reason: "candidate evidence or structure is not eligible",
-      });
+    const validation = eligibleCandidate(raw, snapshot, index);
+    if (validation.valid) candidates.push(validation.value);
+    else skipped.push({ id, reason: validation.reason });
   }
   return { candidates, skipped };
 }

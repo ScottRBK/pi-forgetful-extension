@@ -2760,7 +2760,11 @@ test("debug groups fresh skipped candidates by their recorded reasons", async ()
           candidates: [
             { id: "known-1", stage: "skipped", reason: "already known" },
             { id: "known-2", stage: "skipped", reason: "already known" },
-            { id: "ineligible", stage: "skipped", reason: "not eligible" },
+            {
+              id: "ineligible",
+              stage: "skipped",
+              reason: "assistant messages are not eligible evidence",
+            },
             { id: "missing", stage: "skipped" },
           ],
         },
@@ -2790,7 +2794,8 @@ test("debug groups fresh skipped candidates by their recorded reasons", async ()
     assert.equal(
       feedback[0],
       "Forgetful capture skipped 4 candidates " +
-        "(2: already known; 1: not eligible; 1: reason unavailable).",
+        "(2: already known; 1: assistant messages are not eligible evidence; " +
+        "1: reason unavailable).",
     );
   } finally {
     await fixture.cleanup();

@@ -1048,6 +1048,11 @@ test("invalid candidates are recorded as skipped while valid candidates continue
       ?.stage,
     "skipped",
   );
+  const diagnostics = await service.diagnostics();
+  const rejected = diagnostics.jobs[0]?.candidates.find(
+    (candidate) => candidate.id === "candidate-assistant-only",
+  );
+  assert.equal(rejected?.reason, "assistant messages are not eligible evidence");
   assert.equal(
     (
       job?.candidateOutcomes["candidate-valid-after-invalid"] as {
@@ -1056,6 +1061,58 @@ test("invalid candidates are recorded as skipped while valid candidates continue
     )?.stage,
     "created",
   );
+});
+
+test("capture diagnostics report exact extraction validation reasons", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "pi-forgetful-capture-validation-reasons-"),
+  );
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const client = new FakeClient();
+  const candidate = {
+    content: "A durable fact.",
+    context: "A user decision.",
+    keywords: ["fact"],
+    tags: ["decision"],
+    sourceEntryIds: ["user-1"],
+  };
+  const model = new FakeModel({
+    candidates: [
+      { ...candidate, id: "missing-title" },
+      {
+        ...candidate,
+        id: "unknown-evidence",
+        title: "Unknown evidence",
+        sourceEntryIds: ["unknown-entry"],
+      },
+      {
+        ...candidate,
+        id: "invalid-destination",
+        title: "Invalid destination",
+        destinationProjectId: 0,
+      },
+    ],
+  });
+  const service = new CaptureService({
+    queue,
+    client,
+    model,
+    instanceId: "instance-a",
+  });
+
+  await service.enqueue(snapshot());
+  await service.checkpoint();
+
+  const diagnostics = await service.diagnostics();
+  const reasons = Object.fromEntries(
+    diagnostics.jobs[0]?.candidates.map(({ id, reason }) => [id, reason]) ?? [],
+  );
+  assert.deepEqual(reasons, {
+    "missing-title": "title is missing, empty, or longer than 200 characters",
+    "unknown-evidence": "sourceEntryIds references unknown evidence",
+    "invalid-destination":
+      "destination project requires a positive ID or non-empty name",
+  });
 });
 
 test("partial supersession retries obsolescence with the recorded replacement ID", async () => {
