@@ -183,9 +183,11 @@ test(
       | "wait"
       | "late"
       | "late-no-context"
+      | "late-failure"
       | "cancel"
       | "queued"
       | "progress"
+      | "progress-no-context"
       | "identical" = "wait";
     let mainCalls = 0;
     let waitAfterTerminal = false;
@@ -286,40 +288,36 @@ test(
             } else queueMicrotask(review);
           } else {
             plannerGate.start();
-            void plannerGate.release.then(() =>
-              emit(
-                message(
-                  "memory",
-                  [
-                    {
-                      type: "text",
-                      text: JSON.stringify({
-                        search: mode !== "late-no-context",
-                        queries: mode === "late-no-context"
-                          ? []
-                          : [
-                              input.prompt === "queued request one"
-                                ? "queue-one"
-                                : input.prompt === "queued request two"
-                                  ? "queue-two"
-                                  : "database decision",
-                            ],
-                        queryIntent: mode === "late-no-context"
-                          ? ""
-                          : "Recall database decisions",
-                        entities: [],
-                      }),
-                    },
-                  ],
-                ),
-              ),
-            );
+            void plannerGate.release.then(() => {
+              const noContext =
+                mode === "late-no-context" || mode === "progress-no-context";
+              const text = mode === "late-failure"
+                ? "invalid planner output"
+                : JSON.stringify({
+                    search: !noContext,
+                    queries: noContext
+                      ? []
+                      : [
+                          input.prompt === "queued request one"
+                            ? "queue-one"
+                            : input.prompt === "queued request two"
+                              ? "queue-two"
+                              : "database decision",
+                        ],
+                    queryIntent: noContext ? "" : "Recall database decisions",
+                    entities: [],
+                  });
+              emit(message("memory", [{ type: "text", text }]));
+            });
           }
           return stream;
         }
 
-        if (mode === "progress" && mainCalls === 1) {
-          queueMicrotask(() =>
+        if (
+          (mode === "progress" || mode === "progress-no-context") &&
+          mainCalls === 1
+        ) {
+          const emitToolCall = () =>
             emit(
               message("main", [
                 {
@@ -329,8 +327,13 @@ test(
                   arguments: { query: "boundary search" },
                 },
               ], "toolUse"),
-            ),
-          );
+            );
+          if (mode === "progress-no-context") {
+            queuedMainGate.start();
+            void queuedMainGate.release.then(emitToolCall);
+          } else {
+            queueMicrotask(emitToolCall);
+          }
           return stream;
         }
         if ((mode === "queued" || mode === "identical") && mainCalls === 1) {
@@ -698,7 +701,7 @@ test(
       "the older identical result must not wake the newer request",
     );
 
-    // Act/Assert: a late no-context result still supplies terminal status once.
+    // Act/Assert: a late no-context result does not start another main-model turn.
     mode = "late-no-context";
     mainCalls = 0;
     plannerGate = gate();
@@ -722,29 +725,62 @@ test(
     );
     plannerGate.finish();
     await noContextPrompt;
-    await waitFor(
-      () => mainContexts.length === noContextBase + 2,
-      "late no-context recall should trigger one bounded follow-up",
-    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(memoryContexts.length, noContextMemoryBase + 1);
-    const noContext = mainContexts[noContextBase + 1];
-    assert.ok(noContext, "late no-context recall must produce a provider request");
-    assert.equal(noContext.messages.at(-1)?.role, "user", JSON.stringify(noContext));
-    const noContextContinuation = messageText(noContext);
-    assert.match(
-      noContextContinuation,
-      /\[Forgetful automatic recall terminal state: no-context\]/,
+    assert.equal(
+      mainContexts.length,
+      noContextBase + 1,
+      "late no-context recall must not trigger another main-model turn",
     );
-    assert.match(
-      noContextContinuation,
-      /\[Forgetful automatic recall background continuation\]/,
+
+    // Act/Assert: a late recall failure is also failure-open without another turn.
+    mode = "late-failure";
+    mainCalls = 0;
+    plannerGate = gate();
+    const failureBase = mainContexts.length;
+    const failurePrompt = session.prompt("Continue even if automatic recall fails.");
+    await plannerGate.started;
+    await waitFor(
+      () => mainContexts.length === failureBase + 1,
+      "late recall failure should still allow the initial response",
     );
-    assert.match(noContextContinuation, /do not ask the user to resend/i);
-    assert.match(
-      JSON.stringify(noContext),
-      /What should I do if memory has no answer\?/,
+    let failureSettled = false;
+    void failurePrompt.then(() => {
+      failureSettled = true;
+    });
+    await waitFor(
+      () => failureSettled,
+      "the initial response must settle while failed planning remains held",
     );
-    assert.doesNotMatch(noContextContinuation, /SQLite was chosen|memoryIds/);
+    plannerGate.finish();
+    await failurePrompt;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(
+      mainContexts.length,
+      failureBase + 1,
+      "late recall failure must not trigger another main-model turn",
+    );
+
+    // Act/Assert: no-context status remains visible at an existing tool boundary.
+    mode = "progress-no-context";
+    mainCalls = 0;
+    plannerGate = gate();
+    queuedMainGate = gate();
+    const naturalBoundaryBase = mainContexts.length;
+    const naturalBoundaryPrompt = session.prompt(
+      "Continue through a tool boundary when memory has no answer.",
+    );
+    await plannerGate.started;
+    await queuedMainGate.started;
+    plannerGate.finish();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    queuedMainGate.finish();
+    await naturalBoundaryPrompt;
+    assert.equal(mainContexts.length, naturalBoundaryBase + 2);
+    assert.match(
+      JSON.stringify(mainContexts[naturalBoundaryBase + 1]),
+      /automatic recall terminal state: no-context/,
+    );
 
     const wakeEntries = sessionManager.getEntries().filter((entry) => {
       if (

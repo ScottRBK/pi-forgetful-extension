@@ -1990,6 +1990,7 @@ export function createForgetfulExtension(
         pending.terminalConsumed ||
         !pending.boundarySeen ||
         !pending.result ||
+        !sanitizeText(pending.result.text).trim() ||
         !isCurrentRecallJob(pending, ctx, currentPrompt, currentEntryId) ||
         typeof pi.sendMessage !== "function"
       ) return;
