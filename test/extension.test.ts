@@ -1165,6 +1165,7 @@ test("automatic recall injects only the memory model's selected summary", async 
     assert.match(String(terminal.content), /MiniCPM is currently served/);
     assert.doesNotMatch(String(terminal.content), /CRM|VLLM_MAX_MODEL_LEN|Memory #63/);
     const debug = fixture.notifications.join("\n");
+    assert.doesNotMatch(debug, /Forgetful recall review validation debug:/);
     assert.match(debug, /CRM architecture/);
     assert.match(debug, /Rejected: Memory #63/);
     assert.match(debug, /The serving setting is relevant/);
@@ -1306,6 +1307,131 @@ test("review cannot reintroduce memories rejected by strict project scope", asyn
     await fixture.cleanup();
   }
 });
+
+test("debug captures rejected review JSON and its mismatch direction", async () => {
+  // Arrange: the reviewer returns a structurally invalid summary/source pair.
+  const rejectedMarker = "REJECTED_REVIEW_MARKER";
+  const fixture = await recallReviewHarness(() => ({
+    summary: `Useful evidence ${rejectedMarker} Bearer review-secret`,
+    memoryIds: [],
+    reason: "No source selected.",
+    token: "Bearer review-secret",
+  }));
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+    // Act.
+    const initial = await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+    });
+    const waitResult = await fixture.tools.get("forgetful_recall_wait")!.execute(
+      "review-debug-wait",
+      {},
+      undefined,
+      undefined,
+      fixture.ctx,
+    );
+    await waitForRecallTerminal(fixture);
+
+    // Assert: evidence is debug-only and does not become recall context or lifecycle text.
+    const notifications = fixture.notifications.join("\n");
+    assert.match(notifications, /Forgetful recall failed during review validation/);
+    assert.ok(
+      fixture.notifications.some((message) =>
+        message ===
+          "Forgetful recall failed during review validation: Error: " +
+          "Recall review summary and sources must both be present or both empty",
+      ),
+      notifications,
+    );
+    assert.match(notifications, /Forgetful recall review validation debug:/);
+    assert.match(notifications, /REJECTED_REVIEW_MARKER/);
+    assert.match(notifications, /\[redacted\]/);
+    assert.doesNotMatch(notifications, /review-secret/);
+    assert.match(
+      notifications,
+      /Available source IDs \(bounded\):.*Memory #42.*Memory #63/s,
+    );
+    assert.match(
+      notifications,
+      /Mismatch direction: non-empty summary but no sources selected/,
+    );
+    const finalDebugNotice = fixture.notifications.at(-1) ?? "";
+    assert.match(finalDebugNotice, /Forgetful recall review validation debug:/);
+    assert.doesNotMatch(finalDebugNotice, /Retrieved candidates:/);
+    assert.match(
+      finalDebugNotice,
+      /Forgetful recall took \d+ ms\.\nNo memory context was supplied\./,
+    );
+    assert.doesNotMatch(JSON.stringify(waitResult), /REJECTED_REVIEW_MARKER/);
+    assert.match(JSON.stringify(initial), /memory-decision-pending/);
+    assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
+    assert.doesNotMatch(JSON.stringify(fixture.contextResults), /REJECTED_REVIEW_MARKER/);
+    assert.doesNotMatch(fixture.modelInputs.join("\n"), /REJECTED_REVIEW_MARKER/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("review validation debug bounds the returned reviewer JSON", async () => {
+  // Arrange: an extra reviewer field makes the returned JSON exceed the debug limit.
+  const fixture = await recallReviewHarness(() => ({
+    summary: "Useful evidence",
+    memoryIds: [],
+    reason: "No source selected.",
+    extra: "x".repeat(8_000),
+  }));
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+    // Act.
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+    });
+    await waitForRecallTerminal(fixture);
+
+    // Assert: only the reviewer JSON section uses the 4,000-character bound.
+    const debug = fixture.notifications.find((message) =>
+      message.startsWith("Forgetful recall review validation debug:"),
+    );
+    assert.ok(debug, fixture.notifications.join("\n"));
+    const outputStart = debug.indexOf("Returned reviewer JSON (redacted):\n") +
+      "Returned reviewer JSON (redacted):\n".length;
+    const outputEnd = debug.indexOf("\nAvailable source IDs", outputStart);
+    const output = debug.slice(outputStart, outputEnd);
+    assert.equal(output.length, 4_000);
+    assert.match(output, /\.\.\.\[reviewer JSON truncated at 4000 characters\]/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+for (const verbosity of ["info", "warning", "error"]) {
+  test(`review validation debug stays hidden at ${verbosity} verbosity`, async () => {
+    // Arrange: the same validation failure is observed through a non-debug UI.
+    const fixture = await recallReviewHarness(() => ({
+      summary: "Useful evidence",
+      memoryIds: [],
+      reason: "No source selected.",
+    }), { verbosity });
+    try {
+      await fixture.emit("session_start", { type: "session_start", reason: "new" });
+
+      // Act.
+      await fixture.emit("before_agent_start", {
+        type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
+      });
+      await waitForRecallTerminal(fixture);
+
+      // Assert: the ordinary warning/fail-open path remains, without debug evidence.
+      const notifications = fixture.notifications.join("\n");
+      assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
+      assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
 
 for (const selectDocument of [true, false]) {
   test(`review ${selectDocument ? "selects" : "rejects"} supporting documents`, async () => {
@@ -1474,7 +1600,11 @@ for (const [label, output] of Object.entries({
       await waitForRecallTerminal(fixture);
       // Assert: there is never a raw-result fallback.
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
-      assert.match(fixture.notifications.join("\n"), /recall failed during review validation/);
+      const notifications = fixture.notifications.join("\n");
+      assert.match(notifications, /recall failed during review validation/);
+      assert.match(notifications, /Forgetful recall review validation debug:/);
+      if (label !== "unattributed summary" && label !== "empty selected summary")
+        assert.doesNotMatch(notifications, /Mismatch direction:/);
       const terminal = latestRecallMessage(fixture, "completion");
       assert.equal(terminal.details?.status, "failure");
       assert.doesNotMatch(String(terminal.content), /Invented|Unexplained|Serving|x{100}/);
@@ -1502,6 +1632,10 @@ test("review failures accumulate until the recall circuit opens", async () => {
     // Assert.
     assert.match(fixture.notifications.join("\n"), /recall failed during recall review/);
     assert.match(fixture.notifications.join("\n"), /circuit-open/);
+    assert.doesNotMatch(
+      fixture.notifications.join("\n"),
+      /Forgetful recall review validation debug:/,
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -1949,7 +2083,9 @@ test("search plans require intent and debug identifies the search decision", asy
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
       assert.equal(searches, 0);
       assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
-      assert.match(fixture.notifications.join("\n"), /queryIntent.*search=true.*non-empty string/);
+      const notifications = fixture.notifications.join("\n");
+      assert.match(notifications, /queryIntent.*search=true.*non-empty string/);
+      assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
     } finally {
       await fixture.cleanup();
     }
@@ -1979,8 +2115,10 @@ test("debug reports search exceptions for automatic and manual recall", async ()
     assert.match(JSON.stringify(initial), /memory-decision-pending/);
 
     // Assert: the failure names the step, exception and HTTP status.
-    assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
-    assert.doesNotMatch(fixture.notifications.join("\n"), /completed|no-matches/);
+    let notifications = fixture.notifications.join("\n");
+    assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);
+    assert.doesNotMatch(notifications, /completed|no-matches/);
+    assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
 
     fixture.notifications.splice(0);
     const tool = fixture.tools.get("forgetful_recall")!;
@@ -1989,7 +2127,9 @@ test("debug reports search exceptions for automatic and manual recall", async ()
         undefined, fixture.ctx),
       /Forgetful recall is unavailable/,
     );
-    assert.match(fixture.notifications.join("\n"), /memory search.*ForgetfulHttpError:.*HTTP 503/);
+    notifications = fixture.notifications.join("\n");
+    assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);
+    assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
   } finally {
     await fixture.cleanup();
   }
@@ -2599,6 +2739,130 @@ test("debug reports observed capture candidates distinctly from saved memories",
   }
 });
 
+test("debug groups fresh skipped candidates by their recorded reasons", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async (options) => ({
+      jobs: [
+        {
+          id: options?.jobId,
+          status: "complete",
+          candidates: [
+            { id: "known-1", stage: "skipped", reason: "already known" },
+            { id: "known-2", stage: "skipped", reason: "already known" },
+            { id: "ineligible", stage: "skipped", reason: "not eligible" },
+            { id: "missing", stage: "skipped" },
+          ],
+        },
+      ],
+      conflicts: [],
+    });
+    fixture.entries.push(entry("skip-reasons-user", "root", "user", "skip reasons"));
+    fixture.entries.push(
+      entry("skip-reasons-assistant", "skip-reasons-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const deadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) =>
+        message.includes("Forgetful capture skipped 4 candidates"),
+      ) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const feedback = fixture.notifications.filter((message) =>
+      message.startsWith("Forgetful capture"),
+    );
+    assert.equal(feedback.length, 1, fixture.notifications.join("\n"));
+    assert.equal(
+      feedback[0],
+      "Forgetful capture skipped 4 candidates " +
+        "(2: already known; 1: not eligible; 1: reason unavailable).",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("debug bounds and redacts skipped-reason details", async () => {
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  const longReason = `long reason ${"x".repeat(300)}`;
+  try {
+    await fixture.emit("session_start", {
+      type: "session_start",
+      reason: "new",
+    });
+    fixture.capture.checkpoint = async () => ({
+      processed: 1,
+      processedJobIds: [fixture.capture.enqueued.at(-1)?.id ?? ""],
+      paused: false,
+      errors: [],
+    });
+    fixture.capture.diagnostics = async (options) => ({
+      jobs: [
+        {
+          id: options?.jobId,
+          status: "complete",
+          candidates: [
+            {
+              id: "unsafe",
+              stage: "skipped",
+              reason: `Bearer external-test-secret\n${"x".repeat(200)}`,
+            },
+            { id: "long", stage: "skipped", reason: longReason },
+            ...Array.from({ length: 5 }, (_, index) => ({
+              id: `other-${index}`,
+              stage: "skipped",
+              reason: `other reason ${index}`,
+            })),
+          ],
+        },
+      ],
+      conflicts: [],
+    });
+    fixture.entries.push(entry("bounded-user", "root", "user", "bounded reasons"));
+    fixture.entries.push(
+      entry("bounded-assistant", "bounded-user", "assistant", "done", "stop"),
+    );
+
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    const deadline = Date.now() + 500;
+    while (
+      !fixture.notifications.some((message) =>
+        message.includes("Forgetful capture skipped 7 candidates"),
+      ) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const feedback = fixture.notifications.find((message) =>
+      message.startsWith("Forgetful capture"),
+    );
+    assert.ok(feedback, fixture.notifications.join("\n"));
+    assert.match(feedback, /1: \[redacted\]/);
+    assert.doesNotMatch(feedback, /external-test-secret/);
+    assert.match(feedback, /1: long reason .*…/);
+    assert.match(feedback, /3 other reason groups/);
+    assert.ok(feedback.length <= 800, `feedback was ${feedback.length} chars`);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("debug includes saved candidates when a capture retry is pending", async () => {
   const fixture = await harness({ userSettings: { verbosity: "debug" } });
   try {
@@ -2669,7 +2933,10 @@ test("debug does not count a partial write again when its retry completes", asyn
             id: options?.jobId,
             status: retry ? "complete" : "pending",
             ...(retry ? {} : { lastError: "temporary overlap failure" }),
-            candidates: [{ id: "saved", stage: "created" }],
+            candidates: [
+              { id: "saved", stage: "created" },
+              { id: "skipped", stage: "skipped", reason: "duplicate candidate" },
+            ],
           },
         ],
         conflicts: [],
@@ -2689,6 +2956,7 @@ test("debug does not count a partial write again when its retry completes", asyn
     }
     const firstFeedback = fixture.notifications.join("\n");
     assert.match(firstFeedback, /saved 1 memory/);
+    assert.match(firstFeedback, /skipped 1 candidate \(1: duplicate candidate\)/);
     assert.match(firstFeedback, /retry pending/);
 
     fixture.entries.push(entry("retry-user", "partial-assistant", "user", "retry work"));
@@ -2711,6 +2979,7 @@ test("debug does not count a partial write again when its retry completes", asyn
       .join("\n");
     assert.match(retryFeedback, /completed after retry/);
     assert.doesNotMatch(retryFeedback, /saved 1 memory/);
+    assert.doesNotMatch(retryFeedback, /skipped 1 candidate/);
   } finally {
     await fixture.cleanup();
   }

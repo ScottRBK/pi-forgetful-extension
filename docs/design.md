@@ -131,8 +131,8 @@ The extension:
 Memory failure must never block the user's task. The context hook renders one latest recall state
 for the current model call and removes stale recall rows; that rendered state, including the
 reviewed summary, is transient and is not a session entry. The automatic hook's initial pending
-marker and empty completion wake marker are hidden Pi custom entries that persist normally. They
-are not private storage and must contain no secrets. Queued lifecycle states are transient.
+marker and generic background-completion marker are hidden Pi custom entries that persist normally.
+They are not private storage and must contain no secrets. Queued lifecycle states are transient.
 `forgetful_recall_wait` and `forgetful_recall` results follow normal Pi tool-result persistence.
 
 ## Pi feasibility
@@ -176,8 +176,9 @@ smaller failure surface.
    injection. Invalid output or failed/timed-out review injects nothing, without a raw fallback.
 6. Render exactly one current terminal state: bounded reviewed context, explicit no-context, or
    explicit failure. If completion was not consumed by the current boundary, send one hidden
-   completion wake using Pi's steer seam; it steers an active run or triggers one idle follow-up.
-   If activation already rendered the ready result, send no wake. Do not start another planner.
+   generic background-completion wake using Pi's steer seam; it steers an active run or triggers
+   one idle follow-up. If activation already rendered the ready result, send no wake. Do not start
+   another planner.
 7. Let the main agent call `forgetful_recall_wait` once when it needs the terminal state, or use
    the read-only `forgetful_recall` tool when it needs more detail. Its
    returned content is ordinary Pi tool-result content and may be stored in session history.
@@ -595,10 +596,11 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    overlays, project setup, and scope take effect; instance settings remain user-level while
    scope persists under `.pi/forgetful/settings.json`.
 9. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
-10. **Privacy seam**: initial pending and empty wake markers are hidden from the UI but persisted
-    by Pi. The latest lifecycle state and bounded, untrusted reviewed summary are rendered
-    transiently for the current request. Capture excludes these entries and memory-operation
-    results from evidence. Recall and wait tool results follow normal Pi session persistence.
+10. **Privacy seam**: initial pending and generic background-completion wake markers are hidden
+    from the UI but persisted by Pi. The latest lifecycle state and bounded, untrusted reviewed
+    summary are rendered transiently for the current request. Capture excludes these entries and
+    memory-operation results from evidence. Recall and wait tool results follow normal Pi session
+    persistence.
 11. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
 
 A black-box test can use Pi's faux model to supply predetermined decisions and a real throwaway

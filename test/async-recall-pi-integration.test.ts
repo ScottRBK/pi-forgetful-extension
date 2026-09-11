@@ -182,6 +182,7 @@ test(
     let mode:
       | "wait"
       | "late"
+      | "late-no-context"
       | "cancel"
       | "queued"
       | "progress"
@@ -287,15 +288,19 @@ test(
                     {
                       type: "text",
                       text: JSON.stringify({
-                        search: true,
-                        queries: [
-                          input.prompt === "queued request one"
-                            ? "queue-one"
-                            : input.prompt === "queued request two"
-                              ? "queue-two"
-                              : "database decision",
-                        ],
-                        queryIntent: "Recall database decisions",
+                        search: mode !== "late-no-context",
+                        queries: mode === "late-no-context"
+                          ? []
+                          : [
+                              input.prompt === "queued request one"
+                                ? "queue-one"
+                                : input.prompt === "queued request two"
+                                  ? "queue-two"
+                                  : "database decision",
+                            ],
+                        queryIntent: mode === "late-no-context"
+                          ? ""
+                          : "Recall database decisions",
                         entities: [],
                       }),
                     },
@@ -520,6 +525,20 @@ test(
       JSON.stringify(mainContexts[progressBase + 4]),
       /SQLite was chosen for durable state/,
     );
+    const lateContext = mainContexts[progressBase + 4];
+    assert.ok(lateContext, "late recall must produce a provider request");
+    const lateLatestMessage = lateContext.messages.at(-1);
+    assert.equal(lateLatestMessage?.role, "user", JSON.stringify(lateContext));
+    const lateContinuation = messageText(lateContext);
+    assert.ok(lateContinuation.trim(), JSON.stringify(lateContext));
+    assert.match(
+      lateContinuation,
+      /\[Forgetful automatic recall background continuation\]/,
+    );
+    assert.match(lateContinuation, /original user request|not a new user request/i);
+    assert.match(lateContinuation, /do not ask the user to resend/i);
+    assert.match(lateContinuation, /already fully answered/i);
+    assert.match(JSON.stringify(lateContext), /What database decision should I document\?/);
 
     // Act/Assert: a real abort invalidates recall and cannot resurrect a new main turn.
     mode = "cancel";
@@ -672,5 +691,70 @@ test(
       identicalMainBase + 4,
       "the older identical result must not wake the newer request",
     );
+
+    // Act/Assert: a late no-context result still supplies terminal status once.
+    mode = "late-no-context";
+    mainCalls = 0;
+    plannerGate = gate();
+    const noContextBase = mainContexts.length;
+    const noContextMemoryBase = memoryContexts.length;
+    const noContextPrompt = session.prompt(
+      "What should I do if memory has no answer?",
+    );
+    await plannerGate.started;
+    await waitFor(
+      () => mainContexts.length === noContextBase + 1,
+      "late no-context recall should still allow the initial response",
+    );
+    let noContextSettled = false;
+    void noContextPrompt.then(() => {
+      noContextSettled = true;
+    });
+    await waitFor(
+      () => noContextSettled,
+      "the no-context response must settle while planning remains held",
+    );
+    plannerGate.finish();
+    await noContextPrompt;
+    await waitFor(
+      () => mainContexts.length === noContextBase + 2,
+      "late no-context recall should trigger one bounded follow-up",
+    );
+    assert.equal(memoryContexts.length, noContextMemoryBase + 1);
+    const noContext = mainContexts[noContextBase + 1];
+    assert.ok(noContext, "late no-context recall must produce a provider request");
+    assert.equal(noContext.messages.at(-1)?.role, "user", JSON.stringify(noContext));
+    const noContextContinuation = messageText(noContext);
+    assert.match(
+      noContextContinuation,
+      /\[Forgetful automatic recall terminal state: no-context\]/,
+    );
+    assert.match(
+      noContextContinuation,
+      /\[Forgetful automatic recall background continuation\]/,
+    );
+    assert.match(noContextContinuation, /do not ask the user to resend/i);
+    assert.match(
+      JSON.stringify(noContext),
+      /What should I do if memory has no answer\?/,
+    );
+    assert.doesNotMatch(noContextContinuation, /SQLite was chosen|memoryIds/);
+
+    const wakeEntries = sessionManager.getEntries().filter((entry) => {
+      if (
+        entry.type !== "custom_message" ||
+        entry.customType !== "forgetful_recall_async"
+      )
+        return false;
+      return JSON.stringify(entry).includes('"phase":"wake"');
+    });
+    assert.ok(wakeEntries.length >= 2, JSON.stringify(sessionManager.getEntries()));
+    const wakeText = wakeEntries.map((entry) => JSON.stringify(entry)).join("\n");
+    assert.doesNotMatch(wakeText, /"content":""/);
+    assert.match(
+      wakeText,
+      /\[Forgetful automatic recall background continuation\]/,
+    );
+    assert.doesNotMatch(wakeText, /terminal state|SQLite was chosen|memoryIds/);
   },
 );

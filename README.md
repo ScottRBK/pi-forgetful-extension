@@ -194,18 +194,23 @@ At info level, recall reports the number of selected memories and scope used. De
 shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
 the memory model's selection reason, its final summary, and total recall time. Content already
 shortened for review stays shortened in this display. These are user-only notifications, not
-extra conversation messages or log files.
+extra conversation messages or log files. Review validation failures also include the redacted,
+bounded reviewer JSON, available source IDs, and a mismatch direction when reliably known in the
+same final debug notice as elapsed/no-context text, so Pi's consecutive-status coalescing does
+not hide the evidence.
 At debug level, automatic capture reports each newly queued live job as saved, skipped, no
 candidates, or failed. Retryable failures say that retry is pending. These notices are user-only
 and do not enter model context; `/forgetful status` remains the detailed view for recovered or
 older queue jobs.
+Skipped candidates include a short grouped breakdown, for example:
+`Forgetful capture skipped 3 candidates (2: already known; 1: reason unavailable).`
 Overlapping results are combined into one notice; observe mode reports observed candidates, and a
 later retry reports completion without counting an earlier partial write twice.
 The context hook renders one latest recall state for the current model call and removes stale
 recall rows from that boundary. That rendered state, including the reviewed summary, is transient;
-it is not a persisted session entry. The automatic hook's initial pending marker and its empty
-completion wake marker are hidden Pi custom entries and are persisted normally. They are not a
-privacy boundary: later model calls may receive them, so lifecycle text must contain no secrets.
+it is not a persisted session entry. The automatic hook's initial pending marker and its generic
+background-completion marker are hidden Pi custom entries and are persisted normally. They are not
+a privacy boundary: later model calls may receive them, so lifecycle text must contain no secrets.
 Queued lifecycle states are rendered transiently. `forgetful_recall_wait` returns an ordinary Pi
 tool result and follows normal tool-result persistence. Capture excludes lifecycle entries and
 memory-operation results from eligible evidence. Conflict messages follow normal Pi persistence;

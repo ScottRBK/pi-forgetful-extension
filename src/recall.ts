@@ -1,4 +1,4 @@
-import { sanitizeText } from "./privacy.ts";
+import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import {
   KnowledgeReadService,
   type KnowledgeExpansionResult,
@@ -33,6 +33,10 @@ const MAX_MEMORY_CONTENT_CHARS = 1_400;
 const MAX_MEMORY_CONTEXT_CHARS = 300;
 const MAX_SEARCHES = 2;
 const MAX_SUMMARY_CHARS = 3_000;
+const MAX_REVIEW_DEBUG_JSON_CHARS = 4_000;
+const MAX_REVIEW_DEBUG_SOURCE_CHARS = 1_000;
+const REVIEW_MISMATCH_ERROR =
+  "Recall review summary and sources must both be present or both empty";
 const SOURCE_FIELDS = {
   memoryIds: "Memory",
   entityIds: "Entity",
@@ -100,6 +104,8 @@ export interface RecallResult {
   diagnostic?: string;
   /** Bounded search/review trace for debug UI only; never inject into model context. */
   debugTrace?: string;
+  /** Rejected reviewer output for debug UI only; never inject into model context. */
+  reviewValidationDebug?: string;
   entityIds?: number[];
   relationshipIds?: number[];
   documentIds?: number[];
@@ -568,6 +574,70 @@ function sourceLabels(sources: ReturnType<typeof reviewSources>): string[] {
     sources[key as keyof typeof SOURCE_FIELDS].map((id) => `${label} #${id}`));
 }
 
+function boundDebugText(value: string, max: number, marker: string): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max - marker.length))}${marker}`;
+}
+
+function reviewerOutputText(value: unknown): string {
+  try {
+    const sanitized = sanitizeValue(value);
+    const json = JSON.stringify(sanitized);
+    return sanitizeText(json ?? String(sanitized));
+  } catch {
+    return sanitizeText(String(value));
+  }
+}
+
+function reviewMismatchDirection(value: unknown): string | undefined {
+  if (!isObject(value) || typeof value.summary !== "string") return undefined;
+  const summary = sanitizeText(value.summary).trim();
+  let selected = 0;
+  for (const key of Object.keys(SOURCE_FIELDS) as Array<keyof typeof SOURCE_FIELDS>) {
+    const ids = value[key] === undefined && key !== "memoryIds" ? [] : value[key];
+    if (!Array.isArray(ids)) return undefined;
+    selected += ids.length;
+  }
+  if (summary && selected === 0)
+    return "non-empty summary but no sources selected";
+  if (!summary && selected > 0) return "empty summary but sources selected";
+  return undefined;
+}
+
+function reviewValidationDebug(
+  value: unknown,
+  candidates: RecallResult,
+  mismatchDirection: string | undefined,
+): string {
+  const output = boundDebugText(
+    reviewerOutputText(value),
+    MAX_REVIEW_DEBUG_JSON_CHARS,
+    "...[reviewer JSON truncated at 4000 characters]",
+  );
+  const sources = boundDebugText(
+    sourceLabels(reviewSources(candidates)).join(", ") || "none",
+    MAX_REVIEW_DEBUG_SOURCE_CHARS,
+    "...[available source IDs truncated]",
+  );
+  return [
+    "Forgetful recall review validation debug:",
+    "Returned reviewer JSON (redacted):",
+    output,
+    "Available source IDs (bounded):",
+    sources,
+    ...(mismatchDirection ? [`Mismatch direction: ${mismatchDirection}`] : []),
+  ].join("\n");
+}
+
+class ReviewValidationError extends Error {
+  constructor(
+    message: string,
+    readonly debug: string,
+  ) {
+    super(message);
+  }
+}
+
 function parseReview(value: unknown, candidates: RecallResult): {
   summary: string;
   reason: string;
@@ -591,7 +661,7 @@ function parseReview(value: unknown, candidates: RecallResult): {
   }
   const summary = sanitizeText(value.summary).trim();
   if (Boolean(summary) !== (sourceLabels(sources).length > 0))
-    throw new Error("Recall review summary and sources must both be present or both empty");
+    throw new Error(REVIEW_MISMATCH_ERROR);
   return { summary, reason: sanitizeText(value.reason).trim(), sources };
 }
 
@@ -759,6 +829,9 @@ export class RecallService {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
         diagnostic: deadline.diagnostic(stage, error),
         debugTrace,
+        ...(error instanceof ReviewValidationError
+          ? { reviewValidationDebug: error.debug }
+          : {}),
       };
     } finally {
       deadline.finish();
@@ -787,7 +860,22 @@ export class RecallService {
     debugTrace: string,
     searchFailed: boolean,
   ): RecallResult {
-    const review = parseReview(output, candidates);
+    let review: ReturnType<typeof parseReview>;
+    try {
+      review = parseReview(output, candidates);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ReviewValidationError(
+        message,
+        reviewValidationDebug(
+          output,
+          candidates,
+          message === REVIEW_MISMATCH_ERROR
+            ? reviewMismatchDirection(output)
+            : undefined,
+        ),
+      );
+    }
     const selected = sourceLabels(review.sources);
     const rejected = sourceLabels(reviewSources(candidates))
       .filter((label) => !selected.includes(label));

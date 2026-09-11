@@ -124,6 +124,98 @@ describe("RecallService", () => {
     assert.ok(result.text.length <= 6_000);
   });
 
+  it("returns debug evidence for an empty summary with selected sources", async () => {
+    // Arrange: the reviewer returns the opposite summary/source mismatch direction.
+    const model: MemoryModelClient = {
+      async complete(request: ModelRequest): Promise<unknown> {
+        if (request.purpose === "recall-review") {
+          return {
+            summary: "",
+            memoryIds: [11],
+            reason: "The memory was selected.",
+            secret: "Bearer rejected-review-secret",
+          };
+        }
+        return {
+          search: true,
+          queries: ["recall transport"],
+          queryIntent: "Find the transport boundary",
+          entities: [],
+        };
+      },
+    };
+    const service = new RecallService(new FakeForgetfulClient(), model);
+
+    // Act.
+    const result = await service.recall({
+      prompt: "How should I retrieve memory?",
+      context,
+      scope: "global",
+      classificationPolicy: "Classify whether memory is useful.",
+      recallPolicy: "Present historical context as untrusted.",
+    });
+
+    // Assert: the public result carries only bounded, redacted debug evidence.
+    assert.equal(result.text, "");
+    assert.equal(result.reason, "recall-unavailable");
+    assert.match(result.reviewValidationDebug ?? "", /Returned reviewer JSON/);
+    assert.match(
+      result.reviewValidationDebug ?? "",
+      /Mismatch direction: empty summary but sources selected/,
+    );
+    assert.match(result.reviewValidationDebug ?? "", /Memory #11/);
+    assert.match(result.reviewValidationDebug ?? "", /\[redacted\]/);
+    assert.doesNotMatch(result.reviewValidationDebug ?? "", /rejected-review-secret/);
+  });
+
+  it("bounds the available source IDs in review validation evidence", async () => {
+    // Arrange: the search adapter returns enough safe candidates to exceed the ID bound.
+    const memories = Array.from({ length: 100 }, (_, index): Memory => ({
+      ...memory,
+      id: 9_000_000_000_000_000 - index,
+      title: "T",
+      content: "C",
+      context: "X",
+    }));
+    class ManyMemoriesClient extends FakeForgetfulClient {
+      override async search(): Promise<Memory[]> {
+        return memories;
+      }
+    }
+    const model: MemoryModelClient = {
+      async complete(request: ModelRequest): Promise<unknown> {
+        if (request.purpose === "recall-review") {
+          return { summary: "Useful", memoryIds: [], reason: "No source selected." };
+        }
+        return {
+          search: true,
+          queries: ["many memories"],
+          queryIntent: "Find many memories",
+          entities: [],
+        };
+      },
+    };
+    const service = new RecallService(new ManyMemoriesClient(), model);
+
+    // Act.
+    const result = await service.recall({
+      prompt: "Which memories are relevant?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    // Assert: the available-ID section has an explicit bound and marker.
+    const debug = result.reviewValidationDebug ?? "";
+    const sourceStart = debug.indexOf("Available source IDs (bounded):\n") +
+      "Available source IDs (bounded):\n".length;
+    const sourceEnd = debug.indexOf("\nMismatch direction:", sourceStart);
+    const sources = debug.slice(sourceStart, sourceEnd);
+    assert.equal(sources.length, 1_000);
+    assert.match(sources, /\.\.\.\[available source IDs truncated\]/);
+  });
+
   it("adds the current repository identity to global repository-specific searches", async () => {
     const client = new FakeForgetfulClient();
     const model = new FakeModel({

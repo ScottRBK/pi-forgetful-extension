@@ -152,6 +152,7 @@ test(
     let createConflict = false;
     let resolveOnNextMain = false;
     let skipExtraction = false;
+    let groupedSkipCandidates = false;
     let queueOneNeedsTool = false;
     const handoffs: Array<{ content: unknown; details?: unknown }> = [];
     const runtime = await ModelRuntime.create({
@@ -199,12 +200,18 @@ test(
           const input = JSON.parse(inputText) as Record<string, unknown>;
           if (input.availableSources) {
             const prompt = (input.work as { prompt: string }).prompt;
-            decision = prompt === "queued request one"
-              ? { summary: "Queue one memory.", memoryIds: [43], reason: "First queued topic" }
-              : prompt === "queued request two"
-                ? { summary: "Queue two memory.", memoryIds: [44], reason: "Second queued topic" }
-                : { summary: "SQLite was chosen for durable state.", memoryIds: [42],
-                  reason: "The database decision answers the question." };
+            decision = prompt === "debug review evidence"
+              ? { summary: "Rejected review marker REJECTED_PI_REVIEW", memoryIds: [],
+                reason: "No source selected.", token: "Bearer pi-review-secret",
+                extra: "x".repeat(8_000) }
+              : prompt === "queued request one"
+                ? { summary: "Queue one memory.", memoryIds: [43],
+                  reason: "First queued topic" }
+                : prompt === "queued request two"
+                  ? { summary: "Queue two memory.", memoryIds: [44],
+                    reason: "Second queued topic" }
+                  : { summary: "SQLite was chosen for durable state.", memoryIds: [42],
+                    reason: "The database decision answers the question." };
           } else if (
             input.prompt === "queued request one" ||
             input.prompt === "queued request two"
@@ -232,6 +239,8 @@ test(
                   ).sourceEntryIds,
                 }
               : { action: "create", reason: "New project decision." };
+            if (groupedSkipCandidates)
+              decision = { action: "skip", reason: "already known" };
           } else if (Array.isArray(input.entries)) {
             captureInputs.push(
               input as unknown as (typeof captureInputs)[number],
@@ -255,6 +264,32 @@ test(
                 ],
               }
               : { candidates: [] };
+            if (groupedSkipCandidates && user) {
+              decision = {
+                candidates: [
+                  {
+                    id: "skip-one",
+                    title: "Known choice one",
+                    content: "The first known choice.",
+                    context: "Explicit user decision.",
+                    keywords: ["known"],
+                    tags: ["decision"],
+                    sourceEntryIds: [user.id],
+                    evidenceType: "userDecision",
+                  },
+                  {
+                    id: "skip-two",
+                    title: "Known choice two",
+                    content: "The second known choice.",
+                    context: "Explicit user decision.",
+                    keywords: ["known"],
+                    tags: ["decision"],
+                    sourceEntryIds: [user.id],
+                    evidenceType: "userDecision",
+                  },
+                ],
+              };
+            }
             if (skipExtraction) decision = { candidates: [] };
             if (holdNextCapture) {
               holdNextCapture = false;
@@ -445,10 +480,16 @@ test(
         assert.equal(recallEntries.length, 2);
         const persistedLifecycle = recallEntries.map((entry) => JSON.stringify(entry));
         assert.ok(persistedLifecycle.some((text) => text.includes("memory-decision-pending")));
-        assert.equal(
-          persistedLifecycle.filter((text) => text.includes('"content":""')).length,
-          1,
+        const wakeLifecycle = persistedLifecycle.filter((text) =>
+          text.includes('"phase":"wake"'),
         );
+        assert.equal(wakeLifecycle.length, 1);
+        assert.ok(
+          wakeLifecycle.every((text) =>
+            text.includes("[Forgetful automatic recall background continuation]"),
+          ),
+        );
+        assert.doesNotMatch(wakeLifecycle.join("\n"), /terminal state|SQLite was chosen|memoryIds/);
         assert.doesNotMatch(persistedLifecycle.join("\n"), /retrieval underway|SQLite was chosen/);
     assert.ok(
       recallEntries.every(
@@ -461,6 +502,54 @@ test(
     assert.equal(
       (queries[0] as { strict_project_filter: boolean }).strict_project_filter,
       false,
+    );
+
+    await t.test(
+      "real Pi keeps rejected review evidence user-only",
+      async () => {
+        const beforeNotifications = notifications.length;
+
+        // Act: the scripted memory model returns an invalid review through real Pi.
+        await session.prompt("debug review evidence");
+        const deadline = Date.now() + 3_000;
+        while (
+          !notifications.slice(beforeNotifications).some(({ message }) =>
+            message.startsWith("Forgetful recall review validation debug:"),
+          ) &&
+          Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        // Assert: ctx.ui.notify gets bounded evidence, while Pi context/history does not.
+        const feedback = notifications
+          .slice(beforeNotifications)
+          .filter(({ message }) =>
+            message.startsWith("Forgetful recall review validation debug:"),
+          );
+        assert.equal(feedback.length, 1, JSON.stringify(notifications.slice(beforeNotifications)));
+        assert.match(feedback[0]?.message ?? "", /REJECTED_PI_REVIEW/);
+        assert.match(feedback[0]?.message ?? "", /\[redacted\]/);
+        assert.match(
+          feedback[0]?.message ?? "",
+          /\.\.\.\[reviewer JSON truncated at 4000 characters\]/,
+        );
+        assert.match(feedback[0]?.message ?? "", /Available source IDs \(bounded\):/);
+        assert.doesNotMatch(feedback[0]?.message ?? "", /pi-review-secret/);
+        assert.ok(
+          feedback[0]!.message.length < 6_000,
+          `feedback was ${feedback[0]!.message.length} characters`,
+        );
+        assert.doesNotMatch(
+          JSON.stringify({
+            mainContexts,
+            memoryContexts,
+            entries: sessionManager.getEntries(),
+            messages: session.messages,
+          }),
+          /REJECTED_PI_REVIEW|pi-review-secret/,
+        );
+      },
     );
 
     await t.test(
@@ -658,6 +747,60 @@ test(
           );
         } finally {
           skipExtraction = false;
+        }
+      },
+    );
+
+    await t.test(
+      "real Pi reports grouped reasons for skipped capture candidates",
+      async () => {
+        const beforeNotifications = notifications.length;
+        const beforeCaptures = captureInputs.length;
+        groupedSkipCandidates = true;
+        try {
+          // Act: the real Pi session runs a capture whose overlap decisions both skip.
+          await session.prompt("Two durable choices are already known.");
+          const captureDeadline = Date.now() + 3000;
+          while (
+            captureInputs.length === beforeCaptures &&
+            Date.now() < captureDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          const feedbackDeadline = Date.now() + 3000;
+          while (
+            !notifications
+              .slice(beforeNotifications)
+              .some(({ message }) =>
+                message.includes("skipped 2 candidates (2: already known)"),
+              ) &&
+            Date.now() < feedbackDeadline
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          // Assert through the real Pi notification seam.
+          const feedback = notifications
+            .slice(beforeNotifications)
+            .filter(({ message }) =>
+              message.includes("skipped 2 candidates (2: already known)"),
+            );
+          assert.equal(
+            feedback.length,
+            1,
+            JSON.stringify(notifications.slice(beforeNotifications)),
+          );
+          assert.match(
+            feedback[0]?.message ?? "",
+            /Forgetful capture(?: |: )skipped 2 candidates \(2: already known\)/,
+          );
+          assert.equal(feedback[0]?.type, "info");
+          const notice = "skipped 2 candidates (2: already known)";
+          assert.ok(!JSON.stringify(sessionManager.getEntries()).includes(notice));
+          assert.ok(!JSON.stringify(mainContexts).includes(notice));
+          assert.ok(!JSON.stringify(memoryContexts).includes(notice));
+        } finally {
+          groupedSkipCandidates = false;
         }
       },
     );
