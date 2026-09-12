@@ -229,6 +229,13 @@ const MAX_RICH_DOCUMENT_TEXT = 12_000;
 const MAX_RICH_CODE = 12_000;
 const MAX_RICH_OUTPUT = 24_000;
 const SUBMIT_CAPTURE_CANDIDATES = "submit_capture_candidates";
+const CAPTURE_CANDIDATES_DESCRIPTION =
+  "Submit the final memory-capture judgment for one completed turn. Call this tool exactly once. " +
+  "When no durable, eligible knowledge exists, submit candidates as []. Otherwise submit at most " +
+  "three atomic candidates supported only by the supplied evidence IDs. Every candidate must " +
+  "include id, title, content, context, keywords, tags, sourceEntryIds, and evidenceType. A " +
+  "userDecision may cite only user entries; a verifiedToolChange may cite only successful named " +
+  "toolResult entries. Never cite assistant entries or memory-operation results as evidence.";
 const CAPTURE_RICH_RESOURCE = Type.Object({
   key: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
   sourceEntryIds: Type.Optional(
@@ -239,12 +246,34 @@ const CAPTURE_RICH_RESOURCE = Type.Object({
   input: Type.Optional(Type.Object({})),
 });
 const CAPTURE_CANDIDATE = Type.Object({
-  id: Type.String({ minLength: 1, maxLength: 100 }),
-  title: Type.String({ minLength: 1, maxLength: 200 }),
-  content: Type.String({ minLength: 1, maxLength: 2_000 }),
-  context: Type.String({ minLength: 1, maxLength: 500 }),
-  keywords: Type.Array(Type.String({ maxLength: 100 }), { maxItems: 10 }),
-  tags: Type.Array(Type.String({ maxLength: 100 }), { maxItems: 10 }),
+  id: Type.String({
+    minLength: 1,
+    maxLength: 100,
+    description: "A unique short key for this candidate within this submission; not a memory ID.",
+  }),
+  title: Type.String({
+    minLength: 1,
+    maxLength: 200,
+    description: "Required concise title naming the durable decision, fact, or verified change.",
+  }),
+  content: Type.String({
+    minLength: 1,
+    maxLength: 2_000,
+    description: "Required standalone memory containing only knowledge supported by the evidence.",
+  }),
+  context: Type.String({
+    minLength: 1,
+    maxLength: 500,
+    description: "Required circumstances and scope needed to understand when the memory applies.",
+  }),
+  keywords: Type.Array(Type.String({ maxLength: 100 }), {
+    maxItems: 10,
+    description: "Required search terms. Use [] when no useful keywords exist.",
+  }),
+  tags: Type.Array(Type.String({ maxLength: 100 }), {
+    maxItems: 10,
+    description: "Required short category labels. Use [] when no useful tags exist.",
+  }),
   sourceEntryIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
     minItems: 1,
     maxItems: 8,
@@ -255,12 +284,30 @@ const CAPTURE_CANDIDATE = Type.Object({
     description: "Use userDecision for adopted user statements. Use verifiedToolChange only " +
       "for successful named toolResult evidence.",
   }),
-  importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
-  destinationProjectId: Type.Optional(Type.Integer({ minimum: 1 })),
-  destinationProjectName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  destinationRationale: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  importance: Type.Optional(Type.Integer({
+    minimum: 1,
+    maximum: 10,
+    description: "Optional durability value from 1 (minor) to 10 (critical).",
+  })),
+  destinationProjectId: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Existing supplied project ID; omit to use the current project.",
+  })),
+  destinationProjectName: Type.Optional(Type.String({
+    minLength: 1,
+    maxLength: 200,
+    description: "Existing supplied project name; omit to use the current project.",
+  })),
+  destinationRationale: Type.Optional(Type.String({
+    minLength: 1,
+    maxLength: 500,
+    description: "Evidence-based reason for overriding the current project destination.",
+  })),
   sourceFiles: Type.Optional(
-    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 20 }),
+    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+      maxItems: 20,
+      description: "Evidenced source file paths only; never file contents or file operations.",
+    }),
   ),
   entities: Type.Optional(
     Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_ENTITIES }),
@@ -282,20 +329,52 @@ const CAPTURE_CANDIDATE_PARAMETERS = Type.Object({
   }),
 });
 const SUBMIT_CAPTURE_DECISION = "submit_capture_decision";
+const CAPTURE_DECISION_DESCRIPTION =
+  "Submit the final overlap judgment for one candidate. Call this tool exactly once. Use create " +
+  "for novel knowledge, skip for an equivalent existing fact, supersede only for a clear and " +
+  "complete replacement of the same fact and context, and escalate for uncertain or partial " +
+  "conflicts. Refer only to supplied overlap memory IDs and supplied evidence entry IDs; never " +
+  "invent an ID. Supersede and escalate require the conflicting IDs, oldClaim, newClaim, " +
+  "sourceEntryIds, and a same-fact reason.";
 const CAPTURE_DECISION_PARAMETERS = Type.Object({
-  action: StringEnum(["create", "skip", "supersede", "escalate"] as const),
-  reason: Type.Optional(Type.String({ maxLength: 500 })),
-  conflictingMemoryId: Type.Optional(Type.Integer({ minimum: 1 })),
+  action: StringEnum(["create", "skip", "supersede", "escalate"] as const, {
+    description: "Required judgment: create, skip, supersede, or escalate as defined by the tool.",
+  }),
+  reason: Type.Optional(Type.String({
+    maxLength: 500,
+    description: "Brief evidence-based explanation for the selected action.",
+  })),
+  conflictingMemoryId: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "One conflicting memory ID copied exactly from the supplied overlap results.",
+  })),
   conflictingMemoryIds: Type.Optional(
-    Type.Array(Type.Integer({ minimum: 1 }), { maxItems: 8 }),
+    Type.Array(Type.Integer({ minimum: 1 }), {
+      maxItems: 8,
+      description: "Conflicting memory IDs copied exactly from the supplied overlap results.",
+    }),
   ),
-  memoryId: Type.Optional(Type.Integer({ minimum: 1 })),
-  oldClaim: Type.Optional(Type.String({ maxLength: 1_000 })),
-  newClaim: Type.Optional(Type.String({ maxLength: 1_000 })),
+  memoryId: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "For skip, the equivalent supplied overlap memory that may receive rich links.",
+  })),
+  oldClaim: Type.Optional(Type.String({
+    maxLength: 1_000,
+    description: "The exact old claim being contradicted in the selected overlap memory.",
+  })),
+  newClaim: Type.Optional(Type.String({
+    maxLength: 1_000,
+    description: "The replacement or conflicting claim supported by the supplied evidence.",
+  })),
   sourceEntryIds: Type.Optional(
-    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 8 }),
+    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+      maxItems: 8,
+      description: "Supplied evidence IDs supporting the new claim; never assistant entry IDs.",
+    }),
   ),
-  partial: Type.Optional(Type.Boolean()),
+  partial: Type.Optional(Type.Boolean({
+    description: "True when any old claim or project applicability must remain valid.",
+  })),
 });
 const CAPTURE_POLICY_CORE = [
   `Capture policy contract: submit exactly one ${SUBMIT_CAPTURE_CANDIDATES} tool call with ` +
@@ -991,7 +1070,7 @@ function captureCandidateSubmission(
 ): ModelSubmissionTool {
   return {
     name: SUBMIT_CAPTURE_CANDIDATES,
-    description: "Submit the candidate memories extracted from the completed turn.",
+    description: CAPTURE_CANDIDATES_DESCRIPTION,
     parameters: CAPTURE_CANDIDATE_PARAMETERS,
     onRejection(reason) {
       recordRejection(reason);
@@ -2023,7 +2102,7 @@ export class CaptureService {
     );
     const submission: ModelSubmissionTool = {
       name: SUBMIT_CAPTURE_DECISION,
-      description: "Submit the overlap decision for the captured candidate.",
+      description: CAPTURE_DECISION_DESCRIPTION,
       parameters: CAPTURE_DECISION_PARAMETERS,
       onRejection: (reason) => {
         appendSubmissionRejection(rejectionReasons, reason);

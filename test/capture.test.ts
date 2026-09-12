@@ -470,6 +470,9 @@ test("capture candidate submission retries through the durable checkpoint flow",
   });
   const candidateTool = captureContexts[0]?.tools?.[0];
   assert.equal(candidateTool?.name, "submit_capture_candidates");
+  assert.match(candidateTool?.description ?? "", /when no durable.*candidates.*\[\]/i);
+  assert.match(candidateTool?.description ?? "", /every candidate must include/i);
+  assert.match(candidateTool?.description ?? "", /never cite assistant/i);
   const candidateParameters = candidateTool?.parameters as {
     properties?: {
       candidates?: {
@@ -488,6 +491,9 @@ test("capture candidate submission retries through the durable checkpoint flow",
     Object.keys(candidateProperties).slice(0, 4),
     ["id", "title", "content", "context"],
   );
+  for (const name of ["id", "title", "content", "context", "keywords", "tags"]) {
+    assert.ok(candidateProperties[name]?.description, `${name} must describe its meaning`);
+  }
   assert.deepEqual(candidateProperties.evidenceType?.enum, [
     "userDecision",
     "verifiedToolChange",
@@ -714,8 +720,10 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   });
   const decisionTool = overlapContexts[0]?.tools?.[0];
   assert.equal(decisionTool?.name, "submit_capture_decision");
+  assert.match(decisionTool?.description ?? "", /create.*skip.*supersede.*escalate/i);
+  assert.match(decisionTool?.description ?? "", /only.*supplied overlap/i);
   const decisionParameters = decisionTool?.parameters as {
-    properties?: { action?: { enum?: string[] } };
+    properties?: Record<string, { description?: string; enum?: string[] }>;
   };
   assert.deepEqual(decisionParameters.properties?.action?.enum, [
     "create",
@@ -723,6 +731,20 @@ test("capture overlap submission retries through the durable checkpoint flow", a
     "supersede",
     "escalate",
   ]);
+  for (const name of [
+    "action",
+    "reason",
+    "conflictingMemoryId",
+    "conflictingMemoryIds",
+    "memoryId",
+    "oldClaim",
+    "newClaim",
+    "sourceEntryIds",
+    "partial",
+  ]) {
+    assert.ok(decisionParameters.properties?.[name]?.description,
+      `${name} must describe its meaning`);
+  }
   const feedback = overlapContexts[1]?.messages.at(-1) as Record<string, any> | undefined;
   assert.equal(feedback?.role, "toolResult");
   assert.equal(feedback?.toolCallId, "decision-1");
