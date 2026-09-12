@@ -318,9 +318,10 @@ Automatic recall is asynchronous, but it is bounded to one planner and one revie
 Deeper exploration remains explicit through the read-only tools; it is not started recursively by
 recall lifecycle messages.
 Deterministic regression tests cover structured decisions and failure handling, not real-model
-relevance or summary accuracy. The opt-in
-[live checks](CONTRIBUTING.md#live-recall-submission-checks) exercise the configured model
-and record submission failures, recovery, and summaries.
+judgment or summary accuracy. The opt-in live checks exercise the configured model for
+[recall](CONTRIBUTING.md#live-recall-submission-checks) and
+[capture](CONTRIBUTING.md#live-capture-submission-checks), recording submission failures,
+recovery, and outputs against an isolated Forgetful server.
 
 ### Capture
 
@@ -334,8 +335,9 @@ records include per-candidate outcomes so partial writes can be retried safely.
 
 Each private capture tool allows at most three attempts within its existing model request and
 15-second deadline. Invalid calls receive bounded error feedback so the model can correct them;
-text-only replies are not parsed as fallback JSON. Only original tool arguments that pass schema
-and capture-domain validation are accepted. Rejection details remain bounded and redacted.
+text-only replies are not parsed as fallback JSON. A non-empty candidate call with no valid
+candidate is rejected for correction. Mixed calls still keep valid candidates and skip invalid
+siblings. Rejection details remain bounded and redacted.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
 a memory. It reuses existing records and checkpoints partial work for retry. Automatic capture

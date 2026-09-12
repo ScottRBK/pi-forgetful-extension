@@ -474,7 +474,11 @@ test("capture candidate submission retries through the durable checkpoint flow",
     properties?: {
       candidates?: {
         items?: {
-          properties?: Record<string, { enum?: string[]; items?: { type?: string } }>;
+          properties?: Record<string, {
+            description?: string;
+            enum?: string[];
+            items?: { type?: string };
+          }>;
         };
       };
     };
@@ -488,6 +492,9 @@ test("capture candidate submission retries through the durable checkpoint flow",
     "userDecision",
     "verifiedToolChange",
   ]);
+  assert.match(candidateProperties.sourceEntryIds?.description ?? "", /never.*assistant/i);
+  assert.match(candidateProperties.evidenceType?.description ?? "", /userDecision.*user/i);
+  assert.match(candidateProperties.evidenceType?.description ?? "", /verifiedToolChange.*tool/i);
   assert.equal(candidateProperties.entities?.items?.type, "object");
   const feedback = captureContexts[1]?.messages.at(-1) as Record<string, any>;
   assert.equal(feedback.role, "toolResult");
@@ -511,6 +518,103 @@ test("capture candidate submission retries through the durable checkpoint flow",
   };
   assert.equal(diagnosticJob.submissionRejections?.length, 1);
   assert.match(diagnosticJob.submissionRejections?.[0] ?? "", /must be object/);
+});
+
+test("capture retries when every submitted candidate has invalid evidence", async (t) => {
+  // Arrange: the first tool call cites only ineligible evidence, then corrects both fields.
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-capture-evidence-retry-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const client = new FakeClient();
+  const contexts: Context[] = [];
+  let captureAttempts = 0;
+  const registry: ModelRegistryPort = {
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      const firstContent = context.messages[0]?.content;
+      const input = typeof firstContent === "string"
+        ? JSON.parse(firstContent) as Record<string, unknown>
+        : {};
+      if (Array.isArray(input.entries)) {
+        captureAttempts += 1;
+        if (captureAttempts === 1) {
+          return providerTool("capture-invalid-evidence", "submit_capture_candidates", {
+            candidates: [
+              {
+                id: "wrong-tool-kind",
+                title: "SQLite locally",
+                content: "Local development uses SQLite.",
+                context: "The user adopted the database decision.",
+                keywords: ["sqlite"],
+                tags: ["decision"],
+                sourceEntryIds: ["user-1"],
+                evidenceType: "verifiedToolChange",
+              },
+              {
+                id: "assistant-evidence",
+                title: "Migration completed",
+                content: "The database migration was completed.",
+                context: "The assistant reported completion.",
+                keywords: ["migration"],
+                tags: ["change"],
+                sourceEntryIds: ["assistant-1"],
+                evidenceType: "userDecision",
+              },
+            ],
+          });
+        }
+        return providerTool("capture-corrected-evidence", "submit_capture_candidates", {
+          candidates: [{
+            id: "corrected-user-decision",
+            title: "SQLite locally",
+            content: "Local development uses SQLite.",
+            context: "The user adopted the database decision.",
+            keywords: ["sqlite"],
+            tags: ["decision"],
+            sourceEntryIds: ["user-1"],
+            evidenceType: "userDecision",
+          }],
+        });
+      }
+      return providerTool("overlap-create", "submit_capture_decision", {
+        action: "create",
+        reason: "No overlap.",
+      });
+    },
+  };
+  const service = new CaptureService({
+    queue,
+    client,
+    model: new PiMemoryModel(
+      registry,
+      { provider: "fake", id: "memory" },
+      { classificationTimeoutMs: 1_000 },
+    ),
+    instanceId: "instance-a",
+  });
+
+  // Act.
+  await service.enqueue(snapshot());
+  const result = await service.checkpoint();
+
+  // Assert: all-invalid gets correction feedback; a valid sibling submission still writes.
+  assert.deepEqual(result.errors, []);
+  assert.equal(captureAttempts, 2);
+  const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
+  assert.equal(feedback?.role, "toolResult");
+  assert.equal(feedback?.toolCallId, "capture-invalid-evidence");
+  assert.equal(feedback?.isError, true);
+  assert.match(feedback?.content?.[0]?.text ?? "", /verified tool changes require/i);
+  assert.match(feedback?.content?.[0]?.text ?? "", /assistant messages are not eligible/i);
+  assert.equal(client.created.length, 1);
+  const diagnostics = await service.diagnostics();
+  assert.equal(diagnostics.jobs[0]?.status, "complete");
+  assert.equal(diagnostics.jobs[0]?.candidates.length, 1);
+  assert.equal(diagnostics.jobs[0]?.candidates[0]?.stage, "created");
+  assert.ok(diagnostics.jobs[0]?.submissionRejections?.some(
+    (reason) => /all submitted capture candidates were invalid/i.test(reason),
+  ));
 });
 
 test("capture overlap submission retries through the durable checkpoint flow", async (t) => {

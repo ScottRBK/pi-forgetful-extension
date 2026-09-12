@@ -248,8 +248,13 @@ const CAPTURE_CANDIDATE = Type.Object({
   sourceEntryIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
     minItems: 1,
     maxItems: 8,
+    description: "Use only supplied evidence IDs. userDecision uses user entries; " +
+      "verifiedToolChange uses successful named toolResult entries. Never cite assistant entries.",
   }),
-  evidenceType: StringEnum(["userDecision", "verifiedToolChange"] as const),
+  evidenceType: StringEnum(["userDecision", "verifiedToolChange"] as const, {
+    description: "Use userDecision for adopted user statements. Use verifiedToolChange only " +
+      "for successful named toolResult evidence.",
+  }),
   importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
   destinationProjectId: Type.Optional(Type.Integer({ minimum: 1 })),
   destinationProjectName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
@@ -992,7 +997,13 @@ function captureCandidateSubmission(
       recordRejection(reason);
     },
     validate(input: unknown): unknown {
-      parseCandidates(input, snapshot, maxCandidates);
+      const extraction = parseCandidates(input, snapshot, maxCandidates);
+      if (extraction.candidates.length === 0 && extraction.skipped.length > 0) {
+        const reasons = [...new Set(extraction.skipped.map((item) => item.reason))];
+        throw new InvalidCaptureOutput(
+          `all submitted capture candidates were invalid: ${reasons.join("; ")}`,
+        );
+      }
       return input;
     },
   };

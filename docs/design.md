@@ -344,8 +344,10 @@ is then processed by the durable worker described above.
 2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
    a target project and rationale. Accept exactly one private `submit_capture_candidates` tool call;
    do not parse text output as fallback JSON.
-3. Apply deterministic structural and sensitive-data validation to the original tool arguments,
-   then resolve each destination.
+3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
+   Reject a non-empty submission for correction when every candidate is invalid. When valid and
+   invalid candidates are mixed, keep the valid siblings and record the invalid candidates as
+   skipped. Then resolve each accepted destination.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
 5. Give the candidate, its evidence, and overlapping memories to the memory model. Accept exactly
    one private `submit_capture_decision` tool call containing `create`, `skip`, `supersede`, or

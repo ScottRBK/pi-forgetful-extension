@@ -63,6 +63,22 @@ Results and synthetic response samples are written to the ignored
 arguments do not guarantee relevant facts. A small passing batch is not a production failure-rate
 estimate. See [the acceptance record](docs/recall-submission-acceptance.md).
 
+### Live capture submission checks
+
+This opt-in test spends model credits using the same configured model and isolated Forgetful REST
+server. It checks a novel decision, routine conversation with no candidate, clear supersession,
+and recovery after deliberately corrupting each private capture tool's first genuine submission.
+
+```bash
+FORGETFUL_LIVE_CAPTURE=1 \
+  FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test test/live-capture-submission.test.ts
+```
+
+The test verifies writes and supersession through the public capture and REST boundaries. Results,
+provider call counts, sanitized tool responses, and rejection feedback are written to the ignored
+`test-results/capture-submission-live.json`. It never writes production memories.
+
 If parallel REST tests stall on a constrained machine, run the same deterministic tests serially:
 
 ```bash
