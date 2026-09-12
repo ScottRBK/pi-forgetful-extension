@@ -10,13 +10,18 @@ import type {
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import { validateToolCall } from "@earendil-works/pi-ai";
-import type { MemoryModelClient, ModelRequest } from "./contracts.ts";
-import { ModelSubmissionError, type ModelSubmissionTool } from "./contracts.ts";
+import {
+  ModelSubmissionError,
+  type MemoryModelClient,
+  type ModelRequest,
+  type ModelSubmissionTool,
+} from "./contracts.ts";
 import {
   DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
   type ModelSelection,
 } from "./config.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
+import type { DiagnosticLogger } from "./logging.ts";
 
 export interface ModelRegistryPort {
   find(provider: string, modelId: string): Model<any> | undefined;
@@ -48,6 +53,7 @@ const MAX_REJECTION_CHARS = 800;
 const MAX_HISTORY_TEXT_CHARS = 2_000;
 
 export interface PiMemoryModelOptions {
+  logger?: DiagnosticLogger;
   /** Per-call classification/review deadline; capture and overlap retain 15 seconds. */
   classificationTimeoutMs?: number;
   /** Compatibility alias for classificationTimeoutMs. */
@@ -287,6 +293,31 @@ function errorToolResult(call: ToolCall, error: string): ToolResultMessage {
   };
 }
 
+function appendCallCountCorrection(
+  context: Context,
+  response: AssistantMessage,
+  calls: ToolCall[],
+  submissionName: string,
+  base: string,
+): void {
+  if (calls.length === 0) {
+    context.messages.push({
+      role: "user",
+      content: `Call ${submissionName} exactly once with the review result. ` +
+        "Do not answer with JSON text.",
+      timestamp: Date.now(),
+    });
+    return;
+  }
+  context.messages.push(sanitizedAssistantForHistory(response));
+  for (const call of calls) {
+    const reason = call.name === submissionName
+      ? base
+      : `${base} Tool "${sanitizeText(call.name)}" not found.`;
+    context.messages.push(errorToolResult(call, rejectionText(reason)));
+  }
+}
+
 interface RequestDeadline {
   controller: AbortController;
   callerAbort: Promise<never>;
@@ -355,6 +386,7 @@ export class PiMemoryModel implements MemoryModelClient {
   private readonly classificationTimeoutMs: number;
   private readonly sessionId?: string;
   private readonly transformHeaders?: MemoryModelHeaderTransform;
+  private readonly logger?: DiagnosticLogger;
 
   constructor(
     private readonly registry: ModelRegistryPort,
@@ -368,6 +400,7 @@ export class PiMemoryModel implements MemoryModelClient {
       DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS;
     this.sessionId = options.sessionId || undefined;
     this.transformHeaders = options.transformHeaders;
+    this.logger = options.logger;
     if (
       !Number.isFinite(this.classificationTimeoutMs) ||
       this.classificationTimeoutMs <= 0
@@ -377,6 +410,58 @@ export class PiMemoryModel implements MemoryModelClient {
   }
 
   async complete(request: ModelRequest): Promise<unknown> {
+    const started = performance.now();
+    this.emit("info", "model.started", request);
+    try {
+      const result = await this.completeRequest(request);
+      this.emit("debug", "model.parsed", request, { result });
+      this.emit("info", "model.completed", request, { elapsedMs: performance.now() - started });
+      return result;
+    } catch (error) {
+      this.emit("info", "model.error", request, {
+        elapsedMs: performance.now() - started,
+        status: request.signal?.aborted ? "aborted" : "failed",
+      });
+      this.emit("debug", "model.error_detail", request, {
+        error: rejectionText(error),
+        cause: error instanceof Error && error.cause ? rejectionText(error.cause) : undefined,
+      });
+      throw error;
+    }
+  }
+
+  private emit(
+    level: "info" | "debug",
+    event: string,
+    request: ModelRequest,
+    data: Record<string, unknown> = {},
+  ): void {
+    try {
+      if (!this.logger) return;
+      const safe = sanitizeValue({
+        sessionId: this.sessionId,
+        ...request.diagnosticContext,
+        purpose: request.purpose,
+        model: this.version,
+        ...data,
+      }) as Record<string, unknown>;
+      // Keep correlation when the shared file logger's event limit would drop the whole payload.
+      for (const key of ["context", "response", "result", "input"]) {
+        const json = JSON.stringify(safe[key]);
+        if (!json || Buffer.byteLength(json) <= 60_000) continue;
+        let preview = json;
+        do {
+          preview = preview.slice(0, Math.floor(preview.length * 0.75));
+        } while (Buffer.byteLength(JSON.stringify(preview)) > 59_900);
+        safe[key] = { truncated: true, preview };
+      }
+      this.logger.emit(level, event, safe);
+    } catch {
+      // Diagnostics must never change model execution or retry behaviour.
+    }
+  }
+
+  private async completeRequest(request: ModelRequest): Promise<unknown> {
     if (request.signal?.aborted)
       throw new Error("Memory model request aborted");
     const model = this.registry.find(
@@ -422,11 +507,7 @@ export class PiMemoryModel implements MemoryModelClient {
           deadline,
         );
       }
-      const response = await Promise.race([
-        this.registry.complete(model, context, options),
-        deadline.callerAbort,
-        deadline.timeout,
-      ]);
+      const response = await this.completeAttempt(model, context, options, request, deadline, 1);
 
       return parseCompletionResponse(response, request, deadline.timedOut);
     } catch (error) {
@@ -434,6 +515,41 @@ export class PiMemoryModel implements MemoryModelClient {
     } finally {
       deadline.cleanup();
     }
+  }
+
+  private async completeAttempt(
+    model: Model<any>,
+    context: Context,
+    options: ModelsSimpleStreamOptions,
+    request: ModelRequest,
+    deadline: RequestDeadline,
+    attempt: number,
+  ): Promise<AssistantMessage> {
+    const started = performance.now();
+    this.emit("info", "model.attempt", request, { attempt });
+    this.emit("debug", "model.request", request, { attempt, context });
+    let response: AssistantMessage;
+    try {
+      response = await Promise.race([
+        this.registry.complete(model, context, options),
+        deadline.callerAbort,
+        deadline.timeout,
+      ]);
+    } catch (error) {
+      this.emit("info", "model.attempt_error", request, {
+        attempt, elapsedMs: performance.now() - started,
+      });
+      this.emit("debug", "model.attempt_error_detail", request, {
+        attempt, error: rejectionText(error),
+      });
+      throw error;
+    }
+    // Preserve provider output before parsing or submission validation can reject it.
+    this.emit("debug", "model.response", request, { attempt, response });
+    this.emit("info", "model.attempt_completed", request, {
+      attempt, elapsedMs: performance.now() - started,
+    });
+    return response;
   }
 
   private async completeWithSubmission(
@@ -446,17 +562,19 @@ export class PiMemoryModel implements MemoryModelClient {
     const submission = request.submission!;
     const tool = submissionTool(submission);
     const rejections: string[] = [];
-    const recordRejection = (reason: string, input?: unknown): void => {
+    const recordRejection = (attempt: number, reason: string, input?: unknown): void => {
       const bounded = rejectionText(reason);
+      this.emit("info", "model.submission_rejected", request, { attempt });
+      this.emit("debug", "model.submission_rejection", request, {
+        attempt, reason: bounded, input,
+      });
       rejections.push(bounded);
       submission.onRejection?.(bounded, input);
     };
     for (let attempt = 1; attempt <= MAX_SUBMISSION_ATTEMPTS; attempt++) {
-      const response = await Promise.race([
-        this.registry.complete(model, context, options),
-        deadline.callerAbort,
-        deadline.timeout,
-      ]);
+      const response = await this.completeAttempt(
+        model, context, options, request, deadline, attempt,
+      );
       ensureCompletionFinished(response, request, deadline.timedOut, true);
       // Bound the whole response before validating or retaining any provider-generated history.
       if (Buffer.byteLength(JSON.stringify(response.content), "utf8") > RESPONSE_LIMIT) {
@@ -467,23 +585,8 @@ export class PiMemoryModel implements MemoryModelClient {
       if (calls.length !== 1) {
         const base = `Call ${submission.name} exactly one time; received ` +
           `${calls.length} tool calls.`;
-        recordRejection(base);
-        if (calls.length > 0) {
-          context.messages.push(sanitizedAssistantForHistory(response));
-          for (const call of calls) {
-            const reason = call.name === submission.name
-              ? base
-              : `${base} Tool "${sanitizeText(call.name)}" not found.`;
-            context.messages.push(errorToolResult(call, rejectionText(reason)));
-          }
-        } else {
-          context.messages.push({
-            role: "user",
-            content: `Call ${submission.name} exactly once with the review result. ` +
-              "Do not answer with JSON text.",
-            timestamp: Date.now(),
-          });
-        }
+        recordRejection(attempt, base);
+        appendCallCountCorrection(context, response, calls, submission.name, base);
         continue;
       }
 
@@ -494,9 +597,11 @@ export class PiMemoryModel implements MemoryModelClient {
         return submission.validate(call.arguments);
       } catch (error) {
         const reason = rejectionText(error);
-        recordRejection(reason, call.arguments);
-        context.messages.push(sanitizedAssistantForHistory(response));
-        context.messages.push(errorToolResult(call, reason));
+        recordRejection(attempt, reason, call.arguments);
+        context.messages.push(
+          sanitizedAssistantForHistory(response),
+          errorToolResult(call, reason),
+        );
       }
     }
     throw new ModelSubmissionError(

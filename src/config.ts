@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { CaptureMode, Scope } from "./contracts.ts";
+import type { FileLogLevel } from "./logging.ts";
 
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
 export const DEFAULT_FORGETFUL_TIMEOUT_MS = 10_000;
@@ -10,6 +11,10 @@ export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
 
 export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";
+export function isFileLogLevel(value: unknown): value is FileLogLevel {
+  return value === "off" || value === "info" || value === "debug";
+}
+
 export type Verbosity = "debug" | "info" | "warning" | "error";
 
 export function isVerbosity(value: unknown): value is Verbosity {
@@ -47,6 +52,7 @@ export interface ForgetfulConfig {
   enabled: boolean;
   captureMode: CaptureMode;
   verbosity: Verbosity;
+  logging: FileLogLevel;
   scope: Scope;
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
@@ -81,6 +87,7 @@ export interface PersistedUserSettings {
   capture_mode?: unknown;
   debug?: unknown;
   verbosity?: unknown;
+  logging?: unknown;
   recall_model_timeout_ms?: unknown;
   model?: unknown;
 }
@@ -333,6 +340,7 @@ export async function loadForgetfulConfig(
     enabled: asBoolean(user.enabled, true) && !tokenEnvMissing,
     captureMode,
     verbosity: resolveVerbosity(user, warnings),
+    logging: isFileLogLevel(user.logging) ? user.logging : "off",
     scope,
     scopeSource,
     recallModelTimeoutMs: asPositiveInteger(
@@ -389,6 +397,7 @@ export async function updateUserSettings(
       | "capture_mode"
       | "debug"
       | "verbosity"
+      | "logging"
       | "recall_model_timeout_ms"
       | "model"
     >

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +14,88 @@ import type {
   MemoryInput,
 } from "../src/contracts.ts";
 import { DurableQueueStore } from "../src/queue.ts";
+import { FileLogger } from "../src/logging.ts";
+import { PiMemoryModel, type ModelRegistryPort } from "../src/model.ts";
+
+for (const level of ["debug", "info", "off"] as const) {
+  test(`capture ${level} file explains rejected evidence and saves valid capture`, async (t) => {
+    // Arrange: one mixed-evidence rejection followed by a verified tool change.
+    const directory = await mkdtemp(join(tmpdir(), "capture-log-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const logger = new FileLogger({ directory, sessionId: "session-1", level });
+    const queue = new DurableQueueStore({ directory: join(directory, "queue"),
+      instanceId: "instance-a" });
+    const client = new FakeClient();
+    const candidate = {
+      id: "invalid", title: "Use SQLite locally", content: "Local development uses SQLite.",
+      context: "A durable database decision", keywords: ["sqlite"], tags: ["decision"],
+      sourceEntryIds: ["user-1", "assistant-1"], evidenceType: "userDecision",
+    };
+    const outputs = [
+      { candidates: [candidate, { ...candidate, id: "valid", sourceEntryIds: ["tool-1"],
+        evidenceType: "verifiedToolChange" }] },
+      { action: "create", reason: "No overlap for SQLite" },
+    ];
+    const registry: ModelRegistryPort = {
+      find: () => ({ provider: "fake", id: "memory" }) as any,
+      complete: async () => ({
+        role: "assistant", content: [{ type: "text", text: JSON.stringify(outputs.shift()) }],
+        stopReason: "stop", timestamp: Date.now(),
+      }) as any,
+    };
+    const model = new PiMemoryModel(registry, { provider: "fake", id: "memory" }, { logger });
+    const service = new CaptureService({ queue, client, model, logger, instanceId: "instance-a" });
+    const input = snapshot();
+    input.entries.push({ id: "tool-1", role: "toolResult", toolName: "edit",
+      text: "Changed local database to SQLite. api_key=private-capture-secret" });
+
+    // Act.
+    const queued = await service.enqueue(input);
+    await service.checkpoint();
+    await logger.flush();
+
+    // Assert through the real JSONL output and the external write outcome.
+    assert.equal(client.created.length, 1);
+    const text = await readFile(logger.filePath, "utf8").catch((error) => {
+      if (level === "off" && error.code === "ENOENT") return "";
+      throw error;
+    });
+    assert.doesNotMatch(text, /private-capture-secret/);
+    if (level === "off") return assert.equal(text, "");
+    const events = text.trim().split("\n").map((line) => JSON.parse(line));
+    for (const name of ["queued", "started", "completed", "write_completed"]) {
+      const entry = events.find((event) => event.event === `capture.${name}`);
+      assert.ok(entry, `missing capture.${name}`);
+      assert.equal(entry.data.jobId, queued.jobId);
+      assert.equal(entry.data.sessionId, "session-1");
+      assert.equal(entry.data.branchId, "branch-1");
+    }
+    const write = events.find((event) => event.event === "capture.write_completed");
+    assert.equal(write.data.memoryId, 100);
+    assert.equal(write.data.destinationProjectId, 7);
+    if (level === "info") {
+      assert.ok(events.every((event) => event.level === "info"));
+      assert.doesNotMatch(text, /SQLite|Implemented the migration|No overlap/);
+    } else {
+      const rejected = events.find((event) => event.event === "capture.candidate_rejected");
+      assert.equal(rejected.data.candidateId, "invalid");
+      assert.equal(rejected.data.reason, "assistant messages are not eligible evidence");
+      assert.deepEqual(rejected.data.candidate, candidate);
+      assert.deepEqual(rejected.data.entries.map((entry: any) => [entry.id, entry.role]),
+        [["user-1", "user"], ["assistant-1", "assistant"]]);
+      const accepted = events.find((event) => event.event === "capture.candidate_accepted");
+      assert.equal(accepted.data.entries[0].toolName, "edit");
+      const snapshotEvent = events.find((event) => event.event === "capture.snapshot");
+      assert.equal(snapshotEvent.data.entries.length, 3);
+      const overlap = events.find((event) => event.event === "capture.overlap_decision");
+      assert.equal(overlap.data.decision.action, "create");
+      const request = events.find((event) => event.event === "model.request" &&
+        event.data.purpose === "overlap");
+      assert.equal(request.data.candidateId, "valid");
+      assert.equal(request.data.jobId, queued.jobId);
+    }
+  });
+}
 
 function snapshot(): CaptureSnapshot {
   return {
@@ -46,6 +128,139 @@ function snapshot(): CaptureSnapshot {
     createdAt: new Date().toISOString(),
   };
 }
+
+test("capture file correlates failed write and retry despite sink errors", async (t) => {
+  // Arrange: a transient server write error must preserve the job and its accepted candidate.
+  const directory = await mkdtemp(join(tmpdir(), "capture-retry-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  class ThrowingLogger extends FileLogger {
+    override emit(...args: Parameters<FileLogger["emit"]>): void {
+      super.emit(...args);
+      throw new Error("Diagnostic failure");
+    }
+  }
+  const logger = new ThrowingLogger({ directory, sessionId: "session-1", level: "debug" });
+  const queue = new DurableQueueStore({ directory: join(directory, "queue"),
+    instanceId: "instance-a" });
+  class UnavailableClient extends FakeClient {
+    calls = 0;
+    override async create(input: MemoryInput): Promise<{ id: number }> {
+      if (++this.calls === 1) throw new Error("Write unavailable; password=private-write-secret");
+      return super.create(input);
+    }
+  }
+  const client = new UnavailableClient();
+  const model = new FakeModel({ candidates: [{ id: "retry-candidate", title: "SQLite locally",
+    content: "Use SQLite for development", context: "Database decision", keywords: [], tags: [],
+    sourceEntryIds: ["user-1"] }] }, { action: "create", reason: "Novel SQLite decision" });
+  const service = new CaptureService({ queue, client, model, logger, instanceId: "instance-a" });
+
+  // Act.
+  const queued = await service.enqueue(snapshot());
+  await service.checkpoint();
+  await service.checkpoint();
+  await logger.flush();
+
+  // Assert: a failure is recorded before retry, and no transcript appears in info events.
+  assert.equal(client.created.length, 1);
+  const text = await readFile(logger.filePath, "utf8");
+  const events = text.trim().split("\n").map((line) => JSON.parse(line));
+  const failure = events.find((entry) => entry.event === "capture.error");
+  assert.ok(failure, "missing capture.error for the failed candidate write");
+  assert.equal(failure.data.candidateId, "retry-candidate");
+  assert.equal(failure.data.jobId, queued.jobId);
+  const retry = events.find((entry) => entry.event === "capture.retry");
+  assert.equal(retry.data.attempt, 2);
+  assert.equal(events.at(-1).event, "capture.completed");
+  assert.match(text, /Write unavailable/);
+  assert.doesNotMatch(text, /private-write-secret/);
+  const info = events.filter((entry) => entry.level === "info");
+  assert.doesNotMatch(JSON.stringify(info), /Write unavailable|SQLite|Implemented the migration/);
+});
+
+test("large rejected candidate keeps reason, evidence and bounded raw details", async (t) => {
+  // Arrange: rejected data exceeds the file logger's event budget.
+  const directory = await mkdtemp(join(tmpdir(), "capture-large-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session-1", level: "debug" });
+  const queue = new DurableQueueStore({ directory: join(directory, "queue"),
+    instanceId: "instance-a" });
+  const model = new FakeModel({ candidates: [{ id: "large-candidate", title: "Oversized title",
+    content: "x".repeat(60_000), context: "Database decision",
+    sourceEntryIds: ["assistant-1"] }] });
+  const service = new CaptureService({ queue, model, client: new FakeClient(), logger,
+    instanceId: "instance-a" });
+
+  // Act.
+  const queued = await service.enqueue(snapshot());
+  await service.checkpoint();
+  await logger.flush();
+
+  // Assert.
+  const lines = (await readFile(logger.filePath, "utf8")).trim().split("\n");
+  const rejected = lines.map((line) => JSON.parse(line))
+    .find((entry) => entry.event === "capture.candidate_rejected");
+  assert.equal(rejected.data?.jobId, queued.jobId);
+  assert.equal(rejected.data.reason, "content is missing, empty, or longer than 2000 characters");
+  assert.equal(rejected.data.entries[0].role, "assistant");
+  assert.equal(rejected.data.candidate.truncated, true);
+  assert.match(rejected.data.candidate.preview, /Oversized title/);
+  assert.ok(lines.every((line) => Buffer.byteLength(line + "\n") <= 64 * 1024));
+});
+
+test("capture snapshot log retains the full bounded evidence sent for extraction", async (t) => {
+  // Arrange: the normal 50KB snapshot is already bounded; it must remain useful for debugging.
+  const directory = await mkdtemp(join(tmpdir(), "capture-snapshot-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session-1", level: "debug" });
+  const queue = new DurableQueueStore({ directory: join(directory, "queue"),
+    instanceId: "instance-a" });
+  const model = new FakeModel({ candidates: [] });
+  const input = snapshot();
+  input.entries = Array.from({ length: 20 }, (_, index) => ({
+    id: `entry-${index}`, role: "user", text: "Evidence ".repeat(277),
+  }));
+  input.finalEntryId = "entry-19";
+  const service = new CaptureService({ queue, model, client: new FakeClient(), logger,
+    instanceId: "instance-a" });
+
+  // Act.
+  await service.enqueue(input);
+  await service.checkpoint();
+  await logger.flush();
+
+  // Assert: actual evidence, with no queue archive or unrelated session context attached.
+  const events = (await readFile(logger.filePath, "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  const event = events.find((entry) => entry.event === "capture.snapshot");
+  assert.deepEqual(event.data.entries, input.entries);
+  assert.deepEqual(event.data.entries, (model.requests[0]?.input as any).entries);
+  assert.equal(event.data.history, undefined);
+});
+
+test("capture file records disabled and unsuccessful settlements as skipped", async (t) => {
+  // Arrange.
+  const directory = await mkdtemp(join(tmpdir(), "capture-skipped-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session-1", level: "info" });
+  const queue = new DurableQueueStore({ directory: join(directory, "queue"),
+    instanceId: "instance-a" });
+  const service = new CaptureService({ queue, client: new FakeClient(), model: new FakeModel(),
+    logger, instanceId: "instance-a" });
+
+  // Act.
+  await service.enqueue({ ...snapshot(), mode: "off" });
+  await service.enqueue({ ...snapshot(), id: "failed-snapshot", finalStatus: "error" } as any);
+  await logger.flush();
+
+  // Assert.
+  const events = (await readFile(logger.filePath, "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(events.map((entry) => [entry.event, entry.data.reason]), [
+    ["capture.skipped", "capture is off"],
+    ["capture.skipped", "final run did not complete"],
+  ]);
+});
 
 function memory(id: number, input: MemoryInput): Memory {
   return { ...input, id, is_obsolete: false, linked_memory_ids: [] };
@@ -1115,10 +1330,12 @@ test("capture diagnostics report exact extraction validation reasons", async () 
   });
 });
 
-test("partial supersession retries obsolescence with the recorded replacement ID", async () => {
+test("partial supersession retries and logs both memory IDs and destination", async (t) => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-retry-"),
   );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session-1", level: "info" });
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
   const client = new FakeClient();
   const old = memory(41, {
@@ -1159,6 +1376,7 @@ test("partial supersession retries obsolescence with the recorded replacement ID
     queue,
     client,
     model,
+    logger,
     instanceId: "instance-a",
   });
 
@@ -1170,6 +1388,13 @@ test("partial supersession retries obsolescence with the recorded replacement ID
 
   assert.equal(client.created.length, 1);
   assert.deepEqual(client.superseded, [{ oldId: 41, replacementId: 100 }]);
+  await logger.flush();
+  const events = (await readFile(logger.filePath, "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  const superseded = events.find((entry) => entry.data.stage === "superseded");
+  assert.equal(superseded.data.oldMemoryId, 41);
+  assert.equal(superseded.data.replacementId, 100);
+  assert.equal(superseded.data.destinationProjectId, 7);
 });
 
 test("conflict resolution validates the action and evidence references", async () => {

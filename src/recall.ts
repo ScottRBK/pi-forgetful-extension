@@ -9,6 +9,7 @@ import type {
   EvidenceEntry,
   Memory,
   MemoryModelClient,
+  ModelRequest,
   ModelSubmissionTool,
   Project,
   Scope,
@@ -115,6 +116,7 @@ const CURRENT_REPOSITORY_PATTERN =
   /\b(?:this|current|active)\s+(?:repository|repo|project)\b/i;
 
 export interface RecallRequest {
+  diagnosticContext?: NonNullable<ModelRequest["diagnosticContext"]>;
   prompt: string;
   context: WorkContext;
   scope: Scope;
@@ -811,6 +813,10 @@ export class RecallService {
       const plan = await raceAbort(
         this.model.complete({
           purpose: "classification",
+          diagnosticContext: {
+            sessionId: request.context.sessionId, branchId: request.context.branchId,
+            ...request.diagnosticContext,
+          },
           policy: boundedPolicy(request.classificationPolicy),
           input: this.plannerInput(request),
           signal: deadline.signal,
@@ -892,6 +898,10 @@ export class RecallService {
       this.ensureLive(deadline);
       const output = await raceAbort(this.model.complete({
         purpose: "recall-review",
+        diagnosticContext: {
+          sessionId: request.context.sessionId, branchId: request.context.branchId,
+          ...request.diagnosticContext,
+        },
         policy: `${boundedPolicy(request.recallPolicy)}\n${REVIEW_POLICY}`,
         input: {
           work: this.plannerInput(request),
@@ -920,28 +930,46 @@ export class RecallService {
         reviewRejections,
       );
     } catch (error) {
-      // Recall is failure-open: convert planner/service failures to an empty result.
-      if (!request.signal?.aborted) this.recordFailure();
-      const attemptDebug = error instanceof ModelSubmissionError
-        ? reviewAttemptTrace(error.rejectionReasons, true)
-        : reviewRejections.length > 0 ? reviewAttemptTrace(reviewRejections) : undefined;
-      if (attemptDebug) debugTrace += `\n${attemptDebug}`;
-      const validationDebug = error instanceof ReviewValidationError
-        ? error.debug : failedReviewDebug;
-      const diagnosticStage = error instanceof ModelSubmissionError
-        ? "review validation"
-        : stage;
-      return {
-        ...this.empty(request.scope, failureReason(deadline, request.signal)),
-        diagnostic: deadline.diagnostic(diagnosticStage, error),
-        debugTrace,
-        ...(validationDebug
-          ? { reviewValidationDebug: [validationDebug, attemptDebug].filter(Boolean).join("\n") }
-          : {}),
-      };
+      return this.finishFailure(request, deadline, error, {
+        stage, debugTrace, reviewRejections, failedReviewDebug,
+      });
     } finally {
       deadline.finish();
     }
+  }
+
+  /** Recall is failure-open: convert planner/service failures to an empty result. */
+  private finishFailure(
+    request: RecallRequest,
+    deadline: DeadlineSignal,
+    error: unknown,
+    trace: {
+      stage: string;
+      debugTrace: string;
+      reviewRejections: string[];
+      failedReviewDebug: string | undefined;
+    },
+  ): RecallResult {
+    if (!request.signal?.aborted) this.recordFailure();
+    let attemptDebug: string | undefined;
+    if (error instanceof ModelSubmissionError) {
+      attemptDebug = reviewAttemptTrace(error.rejectionReasons, true);
+    } else if (trace.reviewRejections.length > 0) {
+      attemptDebug = reviewAttemptTrace(trace.reviewRejections);
+    }
+    const debugTrace = trace.debugTrace + (attemptDebug ? `\n${attemptDebug}` : "");
+    const validationDebug = error instanceof ReviewValidationError
+      ? error.debug : trace.failedReviewDebug;
+    const diagnosticStage = error instanceof ModelSubmissionError
+      ? "review validation" : trace.stage;
+    return {
+      ...this.empty(request.scope, failureReason(deadline, request.signal)),
+      diagnostic: deadline.diagnostic(diagnosticStage, error),
+      debugTrace,
+      ...(validationDebug
+        ? { reviewValidationDebug: [validationDebug, attemptDebug].filter(Boolean).join("\n") }
+        : {}),
+    };
   }
 
   private finishEmptySearch(

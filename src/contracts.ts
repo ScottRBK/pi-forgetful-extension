@@ -205,6 +205,13 @@ export interface ModelRequest {
   input: unknown;
   signal?: AbortSignal;
   submission?: ModelSubmissionTool;
+  /** Diagnostic correlation only; never included in the model input. */
+  diagnosticContext?: {
+    jobId?: string;
+    sessionId?: string;
+    branchId?: string;
+    candidateId?: string;
+  };
 }
 
 export interface ModelSubmissionTool {

@@ -29,10 +29,12 @@ import {
   ProjectInitError,
 } from "./project-init.ts";
 import { CaptureService, type CaptureCheckpointResult } from "./capture.ts";
+import { FileLogger } from "./logging.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
   DEFAULT_FORGETFUL_BASE_URL,
   isVerbosity,
+  isFileLogLevel,
   loadForgetfulConfig,
   modelToString,
   updateForgetfulConnection,
@@ -429,6 +431,7 @@ interface RecallActivity {
 }
 
 interface Runtime {
+  logger: FileLogger;
   sessionId: string;
   generation: number;
   cwd: string;
@@ -466,6 +469,7 @@ interface State {
 }
 
 interface PreparedRuntime {
+  logger: FileLogger;
   config: ForgetfulConfig;
   client?: ForgetfulClient;
   model?: PiMemoryModel;
@@ -598,7 +602,11 @@ function recordRecallActivity(
     const outcome = result.text ? "partially completed; error" : "failed";
     const detail = config.verbosity === "debug" ? result.diagnostic :
       `${result.diagnostic.split(":", 1)[0]} (${result.reason ?? "recall-unavailable"})`;
-    log(ctx, config, `Forgetful recall ${outcome} during ${detail}`, "warning");
+    log(ctx, config, `Forgetful recall ${outcome} during ${detail}`, "warning",
+      `Forgetful recall ${outcome} (${result.reason ?? "recall-unavailable"}).`);
+    runtime.logger.emit("debug", "recall.error_detail", {
+      branchId: runtime.branchId, diagnostic: result.diagnostic,
+    });
   } else if (["recall-unavailable", "deadline-exceeded", "aborted", "circuit-open"]
     .includes(result.reason ?? "")) {
     log(ctx, config, `Forgetful recall unavailable: ${result.reason}.`, "warning");
@@ -881,6 +889,8 @@ function notify(
   }
 }
 
+const fileLoggers = new WeakMap<ForgetfulConfig, FileLogger>();
+
 const LOG_PRIORITY: Record<Verbosity, number> = { debug: 0, info: 1, warning: 2, error: 3 };
 
 function log(
@@ -888,7 +898,11 @@ function log(
   config: ForgetfulConfig,
   message: string,
   level: Verbosity = "info",
+  fileMessage = message,
 ): void {
+  fileLoggers.get(config)?.emit(level === "debug" ? "debug" : "info", "notification", {
+    severity: level, message: fileMessage,
+  });
   if (LOG_PRIORITY[level] < LOG_PRIORITY[config.verbosity]) return;
   notify(ctx, sanitizeText(message), level === "debug" ? "info" : level);
 }
@@ -900,8 +914,11 @@ function logFailure(
   error: unknown,
   level: "warning" | "error" = "warning",
 ): void {
+  fileLoggers.get(config)?.emit("debug", "service.error", {
+    message, error: boundedErrorDiagnostic(error),
+  });
   const detail = config.verbosity === "debug" ? `: ${boundedErrorDiagnostic(error)}` : ".";
-  log(ctx, config, message + detail, level);
+  log(ctx, config, message + detail, level, message + ".");
 }
 
 function resolutionStatus(value: unknown): string {
@@ -1395,6 +1412,11 @@ export function createForgetfulExtension(
     };
 
     const cancelRecallJob = (job: RecallJob): void => {
+      if (job.phase !== "terminal") {
+        job.runtime.logger.emit("info", "recall.cancelled", {
+          jobId: job.jobId, branchId: job.branchId, kind: job.kind,
+        });
+      }
       job.controller.abort();
       state.recallJobs.delete(job.jobId);
       if (job.kind === "automatic") {
@@ -1692,12 +1714,14 @@ export function createForgetfulExtension(
       model: PiMemoryModel | undefined,
       instanceId: string,
       queueDirectory: string,
+      logger: FileLogger,
     ): CaptureServicePort | undefined => {
       if (dependencies.capture) return dependencies.capture;
       if (dependencies.createCapture)
         return dependencies.createCapture(config, client, model);
       if (!client || !model) return undefined;
       return new CaptureService({
+        logger,
         queue: new DurableQueueStore({
           directory: queueDirectory,
           instanceId,
@@ -1727,9 +1751,18 @@ export function createForgetfulExtension(
       const resolvedClient = await resolveRuntimeClient(ctx, config);
       config = resolvedClient.config;
       const client = resolvedClient.client;
+      const logger = new FileLogger({
+        directory: join(ctx.cwd, ".pi", "forgetful", "logs"),
+        sessionId,
+        level: config.logging,
+        onError: () => notify(ctx,
+          "Forgetful file logging failed; memory operations will continue.", "warning"),
+      });
+      fileLoggers.set(config, logger);
       const model = config.model
         ? resolveMemoryModel(ctx.modelRegistry, config.model, {
           sessionId,
+          logger,
           classificationTimeoutMs: config.recallModelTimeoutMs,
         })
         : undefined;
@@ -1752,6 +1785,7 @@ export function createForgetfulExtension(
           .slice(0, 32),
       );
       return {
+        logger,
         config,
         client,
         model,
@@ -1787,8 +1821,10 @@ export function createForgetfulExtension(
           prepared.model,
           makeInstanceId(prepared.config),
           prepared.queueDirectory,
+          prepared.logger,
         );
         const runtime: Runtime = {
+          logger: prepared.logger,
           sessionId: prepared.sessionId,
           generation,
           cwd: ctx.cwd,
@@ -1811,6 +1847,7 @@ export function createForgetfulExtension(
         }
         state.skipNextCapture = false;
         state.runtime = runtime;
+        runtime.logger.emit("info", "session.started", { branchId: runtime.branchId });
         if (prepared.config.enabled && capture?.checkpoint) {
           void Promise.resolve(capture.checkpoint())
             .then(() => handoffPendingConflicts(runtime, ctx))
@@ -1835,6 +1872,11 @@ export function createForgetfulExtension(
       return runtime.context;
     };
 
+    const stopFileLogging = async (runtime: Runtime): Promise<void> => {
+      runtime.logger.emit("info", "session.stopped", { branchId: runtime.branchId });
+      await runtime.logger.close();
+    };
+
     const resetRuntime = async (
       ctx: ExtensionContext,
       runtime: Runtime,
@@ -1849,6 +1891,7 @@ export function createForgetfulExtension(
           runtime.branchId,
         );
       }
+      await stopFileLogging(runtime);
       state.skipNextCapture ||= runtime.skipNextCapture;
       if (state.runtime === runtime) state.runtime = undefined;
     };
@@ -1890,13 +1933,12 @@ export function createForgetfulExtension(
     let visibleRecalls = 0;
     const runRecall = async (
       ctx: ExtensionContext,
-      runtime: Runtime,
-      prompt: string,
-      signal?: AbortSignal,
+      pending: RecallJob,
       onPlan?: (plan: RecallPlan) => void,
       contextOverride?: ExtensionWorkContext,
       sessionContextOverride?: EvidenceEntry[],
     ): Promise<RecallResult> => {
+      const { runtime, prompt, jobId, controller } = pending;
       if (!runtime.recall || !runtime.config.enabled || !runtime.model) {
         return {
           text: "",
@@ -1924,6 +1966,7 @@ export function createForgetfulExtension(
       try {
         const context = contextOverride ?? await workContext(ctx, runtime);
         return await runtime.recall.recall({
+          diagnosticContext: { jobId },
           prompt,
           context,
           scope: runtime.config.scope,
@@ -1937,7 +1980,7 @@ export function createForgetfulExtension(
             options.policies ?? {},
             "recall",
           ),
-          signal,
+          signal: controller.signal,
           projects: context.projects,
           sessionContext: sessionContextOverride ?? recallContextEntries(ctx),
           onPlan,
@@ -2054,6 +2097,12 @@ export function createForgetfulExtension(
         terminalConsumed: false,
         wakeSent: false,
       };
+      runtime.logger.emit("info", "recall.started", {
+        jobId: pending.jobId, branchId: pending.branchId, kind,
+      });
+      runtime.logger.emit("debug", "recall.input", {
+        jobId: pending.jobId, branchId: pending.branchId, prompt,
+      });
       state.recallJobs.set(pending.jobId, pending);
       if (kind === "automatic") state.automaticRecalls.set(key, pending);
       else {
@@ -2068,13 +2117,14 @@ export function createForgetfulExtension(
         try {
           const result = await runRecall(
             ctx,
-            runtime,
-            prompt,
-            pending.controller.signal,
+            pending,
             (plan: RecallPlan) => {
               try {
                 if (!plan.search || !isLiveRecallJob(pending, ctx)) return;
                 pending.phase = "retrieval";
+                runtime.logger.emit("info", "recall.retrieval", {
+                  jobId: pending.jobId, branchId: pending.branchId,
+                });
               } catch (error) {
                 logFailure(
                   ctx,
@@ -2117,6 +2167,14 @@ export function createForgetfulExtension(
       pending.promise = promise;
       void promise.then((result) => {
         if (!isLiveRecallJob(pending, ctx)) return;
+        runtime.logger.emit("info", "recall.completed", {
+          jobId: pending.jobId, branchId: pending.branchId,
+          reason: result.reason, memoryIds: result.memoryIds, scope: result.scope,
+          elapsedMs: Math.round(performance.now() - startedAt),
+        });
+        runtime.logger.emit("debug", "recall.result", {
+          jobId: pending.jobId, branchId: pending.branchId, result,
+        });
         pending.result = result;
         pending.phase = "terminal";
         wakeRecallCompletion(pending, ctx);
@@ -2324,6 +2382,9 @@ export function createForgetfulExtension(
             }
           });
         } else {
+          runtime.logger.emit("info", "capture.snapshot_skipped", {
+            branchId: runtime.branchId, reason: result.reason,
+          });
           await advanceSettledRange(runtime, ctx, context, result.finalEntryId);
         }
       } catch (error) {
@@ -2350,6 +2411,7 @@ export function createForgetfulExtension(
           previous.branchId,
         );
       }
+      if (previous) await stopFileLogging(previous);
       state.runtime = undefined;
       const runtime = await loadRuntime(ctx, event);
       runtime.baselineEntryId = ctx.sessionManager.getLeafId();
@@ -2464,6 +2526,7 @@ export function createForgetfulExtension(
           ctx.sessionManager.getSessionId(),
           runtime.branchId,
         );
+      await stopFileLogging(runtime);
       state.pendingQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
       state.skipNextCapture = false;
       state.runtime = undefined;
@@ -2479,6 +2542,7 @@ export function createForgetfulExtension(
           ctx.sessionManager.getSessionId(),
           runtime.branchId,
         );
+      if (runtime) await stopFileLogging(runtime);
       state.runtime = undefined;
       state.pendingQueuedRecall.clear();
       state.skipNextCapture = false;
@@ -3094,6 +3158,7 @@ export function createForgetfulExtension(
         `Forgetful ${runtime.config.enabled ? "on" : "off"}; ` +
           `capture ${runtime.config.captureMode}; scope ${runtime.config.scope}; ` +
           `verbosity ${runtime.config.verbosity}; ` +
+          `logging ${runtime.config.logging === "off" ? "off" : "on"}; ` +
           `project ${
             runtime.context.project
               ? `${sanitizeText(runtime.context.project.name)} (#${runtime.context.project.id})`
@@ -3186,6 +3251,28 @@ export function createForgetfulExtension(
       });
       runtime.config.verbosity = value === "on" ? "debug" : "warning";
       notify(ctx, `Forgetful debug ${value}.`);
+    };
+
+    const handleLoggingCommand = async (
+      parts: string[],
+      ctx: ExtensionContext,
+      runtime: Runtime,
+    ): Promise<void> => {
+      const level = parts[1];
+      if (!isFileLogLevel(level) || parts.length !== 2) {
+        notify(ctx, "Usage: /forgetful logging off|info|debug", "error");
+        return;
+      }
+      await updateUserSettings(runtime.config.paths.userSettings, { logging: level });
+      runtime.config.logging = level;
+      runtime.logger.setLevel(level);
+      runtime.logger.emit("info", "logging.enabled");
+      await runtime.logger.flush();
+      notify(ctx, `Forgetful file logging ${level === "off" ? "off" : "on"}.`);
+      if (level === "debug") {
+        notify(ctx, "Debug logs may contain private conversations and source code. " +
+          "Known secrets are redacted, but redaction cannot catch everything.", "warning");
+      }
     };
 
     const handleVerbosityCommand = async (
@@ -3460,6 +3547,9 @@ export function createForgetfulExtension(
           case "debug":
             await handleDebugCommand(parts, ctx, runtime);
             return;
+          case "logging":
+            await handleLoggingCommand(parts, ctx, runtime);
+            return;
           case "verbosity":
             await handleVerbosityCommand(parts, ctx, runtime);
             return;
@@ -3470,7 +3560,7 @@ export function createForgetfulExtension(
             notify(
               ctx,
               "Usage: /forgetful setup|encode|project init|status|scope|capture|on|off|" +
-                "verbosity|model (legacy: debug on|off)",
+                "logging off|info|debug|verbosity|model (legacy: debug on|off)",
               "error",
             );
         }

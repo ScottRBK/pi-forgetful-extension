@@ -91,7 +91,8 @@ directory. The effective settings can also be represented as:
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto",
-  "verbosity": "warning"
+  "verbosity": "warning",
+  "logging": "off"
 }
 ```
 
@@ -165,6 +166,9 @@ tool.
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
+| `/forgetful logging off` | Stop file logging (default). |
+| `/forgetful logging info` | Save lifecycle events, outcomes, timings, and errors. |
+| `/forgetful logging debug` | Also save evidence, capture transcripts, and model payloads. |
 | `/forgetful verbosity debug` | Show recall details and automatic capture outcomes. |
 | `/forgetful verbosity info` | Show brief recall summaries, warnings and errors. |
 | `/forgetful verbosity warning` | Show warnings and errors (default). |
@@ -175,6 +179,48 @@ Verbosity is saved in user settings and applies immediately, including to queued
 `forgetful_recall` tool. Each level includes higher-severity messages. Explicit command replies
 (including `/forgetful status`) and normal Pi tool results remain visible at every level.
 Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
+
+### File logging
+
+`/forgetful logging off|info|debug` saves its setting in user settings, independently of terminal
+verbosity. `/forgetful status` shows only `logging on` or `logging off`, not the level or path.
+
+Logs are JSONL (one JSON event per line) under `<working-directory>/.pi/forgetful/logs/`.
+Each runtime uses a unique file so concurrent Pi sessions do not write over one another.
+Events include timestamps, levels, session IDs, and relevant branch, job, candidate, and memory IDs.
+Info records progress and outcomes without transcript or model payload bodies. Debug additionally
+records capture evidence snapshots, accepted/rejected candidates and their cited entries, overlap
+decisions, and model requests/responses before parsing or validation can discard them.
+Cited entries use short previews; the capture snapshot records the full bounded evidence separately.
+Large content fields may also use previews with their own `truncated` marker.
+
+Capture transcripts contain the bounded session evidence considered for capture, not unrelated
+session history. Model requests show the actual SDK context; transport/authentication options and
+headers are excluded. Debug logs can still contain private conversations and source code. Known
+secrets are redacted, but this cannot detect every secret. Do not commit or share logs unreviewed.
+This repository already ignores `.pi/`; check the ignore rules in other repositories.
+
+Files rotate at 5 MiB, retaining the current file and two archives per writer. Individual events
+are limited to 256 KiB; oversized bodies are omitted with `truncated: true`, retaining correlation
+IDs when they fit. Pending writes are capped at 1 MiB; excess events are dropped with a warning.
+On initial writes and rotation, old files from closed local writers and exited processes are pruned
+toward 60 files or 100 MiB total. This is a soft limit: active or unknown writers are preserved.
+
+Logging errors produce one warning per writer and never stop memory work. A filesystem error
+stops that writer; fix the filesystem problem and run `/reload` to restart it. Switching logging off
+stops accepting events and discards queued writes. Controls and shutdown wait at most 500 ms for
+pending logging; a stalled writer is disabled with a warning. An already-started filesystem
+operation may finish later. Closed writers become eligible for cleanup after their actual I/O
+finishes.
+Abrupt process termination can lose the final events.
+
+To inspect rejected candidates with `jq` (if installed):
+
+```bash
+jq 'select(.event == "capture.candidate_rejected")' .pi/forgetful/logs/*.jsonl*
+```
+
+### Recall and capture feedback
 
 During automatic recall, Pi shows `Forgetful: recalling...` with a small spinner above the prompt
 editor at every verbosity level. The widget clears when recall finishes, including on failure or
@@ -194,7 +240,8 @@ At info level, recall reports the number of selected memories and scope used. De
 shows search queries and intent, bounded retrieved candidates, selected/rejected source IDs,
 review submission attempts, the memory model's selection reason, its final summary, and total
 recall time. Content already shortened for review stays shortened in this display. These are
-user-only notifications, not extra conversation messages or log files. Review validation failures
+user-only notifications, not extra conversation messages. File logging is separately opt-in.
+Review validation failures
 also include the redacted, bounded reviewer JSON when available, available source IDs, and a
 mismatch direction when reliably known in the same final debug notice as elapsed/no-context text,
 so Pi's consecutive-status coalescing does not hide the evidence.

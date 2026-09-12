@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -697,6 +698,158 @@ test("missing model warning directs the user to setup", async () => {
       ),
     );
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("file logs record recall lifecycle independently of terminal verbosity", async () => {
+  // Arrange: no log files by default, even with terminal debug enabled.
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  const directory = join(fixture.root, ".pi", "forgetful", "logs");
+  try {
+    await fixture.command("status");
+    await assert.rejects(readdir(directory), { code: "ENOENT" });
+
+    // Act: info file logging remains active with terminal output at error level.
+    await fixture.command("verbosity error");
+    await fixture.command("logging info");
+    fixture.notifications.length = 0;
+    await fixture.emit("input", { text: "A private question", source: "interactive" });
+    await fixture.emit("before_agent_start", { prompt: "A private question" });
+    await fixture.tools.get("forgetful_recall_wait")!.execute(
+      "logging-wait", {}, undefined, undefined, fixture.ctx,
+    );
+    await fixture.emit("session_shutdown", {});
+
+    // Assert: shutdown flushes structured lifecycle records, without transcript text at info.
+    const files = (await readdir(directory)).filter((name) => name.endsWith(".jsonl"));
+    assert.ok(files.length > 0);
+    const text = (await Promise.all(files.map((file) =>
+      readFile(join(directory, file), "utf8")))).join("");
+    const events = text.trim().split("\n").map((line) => JSON.parse(line));
+    assert.ok(events.some((item) => item.event === "recall.started"));
+    assert.ok(events.some((item) => item.event === "recall.completed"));
+    assert.ok(events.every((item) => item.sessionId === "session-1"));
+    assert.doesNotMatch(text, /A private question/);
+    assert.equal(fixture.notifications.length, 0);
+
+    // Act / Assert: switching off prevents further file writes.
+    await fixture.command("logging off");
+    const before = (await Promise.all((await readdir(directory)).map((file) =>
+      readFile(join(directory, file), "utf8")))).join("");
+    await fixture.emit("input", { text: "Another question", source: "interactive" });
+    await fixture.emit("session_shutdown", {});
+    const after = (await Promise.all((await readdir(directory)).map((file) =>
+      readFile(join(directory, file), "utf8")))).join("");
+    assert.equal(after, before);
+  } finally {
+    await fixture.emit("session_shutdown", {});
+    await fixture.cleanup();
+  }
+});
+
+test("info file logs never inherit private errors from terminal debug verbosity", async () => {
+  // Arrange: the provider diagnostic contains private text, not a recognizable credential.
+  const privateText = "PRIVATE_PROVIDER_CONVERSATION";
+  for (const level of ["info", "debug"]) {
+    const fixture = await harness({
+      userSettings: { verbosity: "debug", logging: level },
+      recallService: {
+        async recall() {
+          return { text: "", memoryIds: [], scope: "global", reason: "recall-unavailable",
+            diagnostic: `provider failure: ${privateText}` };
+        },
+        async deeper() { return { text: "", memoryIds: [], scope: "global" }; },
+      },
+    });
+    try {
+      // Act.
+      await fixture.emit("before_agent_start", { prompt: "question" });
+      await fixture.tools.get("forgetful_recall_wait")!.execute(
+        "logging-error-wait", {}, undefined, undefined, fixture.ctx,
+      );
+      await fixture.emit("session_shutdown", {});
+
+      // Assert: terminal debug remains detailed, independently of the file level.
+      assert.ok(fixture.notifications.some((text) => text.includes(privateText)));
+      const directory = join(fixture.root, ".pi", "forgetful", "logs");
+      const text = (await Promise.all((await readdir(directory)).map((name) =>
+        readFile(join(directory, name), "utf8")))).join("");
+      assert.ok(text.includes("recall-unavailable"));
+      assert.equal(text.includes(privateText), level === "debug");
+    } finally {
+      await fixture.emit("session_shutdown", {});
+      await fixture.cleanup();
+    }
+  }
+});
+
+test("capture off still completes while the log filesystem is stalled",
+  { skip: process.platform !== "linux", timeout: 5_000 }, async () => {
+    // Arrange: use the actual command path and a real blocked filesystem write.
+    const fixture = await harness();
+    let released: Promise<string> | undefined;
+    try {
+      await fixture.command("logging info");
+      const directory = join(fixture.root, ".pi", "forgetful", "logs");
+      const path = join(directory, (await readdir(directory))[0]!);
+      await rm(path);
+      await new Promise<void>((resolve, reject) => {
+        execFile("mkfifo", [path], error => error ? reject(error) : resolve());
+      });
+      released = new Promise<string>((resolve, reject) => {
+        setTimeout(() => readFile(path, "utf8").then(resolve, reject), 1_500);
+      });
+
+      // Act.
+      const started = performance.now();
+      await fixture.command("capture off");
+
+      // Assert: the control takes effect without waiting for the FIFO reader.
+      assert.ok(performance.now() - started < 1_000);
+      const settings = JSON.parse(await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+      ));
+      assert.equal(settings.capture_mode, "off");
+      assert.ok(fixture.notifications.some(text => text.includes("file logging failed")));
+    } finally {
+      await released;
+      await fixture.emit("session_shutdown", {});
+      await fixture.cleanup();
+    }
+  });
+
+test("file logging commands persist independently and status shows only on or off", async () => {
+  // Arrange: terminal output remains quiet while file logging is changed.
+  const fixture = await harness({ userSettings: { verbosity: "warning" } });
+  try {
+    // Act / Assert: default off and each supported level survive a runtime reload.
+    await fixture.command("status");
+    assert.match(fixture.notifications.at(-1)!, /logging off/);
+    for (const level of ["info", "debug", "off"]) {
+      await fixture.command(`logging ${level}`);
+      const settings = JSON.parse(await readFile(
+        join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+      ));
+      assert.equal(settings.logging, level);
+      assert.equal(settings.verbosity, "warning");
+      await fixture.emit("session_shutdown", {});
+      await fixture.command("status");
+      const status = fixture.notifications.at(-1)!;
+      assert.match(status, new RegExp(`logging ${level === "off" ? "off" : "on"}`));
+      assert.doesNotMatch(status, /logging (?:info|debug)|\.jsonl|forgetful\/logs/);
+    }
+    assert.ok(fixture.notifications.some((text) => /private.*source code/i.test(text)));
+    for (const args of ["logging", "logging trace", "logging debug extra"]) {
+      await fixture.command(args);
+      assert.match(fixture.notifications.at(-1)!, /Usage:.*logging off\|info\|debug/);
+    }
+    const settings = JSON.parse(await readFile(
+      join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+    ));
+    assert.equal(settings.logging, "off");
+  } finally {
+    await fixture.emit("session_shutdown", {});
     await fixture.cleanup();
   }
 });

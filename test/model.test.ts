@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FileLogger } from "../src/logging.ts";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
   PiMemoryModel,
@@ -13,6 +17,59 @@ const selectedModel = {
   provider: "fake",
   id: "memory-model",
 } as unknown as Model<any>;
+
+for (const level of ["debug", "info", "off"] as const) {
+  test(`model ${level} file records SDK attempts without credentials`, async (t) => {
+    // Arrange: malformed output must be observable before parsing; auth stays outside context.
+    const directory = await mkdtemp(join(tmpdir(), "model-log-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const logger = new FileLogger({ directory, sessionId: "session-log", level });
+    const contexts: unknown[] = [];
+    const registry: ModelRegistryPort = {
+      find: () => selectedModel,
+      complete: async (_model, context) => {
+        contexts.push(structuredClone(context));
+        return response('malformed { "password": "private-response-secret"');
+      },
+    };
+    const model = new PiMemoryModel(registry, selectedModel, {
+      logger,
+      transformHeaders: () => ({ authorization: "Bearer private-header-secret" }),
+    });
+
+    // Act.
+    await model.complete({
+      purpose: "capture", policy: "Capture policy", input: { text: "Capture this decision" },
+      diagnosticContext: { sessionId: "session-log", branchId: "branch-log", jobId: "job-log" },
+    });
+    await logger.flush();
+
+    // Assert at the real file boundary, including absence when disabled.
+    const text = await readFile(logger.filePath, "utf8").catch((error) => {
+      if (level === "off" && error.code === "ENOENT") return "";
+      throw error;
+    });
+    assert.doesNotMatch(text, /private-response-secret|private-header-secret|transformHeaders/);
+    assert.doesNotMatch(JSON.stringify(contexts), /job-log|branch-log|diagnosticContext/);
+    if (level === "off") return assert.equal(text, "");
+    const events = text.trim().split("\n").map((line) => JSON.parse(line));
+    const completed = events.find((entry) => entry.event === "model.completed");
+    assert.equal(completed.data.purpose, "capture");
+    assert.equal(completed.data.model, "fake/memory-model");
+    assert.equal(completed.data.jobId, "job-log");
+    assert.ok(completed.data.elapsedMs >= 0);
+    if (level === "info") {
+      assert.ok(events.every((entry) => entry.level === "info"));
+      assert.doesNotMatch(text, /Capture this decision|malformed|Capture policy/);
+    } else {
+      assert.deepEqual(events.find((entry) => entry.event === "model.request").data.context,
+        contexts[0]);
+      const raw = events.find((entry) => entry.event === "model.response");
+      assert.match(raw.data.response.content[0].text, /malformed/);
+      assert.match(raw.data.response.content[0].text, /redacted/);
+    }
+  });
+}
 
 function response(text: string): AssistantMessage {
   return {
@@ -63,6 +120,97 @@ function reviewSubmission(
     validate,
   };
 }
+
+test("model file retains rejected submissions and provider failure by attempt", async (t) => {
+  // Arrange: the second SDK call fails after a malformed first submission.
+  const directory = await mkdtemp(join(tmpdir(), "model-retry-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "review-session", level: "debug" });
+  let calls = 0;
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async () => {
+      if (++calls === 2) throw new Error("Provider offline; password=private-provider-secret");
+      return toolResponse([{ id: "bad-call", name: "submit_recall_review",
+        arguments: { summary: "Unsupported claim", memoryIds: [], reason: "No source" } }]);
+    },
+  };
+  const model = new PiMemoryModel(registry, selectedModel, { logger });
+
+  // Act.
+  await assert.rejects(model.complete({
+    purpose: "recall-review", policy: "Use evidence", input: {},
+    submission: reviewSubmission(() => { throw new Error("summary requires a source"); }),
+  }), /Memory model request failed/);
+  await logger.flush();
+
+  // Assert: the corrected SDK context and original rejected output both survive in the file.
+  const text = await readFile(logger.filePath, "utf8");
+  const events = text.trim().split("\n").map((line) => JSON.parse(line));
+  const requests = events.filter((entry) => entry.event === "model.request");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].data.attempt, 2);
+  assert.equal(requests[1].data.context.messages[1].content[0].arguments.summary,
+    "Unsupported claim");
+  assert.equal(events.find((entry) => entry.event === "model.response").data.attempt, 1);
+  const rejection = events.find((entry) => entry.event === "model.submission_rejection");
+  assert.equal(rejection.data.reason, "summary requires a source");
+  assert.equal(rejection.data.input.summary, "Unsupported claim");
+  const failure = events.find((entry) => entry.event === "model.attempt_error");
+  assert.equal(failure.data.attempt, 2);
+  assert.ok(failure.data.elapsedMs >= 0);
+  assert.doesNotMatch(text, /private-provider-secret/);
+  const info = events.filter((entry) => entry.level === "info");
+  assert.doesNotMatch(JSON.stringify(info), /Unsupported claim|Provider offline|requires a source/);
+});
+
+test("oversized SDK output leaves a bounded correlated preview before rejection", async (t) => {
+  // Arrange: the provider ignores its output limit.
+  const directory = await mkdtemp(join(tmpdir(), "model-large-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session", level: "debug" });
+  const model = new PiMemoryModel({ find: () => selectedModel,
+    complete: async () => response(`oversized-raw-response ${"x".repeat(200_000)}`),
+  }, selectedModel, { logger });
+
+  // Act.
+  await assert.rejects(model.complete({ purpose: "capture", policy: "policy", input: {},
+    diagnosticContext: { jobId: "large-job" } }), /Memory model request failed/);
+  await logger.flush();
+
+  // Assert: logger truncation must not discard the job ID and all response detail.
+  const lines = (await readFile(logger.filePath, "utf8")).trim().split("\n");
+  const raw = lines.map((line) => JSON.parse(line))
+    .find((entry) => entry.event === "model.response");
+  assert.equal(raw.data?.jobId, "large-job");
+  assert.equal(raw.data.response.truncated, true);
+  assert.match(raw.data.response.preview, /oversized-raw-response/);
+  assert.ok(lines.every((line) => Buffer.byteLength(line + "\n") <= 64 * 1024));
+});
+
+test("throwing diagnostic sink cannot change the model result", async (t) => {
+  // Arrange: write to the real file, then simulate a defective custom sink.
+  const directory = await mkdtemp(join(tmpdir(), "model-throw-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  class ThrowingLogger extends FileLogger {
+    override emit(...args: Parameters<FileLogger["emit"]>): void {
+      super.emit(...args);
+      throw new Error("Diagnostic failure");
+    }
+  }
+  const logger = new ThrowingLogger({ directory, sessionId: "session", level: "debug" });
+  const model = new PiMemoryModel({
+    find: () => selectedModel, complete: async () => response('{"ok":true}'),
+  }, selectedModel, { logger });
+
+  // Act.
+  const result = await model.complete({ purpose: "capture", policy: "policy", input: {} });
+  await logger.flush();
+
+  // Assert.
+  assert.deepEqual(result, { ok: true });
+  assert.match(await readFile(logger.filePath, "utf8"), /model.completed/);
+});
 
 test("memory model sends a bounded JSON request and parses a JSON response", async () => {
   const calls: Array<{ systemPrompt?: string; content: unknown }> = [];

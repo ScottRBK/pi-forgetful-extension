@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FileLogger } from "../src/logging.ts";
 import { describe, it } from "node:test";
 
 import type {
@@ -639,7 +643,9 @@ describe("RecallService", () => {
   });
 });
 
-function reviewerWithResponses(contents: AssistantMessage["content"][]): PiMemoryModel {
+function reviewerWithResponses(
+  contents: AssistantMessage["content"][], logger?: FileLogger,
+): PiMemoryModel {
   const model = { provider: "fake", id: "memory" } as Model<any>;
   let index = 0;
   return new PiMemoryModel({
@@ -656,7 +662,7 @@ function reviewerWithResponses(contents: AssistantMessage["content"][]): PiMemor
         timestamp: Date.now(),
       };
     },
-  }, model);
+  }, model, { logger });
 }
 
 it("recall debug counts text and schema rejections after successful correction", async () => {
@@ -753,4 +759,37 @@ it("recall explains malformed source arrays without silently accepting Pi coerci
   assert.equal(result.text, "");
   assert.match(result.debugTrace ?? "", /entityIds must be an integer array/);
   assert.match(result.debugTrace ?? "", /Use \[\] for no sources/);
+});
+
+it("recall file connects classification and review to the originating job", async t => {
+  // Arrange: real recall, model adapter and files; only the external services are simulated.
+  const directory = await mkdtemp(join(tmpdir(), "recall-correlated-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "session-1", level: "debug" });
+  const model = reviewerWithResponses([[{
+    type: "toolCall", id: "review", name: "submit_recall_review",
+    arguments: { summary: "Recall uses a transport port.", memoryIds: [11], reason: "Relevant" },
+  }]], logger);
+  const service = new RecallService(new FakeForgetfulClient(), model);
+
+  // Act.
+  const result = await service.recall({
+    prompt: "How does recall work?", context, scope: "global",
+    classificationPolicy: "policy", recallPolicy: "policy",
+    diagnosticContext: { jobId: "recall-job-a" },
+  });
+  await logger.flush();
+
+  // Assert: both model stages have the same job, without adding it to the prompt.
+  assert.deepEqual(result.memoryIds, [11]);
+  const events = (await readFile(logger.filePath, "utf8")).trim().split("\n")
+    .map(line => JSON.parse(line));
+  const requests = events.filter(event => event.event === "model.request");
+  assert.deepEqual(requests.map(event => event.data.purpose), ["classification", "recall-review"]);
+  for (const event of requests) {
+    assert.equal(event.data.jobId, "recall-job-a");
+    assert.equal(event.data.branchId, "branch-1");
+    assert.equal(event.data.sessionId, "session-1");
+    assert.doesNotMatch(JSON.stringify(event.data.context), /recall-job-a/);
+  }
 });

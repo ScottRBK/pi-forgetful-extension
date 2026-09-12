@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { DiagnosticLogger } from "./logging.ts";
 
 import type {
   CaptureMode,
@@ -89,6 +90,7 @@ export interface CaptureDecision {
 }
 
 export interface CaptureServiceOptions {
+  logger?: DiagnosticLogger;
   queue: DurableQueueStore;
   client: ForgetfulClient;
   model: MemoryModelClient;
@@ -859,6 +861,7 @@ function parseCandidates(
   value: unknown,
   snapshot: CaptureSnapshot,
   maxCandidates: number,
+  onCandidate?: (id: string, raw: unknown, reason?: string) => void,
 ): CandidateExtraction {
   const response = record(value);
   if (!response || !Array.isArray(response.candidates))
@@ -872,11 +875,13 @@ function parseCandidates(
     const rawRecord = record(raw);
     const id = stringValue(rawRecord?.id, 100) ?? `candidate-${index + 1}`;
     if (seenIds.has(id)) {
+      onCandidate?.(id, raw, "duplicate candidate ID");
       skipped.push({ id, reason: "duplicate candidate ID" });
       continue;
     }
     seenIds.add(id);
     const validation = eligibleCandidate(raw, snapshot, index);
+    onCandidate?.(id, raw, validation.valid ? undefined : validation.reason);
     if (validation.valid) candidates.push(validation.value);
     else skipped.push({ id, reason: validation.reason });
   }
@@ -1258,9 +1263,11 @@ export class CaptureService {
   private readonly maxJobsPerCheckpoint: number;
   private readonly now: () => Date;
   private readonly knowledgeWriter?: KnowledgeWriter;
+  private readonly logger?: DiagnosticLogger;
   private stopped = false;
 
   constructor(options: CaptureServiceOptions) {
+    this.logger = options.logger;
     this.queue = options.queue;
     this.client = options.client;
     this.knowledgeWriter = options.client.knowledge
@@ -1289,6 +1296,40 @@ export class CaptureService {
     );
     this.maxJobsPerCheckpoint = Math.max(1, options.maxJobsPerCheckpoint ?? 8);
     this.now = options.now ?? (() => new Date());
+  }
+
+  private correlation(job: QueueJob, candidateId?: string) {
+    return {
+      sessionId: job.snapshot.context.sessionId,
+      branchId: job.snapshot.context.branchId,
+      jobId: job.id,
+      ...(candidateId ? { candidateId } : {}),
+    };
+  }
+
+  private emit(
+    level: "info" | "debug", event: string, data: Record<string, unknown>,
+  ): void {
+    try {
+      if (!this.logger) return;
+      const safe = sanitizeValue(data) as Record<string, unknown>;
+      const keys = ["entries", "candidate", "outcome", "response", "decision"]
+        .filter((key) => safe[key] !== undefined);
+      const limit = Math.floor(60_000 / Math.max(1, keys.length));
+      // Bound content separately so truncation preserves correlation and exact rejection reasons.
+      for (const key of keys) {
+        const json = JSON.stringify(safe[key]);
+        if (Buffer.byteLength(json) <= limit) continue;
+        let preview = json;
+        do {
+          preview = preview.slice(0, Math.floor(preview.length * 0.75));
+        } while (Buffer.byteLength(JSON.stringify(preview)) > limit - 100);
+        safe[key] = { truncated: true, preview };
+      }
+      this.logger.emit(level, `capture.${event}`, safe);
+    } catch {
+      // Diagnostics are optional and must never change capture or its durable checkpoints.
+    }
   }
 
   private async enabled(mode?: CaptureMode): Promise<boolean> {
@@ -1322,6 +1363,24 @@ export class CaptureService {
   }
 
   async enqueue(snapshot: CaptureSnapshot): Promise<CaptureEnqueueResult> {
+    const correlation = {
+      sessionId: snapshot.context.sessionId, branchId: snapshot.context.branchId,
+      jobId: snapshot.id,
+    };
+    try {
+      const result = await this.enqueueSnapshot(snapshot);
+      this.emit("info", result.queued ? "queued" : "skipped", {
+        ...correlation, jobId: result.jobId, reason: result.reason,
+      });
+      return result;
+    } catch (error) {
+      this.emit("info", "error", { ...correlation, operation: "enqueue" });
+      this.emit("debug", "error_detail", { ...correlation, error: scrubError(error) });
+      throw error;
+    }
+  }
+
+  private async enqueueSnapshot(snapshot: CaptureSnapshot): Promise<CaptureEnqueueResult> {
     const status =
       (snapshot as CaptureSnapshot & { finalStatus?: string; status?: string })
         .finalStatus ??
@@ -1436,7 +1495,19 @@ export class CaptureService {
     candidateId: string,
     outcome: unknown,
   ): Promise<QueueJob> {
-    return this.queue.checkpoint(job.id, candidateId, clone(outcome));
+    const updated = await this.queue.checkpoint(job.id, candidateId, clone(outcome));
+    const value = record(outcome);
+    const previous = record(job.candidateOutcomes[candidateId]);
+    this.emit("info", value?.stage === "skipped" ? "skipped" : "candidate_progress", {
+      ...this.correlation(job, candidateId), stage: value?.stage, action: value?.action,
+      destinationProjectId: value?.destinationProjectId ?? previous?.destinationProjectId,
+      memoryId: value?.memoryId, oldMemoryId: value?.oldMemoryId,
+      replacementId: value?.replacementId, conflictId: value?.conflictId,
+    });
+    this.emit("debug", "candidate_outcome", {
+      ...this.correlation(job, candidateId), outcome,
+    });
+    return updated;
   }
 
   private async destinationProjects(
@@ -1513,6 +1584,10 @@ export class CaptureService {
     const result = await this.client.create(input);
     if (!projectId(result.id))
       throw new Error("Forgetful returned an invalid memory ID");
+    this.emit("info", "write_completed", {
+      ...this.correlation(job, candidate.id), operation: "create", memoryId: result.id,
+      destinationProjectId: destination, projectIds,
+    });
     return result.id;
   }
 
@@ -1821,6 +1896,7 @@ export class CaptureService {
     });
     const response = await this.model.complete({
       purpose: "overlap",
+      diagnosticContext: this.correlation(currentJob, candidate.id),
       policy: this.policyFor(currentJob.snapshot, "overlap"),
       input: {
         candidate: overlapCandidate(candidate),
@@ -1843,6 +1919,10 @@ export class CaptureService {
       await this.validateDecision(decision, candidate, overlaps);
     } catch (error) {
       if (!(error instanceof InvalidCaptureOutput)) throw error;
+      this.emit("debug", "overlap_rejected", {
+        ...this.correlation(job, candidate.id), response, reason: error.message,
+        destinationProjectId: destination, memoryIds: overlaps.map((memory) => memory.id),
+      });
       const skipped = await this.checkpointOutcome(currentJob, candidate.id, {
         stage: "skipped",
         action: "skip",
@@ -1851,6 +1931,14 @@ export class CaptureService {
       });
       return { status: "skipped", job: skipped };
     }
+    this.emit("info", "overlap", {
+      ...this.correlation(job, candidate.id), action: decision.action,
+      destinationProjectId: destination, memoryIds: overlaps.map((memory) => memory.id),
+      memoryId: decision.memoryId, conflictingMemoryIds: decisionConflictIds(decision),
+    });
+    this.emit("debug", "overlap_decision", {
+      ...this.correlation(job, candidate.id), decision, destinationProjectId: destination,
+    });
     const decidedJob = await this.checkpointOutcome(currentJob, candidate.id, {
       stage: "decided",
       candidate,
@@ -2156,6 +2244,7 @@ export class CaptureService {
     });
     const response = await this.model.complete({
       purpose: "capture",
+      diagnosticContext: this.correlation(currentJob),
       policy: this.policyFor(currentJob.snapshot, "capture"),
       input: {
         context: {
@@ -2176,6 +2265,24 @@ export class CaptureService {
       response,
       currentJob.snapshot,
       this.maxCandidates,
+      (candidateId, raw, reason) => {
+        const item = record(raw);
+        const ids = strings(item?.sourceEntryIds ?? item?.source_entry_ids, 8, 200);
+        this.emit("debug", reason ? "candidate_rejected" : "candidate_accepted", {
+          ...this.correlation(currentJob, candidateId), reason,
+          entries: ids.map((id) => {
+            const entry = currentJob.snapshot.entries.find((value) => value.id === id);
+            return entry
+              ? { ...entry, text: entry.text.slice(0, 256), truncated: entry.text.length > 256 }
+              : { id, missing: true };
+          }),
+          candidate: raw,
+        });
+        this.emit("info", reason ? "skipped" : "candidate_validated", {
+          ...this.correlation(currentJob, candidateId),
+          stage: reason ? "rejected" : "accepted", sourceEntryIds: ids,
+        });
+      },
     );
     const extractedJob = await this.queue.checkpoint(currentJob.id, {
       extractedCandidates: extraction.candidates,
@@ -2207,6 +2314,12 @@ export class CaptureService {
           outcome,
         );
       } catch (error) {
+        this.emit("info", error instanceof CapturePause ? "paused" : "error", {
+          ...this.correlation(currentJob, candidate.id),
+        });
+        this.emit("debug", "error_detail", {
+          ...this.correlation(currentJob, candidate.id), error: scrubError(error),
+        });
         if (error instanceof CapturePause) {
           await this.queue.checkpoint(currentJob.id, {
             status: "paused",
@@ -2281,11 +2394,27 @@ export class CaptureService {
     job: QueueJob,
     result: CaptureCheckpointResult,
   ): Promise<boolean> {
+    const started = performance.now();
+    this.emit("info", job.attempts > 1 ? "retry" : "started", {
+      ...this.correlation(job), attempt: job.attempts,
+    });
+    this.emit("debug", "snapshot", {
+      ...this.correlation(job), entries: job.snapshot.entries,
+      finalEntryId: job.snapshot.finalEntryId,
+    });
     try {
       await this.processJob(job);
       const after = await this.queue.getJob(job.id);
+      this.emit("info", after?.status === "complete" ? "completed" : "job_progress", {
+        ...this.correlation(job), status: after?.status,
+        elapsedMs: performance.now() - started,
+      });
       return after?.status !== "pending" && after?.status !== "paused";
     } catch (error) {
+      this.emit("info", "error", {
+        ...this.correlation(job), elapsedMs: performance.now() - started,
+      });
+      this.emit("debug", "error_detail", { ...this.correlation(job), error: scrubError(error) });
       result.errors.push(scrubError(error));
       const latest = await this.queue.getJob(job.id);
       if (latest) {
