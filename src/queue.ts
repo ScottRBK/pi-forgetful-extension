@@ -50,6 +50,7 @@ export interface QueueJob {
   callCount: number;
   extractedCandidates?: unknown[];
   candidateOutcomes: Record<string, unknown>;
+  submissionRejections?: string[];
   lastError?: string;
   createdAt: string;
   updatedAt: string;
@@ -103,6 +104,7 @@ export interface QueueCheckpoint {
   callCount?: number;
   extractedCandidates?: unknown[];
   candidateOutcomes?: Record<string, unknown>;
+  submissionRejections?: string[];
   lastError?: string;
   startedAt?: string;
 }
@@ -806,6 +808,11 @@ export class DurableQueueStore {
           ...job.candidateOutcomes,
           ...sanitizeOutcomeMap(jsonSnapshot(patch.candidateOutcomes)),
         };
+      }
+      if (patch.submissionRejections !== undefined) {
+        job.submissionRejections = patch.submissionRejections
+          .map(scrubDiagnostic)
+          .slice(-3);
       }
       if (patch.lastError !== undefined)
         job.lastError = scrubDiagnostic(patch.lastError);

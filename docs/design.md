@@ -342,16 +342,20 @@ is then processed by the durable worker described above.
 
 1. Read only the conversation messages in the fixed snapshot after the last capture watermark.
 2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
-   a target project and rationale, using the bounded capture call budget.
-3. Apply deterministic structural and sensitive-data validation and resolve each destination.
+   a target project and rationale. Accept exactly one private `submit_capture_candidates` tool call;
+   do not parse text output as fallback JSON.
+3. Apply deterministic structural and sensitive-data validation to the original tool arguments,
+   then resolve each destination.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
-5. Give the candidate, its evidence, and overlapping memories to the memory model for a bounded
-   `create`, `skip`, `supersede`, or `escalate` decision. This extends the existing overlap
-   judgment; it does not require a separate contradiction service or an extra model call per
-   candidate. Use `supersede` for a clearly evidenced change and `escalate` for unresolved conflict.
-6. Validate the decision. A contradiction must identify conflicting memories from that query,
-   the incompatible claims, source entries in the eligible snapshot, and why they concern the
-   same fact.
+5. Give the candidate, its evidence, and overlapping memories to the memory model. Accept exactly
+   one private `submit_capture_decision` tool call containing `create`, `skip`, `supersede`, or
+   `escalate`. This extends the existing overlap judgment; it does not require a separate
+   contradiction service or an extra model call per candidate. Use `supersede` for a clearly
+   evidenced change and `escalate` for unresolved conflict.
+6. Validate the original decision arguments. A contradiction must identify conflicting memories
+   from that query, the incompatible claims, source entries in the eligible snapshot, and why they
+   concern the same fact. Each private capture submission has at most three attempts within its
+   existing model request and deadline; rejected calls receive bounded error tool results.
 7. Execute `create` or automatic `supersede` through the existing Forgetful API using the shared
    resolution path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
    neither an ordinary duplicate nor permission to create a competing fact.
@@ -513,8 +517,9 @@ The benchmark matrix covers every supported memory planner model, warm and cold 
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the asynchronous recall path. The
 implementation bounds recall to one planner call and one review path per prompt, with at most three
-private review-submission attempts. Capture extraction and overlap decisions, including
-contradiction detection, have a per-run call budget; debug shows aggregate usage.
+private review-submission attempts. Capture extraction and each overlap decision use one model call
+from the per-run budget, with at most three private submission attempts inside that call and its
+15-second deadline. Debug shows aggregate usage and bounded rejection details.
 
 ## Transport
 
@@ -587,9 +592,12 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    scoped Forgetful data to the main agent.
 4. **Capture input seam**: the capture model receives only the completed turn delta and the
    composed capture policy, including the current project and evidence for another destination.
-5. **Capture mechanism seam**: given structured create/skip/supersede/escalate decisions, the
-   extension searches the destination project, applies validated creates or ordered supersession,
-   and retains uncertain conflicts. A stale decision never knowingly changes a newer memory.
+   Candidate extraction accepts one private tool submission, returns bounded validation feedback
+   for correction, and never treats text-only JSON as a valid submission.
+5. **Capture mechanism seam**: given a private create/skip/supersede/escalate submission, the
+   extension validates its original arguments, searches the destination project, applies validated
+   creates or ordered supersession, and retains uncertain conflicts. Invalid decisions receive
+   bounded correction feedback. A stale decision never knowingly changes a newer memory.
 6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
    and project choices are loaded per repository; planner-requested overrides require explicit
    authorization; project requests set `strict_project_filter: true` and use the resolved

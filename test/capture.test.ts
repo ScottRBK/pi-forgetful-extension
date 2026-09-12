@@ -16,6 +16,7 @@ import type {
 import { DurableQueueStore } from "../src/queue.ts";
 import { FileLogger } from "../src/logging.ts";
 import { PiMemoryModel, type ModelRegistryPort } from "../src/model.ts";
+import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 
 for (const level of ["debug", "info", "off"] as const) {
   test(`capture ${level} file explains rejected evidence and saves valid capture`, async (t) => {
@@ -38,10 +39,13 @@ for (const level of ["debug", "info", "off"] as const) {
     ];
     const registry: ModelRegistryPort = {
       find: () => ({ provider: "fake", id: "memory" }) as any,
-      complete: async () => ({
-        role: "assistant", content: [{ type: "text", text: JSON.stringify(outputs.shift()) }],
-        stopReason: "stop", timestamp: Date.now(),
-      }) as any,
+      complete: async (_model, context) => {
+        const output = outputs.shift();
+        const tool = context.tools?.[0];
+        return tool
+          ? providerTool("capture-log", tool.name, output as any)
+          : providerText(JSON.stringify(output));
+      },
     };
     const model = new PiMemoryModel(registry, { provider: "fake", id: "memory" }, { logger });
     const service = new CaptureService({ queue, client, model, logger, instanceId: "instance-a" });
@@ -354,6 +358,371 @@ class FakeModel implements MemoryModelClient {
     return response;
   }
 }
+
+function providerResponse(
+  content: AssistantMessage["content"],
+  stopReason: AssistantMessage["stopReason"] = "stop",
+): AssistantMessage {
+  return {
+    role: "assistant",
+    api: "faux",
+    provider: "fake",
+    model: "memory",
+    content,
+    stopReason,
+    timestamp: Date.now(),
+  } as AssistantMessage;
+}
+
+function providerText(text: string): AssistantMessage {
+  return providerResponse([{ type: "text", text }]);
+}
+
+function providerTool(
+  id: string,
+  name: string,
+  args: Record<string, unknown>,
+): AssistantMessage {
+  return providerResponse(
+    [{ type: "toolCall", id, name, arguments: args }],
+    "toolUse",
+  );
+}
+
+test("capture candidate submission retries through the durable checkpoint flow", async (t) => {
+  // Arrange: the provider first submits the wrong shape, then corrects it after tool feedback.
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-capture-submission-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const client = new FakeClient();
+  const contexts: Context[] = [];
+  let captureAttempts = 0;
+  const invalidCandidate = {
+    id: "assistant-only",
+    title: "Assistant suggestion",
+    content: "This suggestion is not capture evidence.",
+    context: "The assistant proposed it.",
+    keywords: ["invalid"],
+    tags: ["test"],
+    sourceEntryIds: ["assistant-1"],
+    evidenceType: "userDecision",
+  };
+  const validCandidate = {
+    id: "valid-after-retry",
+    title: "Use SQLite locally",
+    content: "Local development uses SQLite.",
+    context: "The user made this database decision.",
+    keywords: ["sqlite"],
+    tags: ["decision"],
+    sourceEntryIds: ["user-1"],
+    evidenceType: "userDecision",
+  };
+  const registry: ModelRegistryPort = {
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      const firstContent = context.messages[0]?.content;
+      const input = typeof firstContent === "string"
+        ? JSON.parse(firstContent) as Record<string, unknown>
+        : {};
+      if (Array.isArray(input.entries)) {
+        if (!context.tools?.[0]) {
+          return providerText(JSON.stringify({ candidates: [validCandidate] }));
+        }
+        captureAttempts += 1;
+        if (captureAttempts === 1) {
+          return providerTool("capture-1", "submit_capture_candidates", {
+            candidates: "not-an-array",
+          });
+        }
+        return providerTool("capture-2", "submit_capture_candidates", {
+          candidates: [invalidCandidate, validCandidate],
+        });
+      }
+      const output = { action: "create", reason: "No overlap." };
+      return context.tools?.[0]
+        ? providerTool("overlap-1", context.tools[0].name, output)
+        : providerText(JSON.stringify(output));
+    },
+  };
+  const model = new PiMemoryModel(
+    registry,
+    { provider: "fake", id: "memory" },
+    { classificationTimeoutMs: 1_000 },
+  );
+  const service = new CaptureService({
+    queue,
+    client,
+    model,
+    instanceId: "instance-a",
+  });
+
+  // Act.
+  await service.enqueue(snapshot());
+  const result = await service.checkpoint();
+
+  // Assert.
+  assert.deepEqual(result.errors, []);
+  assert.equal(captureAttempts, 2);
+  const captureContexts = contexts.filter((context) => {
+    const content = context.messages[0]?.content;
+    return typeof content === "string" && content.includes('"entries"');
+  });
+  const candidateTool = captureContexts[0]?.tools?.[0];
+  assert.equal(candidateTool?.name, "submit_capture_candidates");
+  const candidateParameters = candidateTool?.parameters as {
+    properties?: {
+      candidates?: {
+        items?: {
+          properties?: Record<string, { enum?: string[]; items?: { type?: string } }>;
+        };
+      };
+    };
+  };
+  const candidateProperties = candidateParameters.properties?.candidates?.items?.properties ?? {};
+  assert.deepEqual(
+    Object.keys(candidateProperties).slice(0, 4),
+    ["id", "title", "content", "context"],
+  );
+  assert.deepEqual(candidateProperties.evidenceType?.enum, [
+    "userDecision",
+    "verifiedToolChange",
+  ]);
+  assert.equal(candidateProperties.entities?.items?.type, "object");
+  const feedback = captureContexts[1]?.messages.at(-1) as Record<string, any>;
+  assert.equal(feedback.role, "toolResult");
+  assert.equal(feedback.toolCallId, "capture-1");
+  assert.equal(feedback.isError, true);
+  assert.match(feedback.content[0].text, /candidates\.0: must be object/);
+  assert.equal(client.created.length, 1);
+  const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
+  assert.equal(job?.status, "complete");
+  assert.equal(
+    (job?.candidateOutcomes[invalidCandidate.id] as { stage?: string })?.stage,
+    "skipped",
+  );
+  assert.equal(
+    (job?.candidateOutcomes[validCandidate.id] as { stage?: string })?.stage,
+    "created",
+  );
+  const diagnostics = await service.diagnostics();
+  const diagnosticJob = diagnostics.jobs[0] as typeof diagnostics.jobs[number] & {
+    submissionRejections?: string[];
+  };
+  assert.equal(diagnosticJob.submissionRejections?.length, 1);
+  assert.match(diagnosticJob.submissionRejections?.[0] ?? "", /must be object/);
+});
+
+test("capture overlap submission retries through the durable checkpoint flow", async (t) => {
+  // Arrange: an existing overlap receives one invalid ID, then a corrected decision.
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-overlap-submission-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const client = new FakeClient();
+  const old = memory(41, {
+    title: "Database choice",
+    content: "The project uses PostgreSQL.",
+    context: "Old decision",
+    keywords: ["database"],
+    tags: ["decision"],
+    project_ids: [7],
+  });
+  client.searchResults = [old];
+  client.memories.set(old.id, old);
+  const candidate = {
+    id: "candidate-overlap-retry",
+    title: "Use SQLite",
+    content: "The project uses SQLite.",
+    context: "The user changed the database decision.",
+    keywords: ["database"],
+    tags: ["decision"],
+    sourceEntryIds: ["user-1"],
+    evidenceType: "userDecision",
+  };
+  const contexts: Context[] = [];
+  let overlapAttempts = 0;
+  const registry: ModelRegistryPort = {
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      const firstContent = context.messages[0]?.content;
+      const input = typeof firstContent === "string"
+        ? JSON.parse(firstContent) as Record<string, unknown>
+        : {};
+      if (Array.isArray(input.entries)) {
+        return providerTool("capture-1", "submit_capture_candidates", {
+          candidates: [candidate],
+        });
+      }
+      overlapAttempts += 1;
+      if (overlapAttempts === 1 && !context.tools?.length) {
+        return providerText(JSON.stringify({
+          action: "supersede",
+          conflictingMemoryId: old.id,
+          oldClaim: old.content,
+          newClaim: candidate.content,
+          reason: "The project migrated databases.",
+          sourceEntryIds: candidate.sourceEntryIds,
+        }));
+      }
+      if (overlapAttempts === 1) {
+        return providerTool("decision-1", "submit_capture_decision", {
+          action: "supersede",
+          conflictingMemoryId: old.id + 1,
+          oldClaim: old.content,
+          newClaim: candidate.content,
+          reason: "The project migrated databases.",
+          sourceEntryIds: candidate.sourceEntryIds,
+        });
+      }
+      return providerTool("decision-2", "submit_capture_decision", {
+        action: "supersede",
+        conflictingMemoryId: old.id,
+        oldClaim: old.content,
+        newClaim: candidate.content,
+        reason: "The project migrated databases.",
+        sourceEntryIds: candidate.sourceEntryIds,
+      });
+    },
+  };
+  const model = new PiMemoryModel(
+    registry,
+    { provider: "fake", id: "memory" },
+    { classificationTimeoutMs: 1_000 },
+  );
+  const service = new CaptureService({
+    queue,
+    client,
+    model,
+    instanceId: "instance-a",
+  });
+
+  // Act.
+  await service.enqueue(snapshot());
+  const result = await service.checkpoint();
+
+  // Assert.
+  assert.deepEqual(result.errors, []);
+  assert.equal(overlapAttempts, 2);
+  const overlapContexts = contexts.filter((context) => {
+    const content = context.messages[0]?.content;
+    return typeof content === "string" && content.includes('"candidate"');
+  });
+  const decisionTool = overlapContexts[0]?.tools?.[0];
+  assert.equal(decisionTool?.name, "submit_capture_decision");
+  const decisionParameters = decisionTool?.parameters as {
+    properties?: { action?: { enum?: string[] } };
+  };
+  assert.deepEqual(decisionParameters.properties?.action?.enum, [
+    "create",
+    "skip",
+    "supersede",
+    "escalate",
+  ]);
+  const feedback = overlapContexts[1]?.messages.at(-1) as Record<string, any> | undefined;
+  assert.equal(feedback?.role, "toolResult");
+  assert.equal(feedback?.toolCallId, "decision-1");
+  assert.equal(feedback?.toolName, "submit_capture_decision");
+  assert.equal(feedback?.isError, true);
+  assert.match(feedback?.content?.[0]?.text ?? "", /outside the overlap search/);
+  assert.equal(client.created.length, 1);
+  assert.deepEqual(client.superseded, [{ oldId: old.id, replacementId: 100 }]);
+  const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
+  assert.equal(job?.status, "complete");
+});
+
+test("exhausted overlap submission skips one candidate and continues siblings", async (t) => {
+  // Arrange: the first candidate never calls its tool; the second submits a valid decision.
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-overlap-exhausted-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const client = new FakeClient();
+  const old = memory(42, {
+    title: "Existing choice",
+    content: "The project uses PostgreSQL.",
+    context: "Earlier decision",
+    keywords: ["database"],
+    tags: ["decision"],
+    project_ids: [7],
+  });
+  client.searchResults = [old];
+  client.memories.set(old.id, old);
+  const candidates = [
+    {
+      id: "invalid-overlap",
+      title: "Use SQLite",
+      content: "The project uses SQLite.",
+      context: "A database decision.",
+      keywords: ["database"],
+      tags: ["decision"],
+      sourceEntryIds: ["user-1"],
+      evidenceType: "userDecision",
+    },
+    {
+      id: "valid-sibling",
+      title: "Use Redis",
+      content: "The project uses Redis for caching.",
+      context: "A cache decision.",
+      keywords: ["cache"],
+      tags: ["decision"],
+      sourceEntryIds: ["user-1"],
+      evidenceType: "userDecision",
+    },
+  ];
+  let invalidAttempts = 0;
+  let siblingAttempts = 0;
+  const registry: ModelRegistryPort = {
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      const content = context.messages[0]?.content;
+      const input = typeof content === "string"
+        ? JSON.parse(content) as Record<string, any>
+        : {};
+      if (Array.isArray(input.entries)) {
+        return providerTool("capture-1", "submit_capture_candidates", { candidates });
+      }
+      if (input.candidate?.id === "invalid-overlap") {
+        invalidAttempts += 1;
+        return providerText(JSON.stringify({ action: "skip", reason: "JSON is not a call." }));
+      }
+      siblingAttempts += 1;
+      return providerTool("decision-sibling", "submit_capture_decision", {
+        action: "create",
+        reason: "This is a separate cache decision.",
+      });
+    },
+  };
+  const service = new CaptureService({
+    queue,
+    client,
+    model: new PiMemoryModel(
+      registry,
+      { provider: "fake", id: "memory" },
+      { classificationTimeoutMs: 1_000 },
+    ),
+    instanceId: "instance-a",
+  });
+
+  // Act.
+  await service.enqueue(snapshot());
+  const result = await service.checkpoint();
+
+  // Assert.
+  assert.deepEqual(result.errors, []);
+  assert.equal(invalidAttempts, 3);
+  assert.equal(siblingAttempts, 1);
+  assert.equal(client.created.length, 1);
+  const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
+  assert.equal(job?.status, "complete");
+  assert.equal(
+    (job?.candidateOutcomes[candidates[0]!.id] as { stage?: string })?.stage,
+    "skipped",
+  );
+  assert.equal(
+    (job?.candidateOutcomes[candidates[1]!.id] as { stage?: string })?.stage,
+    "created",
+  );
+});
 
 test("CaptureService creates a novel user-evidenced candidate in the current project", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-capture-"));

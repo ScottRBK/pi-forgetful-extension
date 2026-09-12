@@ -303,8 +303,7 @@ function appendCallCountCorrection(
   if (calls.length === 0) {
     context.messages.push({
       role: "user",
-      content: `Call ${submissionName} exactly once with the review result. ` +
-        "Do not answer with JSON text.",
+      content: `Call ${submissionName} exactly once. Do not answer with JSON text.`,
       timestamp: Date.now(),
     });
     return;

@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { ModelSubmissionError } from "./contracts.ts";
 import type { DiagnosticLogger } from "./logging.ts";
 
 import type {
@@ -9,6 +12,7 @@ import type {
   Memory,
   MemoryInput,
   MemoryModelClient,
+  ModelSubmissionTool,
   WorkContext,
   CodeArtifactInput,
   DocumentInput,
@@ -137,6 +141,7 @@ export interface CaptureDiagnosticJob {
   sessionId: string;
   branchId: string;
   candidates: CaptureDiagnosticCandidate[];
+  submissionRejections?: string[];
   lastError?: string;
 }
 
@@ -210,6 +215,8 @@ const MAX_ENTRY_TEXT = 4_000;
 const MAX_CAPTURE_TEXT = 50_000;
 const MAX_MODEL_OUTPUT = 100_000;
 const MAX_MODEL_CALLS = 4;
+const MAX_SUBMISSION_REJECTIONS = 3;
+const MAX_SUBMISSION_REJECTION_CHARS = 500;
 const MAX_RESOLUTION_ENTRIES = 20;
 const MAX_SELECTED_RESOLUTION_ENTRIES = 8;
 const MEMORY_CONTEXT_MAX = 500;
@@ -221,10 +228,76 @@ const MAX_RICH_NOTES = 1_000;
 const MAX_RICH_DOCUMENT_TEXT = 12_000;
 const MAX_RICH_CODE = 12_000;
 const MAX_RICH_OUTPUT = 24_000;
+const SUBMIT_CAPTURE_CANDIDATES = "submit_capture_candidates";
+const CAPTURE_RICH_RESOURCE = Type.Object({
+  key: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  sourceEntryIds: Type.Optional(
+    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 8 }),
+  ),
+  sourceEntityKey: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  targetEntityKey: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  input: Type.Optional(Type.Object({})),
+});
+const CAPTURE_CANDIDATE = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 100 }),
+  title: Type.String({ minLength: 1, maxLength: 200 }),
+  content: Type.String({ minLength: 1, maxLength: 2_000 }),
+  context: Type.String({ minLength: 1, maxLength: 500 }),
+  keywords: Type.Array(Type.String({ maxLength: 100 }), { maxItems: 10 }),
+  tags: Type.Array(Type.String({ maxLength: 100 }), { maxItems: 10 }),
+  sourceEntryIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+    minItems: 1,
+    maxItems: 8,
+  }),
+  evidenceType: StringEnum(["userDecision", "verifiedToolChange"] as const),
+  importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+  destinationProjectId: Type.Optional(Type.Integer({ minimum: 1 })),
+  destinationProjectName: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  destinationRationale: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  sourceFiles: Type.Optional(
+    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 20 }),
+  ),
+  entities: Type.Optional(
+    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_ENTITIES }),
+  ),
+  documents: Type.Optional(
+    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_DOCUMENTS }),
+  ),
+  codeArtifacts: Type.Optional(
+    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_CODE_ARTIFACTS }),
+  ),
+  relationships: Type.Optional(
+    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_RELATIONSHIPS }),
+  ),
+});
+const CAPTURE_CANDIDATE_PARAMETERS = Type.Object({
+  candidates: Type.Array(CAPTURE_CANDIDATE, {
+    maxItems: 3,
+    description: "Candidate memories extracted from the completed turn. Use [] when none.",
+  }),
+});
+const SUBMIT_CAPTURE_DECISION = "submit_capture_decision";
+const CAPTURE_DECISION_PARAMETERS = Type.Object({
+  action: StringEnum(["create", "skip", "supersede", "escalate"] as const),
+  reason: Type.Optional(Type.String({ maxLength: 500 })),
+  conflictingMemoryId: Type.Optional(Type.Integer({ minimum: 1 })),
+  conflictingMemoryIds: Type.Optional(
+    Type.Array(Type.Integer({ minimum: 1 }), { maxItems: 8 }),
+  ),
+  memoryId: Type.Optional(Type.Integer({ minimum: 1 })),
+  oldClaim: Type.Optional(Type.String({ maxLength: 1_000 })),
+  newClaim: Type.Optional(Type.String({ maxLength: 1_000 })),
+  sourceEntryIds: Type.Optional(
+    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 8 }),
+  ),
+  partial: Type.Optional(Type.Boolean()),
+});
 const CAPTURE_POLICY_CORE = [
-  "Capture policy contract: return one JSON object with candidates, at most three.",
+  `Capture policy contract: submit exactly one ${SUBMIT_CAPTURE_CANDIDATES} tool call with ` +
+    "candidates, at most three.",
+  "Do not answer with JSON text.",
   "Capture durable decisions, verified changes, and reusable project knowledge. " +
-    "Return no candidates for routine work, acknowledgements, guesses, or temporary details.",
+    "Submit no candidates for routine work, acknowledgements, guesses, or temporary details.",
   "Each candidate has id, title, content, context (strings), keywords and tags (string arrays), " +
     "sourceEntryIds (one to eight supplied entry IDs), and evidenceType " +
     "(userDecision or verifiedToolChange). Optional importance is an integer from 1 to 10.",
@@ -242,8 +315,8 @@ const CAPTURE_POLICY_CORE = [
     "tags, aka, and optional notes. " +
     "Document input requires title, description, content, document_type, and tags. Code input " +
     "requires title, description, code, language, and tags. Keep rich arrays small and each " +
-    "document or code body under 12000 characters. Never return files or file operations.",
-  "Compact rich JSON shape: " +
+    "document or code body under 12000 characters. Never submit files or file operations.",
+  "Compact rich field shape: " +
     '{"entities":[{"key":"api","sourceEntryIds":["e1"],"input":' +
     '{"name":"API","entity_type":"System","aka":[],"tags":[],' +
     '"notes":"..."}}],"documents":[{"key":"runbook",' +
@@ -262,10 +335,11 @@ const CAPTURE_POLICY_CORE = [
     "Never invent a project. Optional sourceFiles contains only evidenced source file paths.",
 ].join(" ");
 const OVERLAP_POLICY_CORE = [
-  "Overlap policy contract: return one JSON object with " +
+  `Overlap policy contract: submit exactly one ${SUBMIT_CAPTURE_DECISION} tool call with ` +
     "action create, skip, supersede, or escalate.",
+  "Do not answer with JSON text.",
   "Use only the supplied candidate, source evidence, and destination-scoped overlap memories.",
-  "Return reason (string). Use create for novel durable knowledge and skip for an existing " +
+  "Submit reason (string). Use create for novel durable knowledge and skip for an existing " +
     "equivalent fact. Supersede only a clear, evidenced change to the same fact and context; " +
     "use escalate for an uncertain contradiction. Similarity alone is not a contradiction.",
   "For skip, memoryId may identify the overlapping memory that should receive missing rich links.",
@@ -863,7 +937,10 @@ function parseCandidates(
   maxCandidates: number,
   onCandidate?: (id: string, raw: unknown, reason?: string) => void,
 ): CandidateExtraction {
-  const response = record(value);
+  // Capture extraction is tool-only. Text that happens to contain JSON is not a fallback.
+  const response = record(
+    value && typeof value === "object" && !Array.isArray(value) ? value : undefined,
+  );
   if (!response || !Array.isArray(response.candidates))
     throw new InvalidCaptureOutput("capture model did not return candidates");
   const candidates: CaptureCandidate[] = [];
@@ -886,6 +963,39 @@ function parseCandidates(
     else skipped.push({ id, reason: validation.reason });
   }
   return { candidates, skipped };
+}
+
+function boundedSubmissionRejections(value: readonly string[]): string[] {
+  return value
+    .map((reason) => sanitizeText(reason).slice(0, MAX_SUBMISSION_REJECTION_CHARS))
+    .filter((reason) => reason.length > 0)
+    .slice(-MAX_SUBMISSION_REJECTIONS);
+}
+
+function appendSubmissionRejection(rejections: string[], reason: string): void {
+  const bounded = boundedSubmissionRejections([reason])[0];
+  if (!bounded) return;
+  rejections.push(bounded);
+  rejections.splice(0, Math.max(0, rejections.length - MAX_SUBMISSION_REJECTIONS));
+}
+
+function captureCandidateSubmission(
+  snapshot: CaptureSnapshot,
+  maxCandidates: number,
+  recordRejection: (reason: string) => void,
+): ModelSubmissionTool {
+  return {
+    name: SUBMIT_CAPTURE_CANDIDATES,
+    description: "Submit the candidate memories extracted from the completed turn.",
+    parameters: CAPTURE_CANDIDATE_PARAMETERS,
+    onRejection(reason) {
+      recordRejection(reason);
+    },
+    validate(input: unknown): unknown {
+      parseCandidates(input, snapshot, maxCandidates);
+      return input;
+    },
+  };
 }
 
 function decisionMemoryId(
@@ -957,7 +1067,10 @@ function decisionPartial(response: Record<string, unknown>): boolean {
 }
 
 function parseDecision(value: unknown): CaptureDecision {
-  const response = record(value);
+  // Overlap decisions are tool-only. Text that happens to contain JSON is not a fallback.
+  const response = record(
+    value && typeof value === "object" && !Array.isArray(value) ? value : undefined,
+  );
   if (!response)
     throw new InvalidCaptureOutput(
       "overlap model did not return a decision object",
@@ -1522,11 +1635,11 @@ export class CaptureService {
     return [destination];
   }
 
-  private async validateDecision(
+  private validateDecision(
     decision: CaptureDecision,
     candidate: CaptureCandidate,
     overlaps: Memory[],
-  ): Promise<void> {
+  ): void {
     const overlapIds = new Set(overlaps.map((memory) => memory.id));
     if (decision.action === "supersede" || decision.action === "escalate") {
       const ids = decisionConflictIds(decision);
@@ -1894,36 +2007,91 @@ export class CaptureService {
     const currentJob = await this.queue.checkpoint(job.id, {
       callCount: job.callCount + 1,
     });
-    const response = await this.model.complete({
-      purpose: "overlap",
-      diagnosticContext: this.correlation(currentJob, candidate.id),
-      policy: this.policyFor(currentJob.snapshot, "overlap"),
-      input: {
-        candidate: overlapCandidate(candidate),
-        destinationProjectId: destination,
-        overlaps: sanitizeValue(overlaps),
-        evidenceEntries: sourceEvidence(candidate, currentJob.snapshot).map(
-          (entry) => ({
-            id: entry.id,
-            role: entry.role,
-            text: entry.text,
-            ...(entry.toolName ? { toolName: entry.toolName } : {}),
-          }),
-        ),
-        modelVersion: currentJob.snapshot.modelVersion,
+    const rejectionReasons = boundedSubmissionRejections(
+      currentJob.submissionRejections ?? [],
+    );
+    const submission: ModelSubmissionTool = {
+      name: SUBMIT_CAPTURE_DECISION,
+      description: "Submit the overlap decision for the captured candidate.",
+      parameters: CAPTURE_DECISION_PARAMETERS,
+      onRejection: (reason) => {
+        appendSubmissionRejection(rejectionReasons, reason);
+        this.emit("debug", "overlap_submission_rejected", {
+          ...this.correlation(currentJob, candidate.id),
+          reason: boundedSubmissionRejections([reason])[0],
+        });
       },
-    });
+      validate: (input) => {
+        const decision = parseDecision(input);
+        this.validateDecision(decision, candidate, overlaps);
+        return input;
+      },
+    };
+    const persistRejections = async (): Promise<QueueJob> => {
+      if (rejectionReasons.length === 0) return currentJob;
+      try {
+        return await this.queue.checkpoint(currentJob.id, {
+          submissionRejections: rejectionReasons,
+        });
+      } catch (error) {
+        this.emit("debug", "overlap_submission_rejection_checkpoint_failed", {
+          ...this.correlation(currentJob, candidate.id),
+          error: scrubError(error),
+        });
+        return currentJob;
+      }
+    };
+    const input = {
+      candidate: overlapCandidate(candidate),
+      destinationProjectId: destination,
+      overlaps: sanitizeValue(overlaps),
+      evidenceEntries: sourceEvidence(candidate, currentJob.snapshot).map(
+        (entry) => ({
+          id: entry.id,
+          role: entry.role,
+          text: entry.text,
+          ...(entry.toolName ? { toolName: entry.toolName } : {}),
+        }),
+      ),
+      modelVersion: currentJob.snapshot.modelVersion,
+    };
+    let response: unknown;
+    try {
+      response = await this.model.complete({
+        purpose: "overlap",
+        diagnosticContext: this.correlation(currentJob, candidate.id),
+        policy: this.policyFor(currentJob.snapshot, "overlap"),
+        input,
+        submission,
+      });
+    } catch (error) {
+      const rejectedJob = await persistRejections();
+      if (!(error instanceof ModelSubmissionError)) throw error;
+      const reason = rejectionReasons.at(-1) ?? error.message;
+      this.emit("debug", "overlap_rejected", {
+        ...this.correlation(job, candidate.id), reason,
+        destinationProjectId: destination, memoryIds: overlaps.map((memory) => memory.id),
+      });
+      const skipped = await this.checkpointOutcome(rejectedJob, candidate.id, {
+        stage: "skipped",
+        action: "skip",
+        reason,
+        destinationProjectId: destination,
+      });
+      return { status: "skipped", job: skipped };
+    }
     let decision: CaptureDecision;
     try {
       decision = parseDecision(response);
-      await this.validateDecision(decision, candidate, overlaps);
+      this.validateDecision(decision, candidate, overlaps);
     } catch (error) {
       if (!(error instanceof InvalidCaptureOutput)) throw error;
+      const rejectedJob = await persistRejections();
       this.emit("debug", "overlap_rejected", {
         ...this.correlation(job, candidate.id), response, reason: error.message,
         destinationProjectId: destination, memoryIds: overlaps.map((memory) => memory.id),
       });
-      const skipped = await this.checkpointOutcome(currentJob, candidate.id, {
+      const skipped = await this.checkpointOutcome(rejectedJob, candidate.id, {
         stage: "skipped",
         action: "skip",
         reason: error.message,
@@ -1939,7 +2107,7 @@ export class CaptureService {
     this.emit("debug", "overlap_decision", {
       ...this.correlation(job, candidate.id), decision, destinationProjectId: destination,
     });
-    const decidedJob = await this.checkpointOutcome(currentJob, candidate.id, {
+    const decidedJob = await this.checkpointOutcome(await persistRejections(), candidate.id, {
       stage: "decided",
       candidate,
       destinationProjectId: destination,
@@ -2242,25 +2410,57 @@ export class CaptureService {
     const currentJob = await this.queue.checkpoint(job.id, {
       callCount: job.callCount + 1,
     });
-    const response = await this.model.complete({
-      purpose: "capture",
-      diagnosticContext: this.correlation(currentJob),
-      policy: this.policyFor(currentJob.snapshot, "capture"),
-      input: {
-        context: {
-          cwd: sanitizeText(currentJob.snapshot.context.cwd).slice(0, 500),
-          repoName: currentJob.snapshot.context.repoName,
-          project: currentJob.snapshot.context.project,
-          sessionId: currentJob.snapshot.context.sessionId,
-          branchId: currentJob.snapshot.context.branchId,
-        },
-        projects: (
-          currentJob.snapshot.context as WorkContext & { projects?: unknown[] }
-        ).projects?.slice(0, 100),
-        entries: currentJob.snapshot.entries,
-        modelVersion: currentJob.snapshot.modelVersion,
+    const rejectionReasons = boundedSubmissionRejections(
+      currentJob.submissionRejections ?? [],
+    );
+    const submission = captureCandidateSubmission(
+      currentJob.snapshot,
+      this.maxCandidates,
+      (reason) => {
+        appendSubmissionRejection(rejectionReasons, reason);
+        this.emit("debug", "candidate_submission_rejected", {
+          ...this.correlation(currentJob), reason: boundedSubmissionRejections([reason])[0],
+        });
       },
-    });
+    );
+    const persistRejections = async (): Promise<void> => {
+      if (rejectionReasons.length === 0) return;
+      try {
+        await this.queue.checkpoint(currentJob.id, {
+          submissionRejections: rejectionReasons,
+        });
+      } catch (error) {
+        this.emit("debug", "candidate_submission_rejection_checkpoint_failed", {
+          ...this.correlation(currentJob), error: scrubError(error),
+        });
+      }
+    };
+    let response: unknown;
+    try {
+      response = await this.model.complete({
+        purpose: "capture",
+        diagnosticContext: this.correlation(currentJob),
+        policy: this.policyFor(currentJob.snapshot, "capture"),
+        input: {
+          context: {
+            cwd: sanitizeText(currentJob.snapshot.context.cwd).slice(0, 500),
+            repoName: currentJob.snapshot.context.repoName,
+            project: currentJob.snapshot.context.project,
+            sessionId: currentJob.snapshot.context.sessionId,
+            branchId: currentJob.snapshot.context.branchId,
+          },
+          projects: (
+            currentJob.snapshot.context as WorkContext & { projects?: unknown[] }
+          ).projects?.slice(0, 100),
+          entries: currentJob.snapshot.entries,
+          modelVersion: currentJob.snapshot.modelVersion,
+        },
+        submission,
+      });
+    } catch (error) {
+      await persistRejections();
+      throw error;
+    }
     const extraction = parseCandidates(
       response,
       currentJob.snapshot,
@@ -2286,6 +2486,9 @@ export class CaptureService {
     );
     const extractedJob = await this.queue.checkpoint(currentJob.id, {
       extractedCandidates: extraction.candidates,
+      ...(rejectionReasons.length > 0
+        ? { submissionRejections: rejectionReasons }
+        : {}),
       candidateOutcomes: Object.fromEntries([
         ...extraction.candidates.map(
           (candidate) => [candidate.id, { stage: "extracted" }] as const,
@@ -2624,6 +2827,9 @@ export class CaptureService {
         sessionId: job.snapshot.context.sessionId,
         branchId: job.snapshot.context.branchId,
         candidates,
+        ...(job.submissionRejections?.length
+          ? { submissionRejections: boundedSubmissionRejections(job.submissionRejections) }
+          : {}),
         ...(job.lastError ? { lastError: scrubError(job.lastError) } : {}),
       };
     });

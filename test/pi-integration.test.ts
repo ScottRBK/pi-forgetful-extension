@@ -186,6 +186,8 @@ test(
           entities: [],
         };
         let reviewDecision = false;
+        let captureDecision = false;
+        let overlapDecision = false;
         if (model.id === "memory") {
           const last = context.messages.at(-1);
           const raw = last?.content;
@@ -199,6 +201,14 @@ test(
                     .join("")
                 : "{}";
           const input = JSON.parse(inputText) as Record<string, unknown>;
+          captureDecision = Boolean(
+            Array.isArray(input.entries) &&
+              context.tools?.some((tool) => tool.name === "submit_capture_candidates"),
+          );
+          overlapDecision = Boolean(
+            input.candidate &&
+              context.tools?.some((tool) => tool.name === "submit_capture_decision"),
+          );
           if (input.availableSources) {
             reviewDecision = true;
             const prompt = (input.work as { prompt: string }).prompt;
@@ -310,13 +320,29 @@ test(
           model: model.id,
           content: reviewDecision
             ? [{
-              type: "toolCall",
-              id: "review-1",
-              name: "submit_recall_review",
-              arguments: decision as Record<string, any>,
-            }]
-            : [{ type: "text", text }],
-          stopReason: reviewDecision ? "toolUse" : "stop",
+                type: "toolCall",
+                id: "review-1",
+                name: "submit_recall_review",
+                arguments: decision as Record<string, any>,
+              }]
+            : captureDecision
+              ? [{
+                  type: "toolCall",
+                  id: "capture-1",
+                  name: "submit_capture_candidates",
+                  arguments: decision as Record<string, any>,
+                }]
+              : overlapDecision
+                ? [{
+                    type: "toolCall",
+                    id: "decision-1",
+                    name: "submit_capture_decision",
+                    arguments: decision as Record<string, any>,
+                  }]
+              : [{ type: "text", text }],
+          stopReason: reviewDecision || captureDecision || overlapDecision
+            ? "toolUse"
+            : "stop",
           timestamp: Date.now(),
           usage: {
             input: 1,

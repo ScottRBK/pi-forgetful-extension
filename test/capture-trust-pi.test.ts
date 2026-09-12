@@ -167,13 +167,32 @@ test(
               };
             }
           }
+          const captureDecision = model.id === "memory" &&
+            context.tools?.some((tool) => tool.name === "submit_capture_candidates");
+          const overlapDecision = model.id === "memory" &&
+            Boolean(input.candidate) &&
+            context.tools?.some((tool) => tool.name === "submit_capture_decision");
           const message: AssistantMessage = {
             role: "assistant",
             api: "faux",
             provider: "test",
             model: model.id,
-            content: [{ type: "text", text: JSON.stringify(output) }],
-            stopReason: "stop",
+            content: overlapDecision
+              ? [{
+                  type: "toolCall",
+                  id: "decision-1",
+                  name: "submit_capture_decision",
+                  arguments: output as Record<string, any>,
+                }]
+              : captureDecision
+              ? [{
+                  type: "toolCall",
+                  id: "capture-1",
+                  name: "submit_capture_candidates",
+                  arguments: output as Record<string, any>,
+                }]
+              : [{ type: "text", text: JSON.stringify(output) }],
+            stopReason: captureDecision || overlapDecision ? "toolUse" : "stop",
             timestamp: Date.now(),
             usage: {
               input: 1,
@@ -184,7 +203,11 @@ test(
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             },
           };
-          stream.push({ type: "done", reason: "stop", message });
+          stream.push({
+            type: "done",
+            reason: captureDecision || overlapDecision ? "toolUse" : "stop",
+            message,
+          });
           stream.end(message);
         });
         return stream;

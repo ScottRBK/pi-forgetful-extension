@@ -325,10 +325,17 @@ and record submission failures, recovery, and summaries.
 ### Capture
 
 After a successful settled run, the extension snapshots stable session and branch entry IDs and
-enqueues the bounded evidence. A live worker extracts zero to three candidates, validates evidence
-and destinations, checks overlap in the destination project, then creates novel knowledge,
-supersedes a clearly outdated memory, or preserves an uncertain conflict for the originating
-session. Queue records include per-candidate outcomes so partial writes can be retried safely.
+enqueues the bounded evidence. A live worker extracts zero to three candidates through the private
+`submit_capture_candidates` tool, validates evidence and destinations, and checks overlap in the
+destination project. The overlap model submits `create`, `skip`, `supersede`, or `escalate` through
+the private `submit_capture_decision` tool. The worker then creates novel knowledge, supersedes a
+clearly outdated memory, or preserves an uncertain conflict for the originating session. Queue
+records include per-candidate outcomes so partial writes can be retried safely.
+
+Each private capture tool allows at most three attempts within its existing model request and
+15-second deadline. Invalid calls receive bounded error feedback so the model can correct them;
+text-only replies are not parsed as fallback JSON. Only original tool arguments that pass schema
+and capture-domain validation are accepted. Rejection details remain bounded and redacted.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
 a memory. It reuses existing records and checkpoints partial work for retry. Automatic capture
