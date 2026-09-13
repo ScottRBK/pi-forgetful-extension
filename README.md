@@ -285,9 +285,9 @@ its separate, bounded context budget.
 
 ### Recall
 
-The memory model returns a validated plan with bounded topic queries, intent, entities, and an
-optional scope request. The extension starts that job without holding the main model call. The
-automatic hook starts with pending state and a stable protocol; if the planner has already
+The memory model returns a validated plan with bounded topic queries, intent, entities, and
+repository hints. The extension starts that job without holding the main model call. The automatic
+hook starts with pending state and a stable protocol; if the planner has already
 advanced, the latest boundary renders retrieval-underway state instead. It then renders either
 bounded untrusted context or an explicit no-context or failure terminal state. The extension
 resolves global or strict project scope, searches Forgetful, then asks the same memory model to
