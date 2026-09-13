@@ -294,8 +294,8 @@ resolves global or strict project scope, searches Forgetful, then asks the same 
 review bounded results against the current question and session context. The model rejects
 unrelated matches and submits a concise summary with source IDs through a private
 `submit_recall_review` tool. Only that summary and validated references reach the main agent, not
-raw results or attachments. A planner-requested scope change requires explicit approval for that
-operation and does not change the persisted preference.
+raw results or attachments. The configured recall scope is authoritative; the planner cannot
+change it for an individual operation.
 
 Recall can follow entities, relationships and supporting documents or code artifacts within its
 time and output limits. The active agent can explicitly open supporting records for more detail,

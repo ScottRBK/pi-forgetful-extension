@@ -1896,57 +1896,73 @@ for (const path of ["normal", "queued", "foreground"]) {
   }
 }
 
-for (const clockJumpMs of [-60_000, 60_000]) {
-  test(`scope approval preserves active recall budget after a ${clockJumpMs} ms clock jump`,
-    async (t) => {
-      // Arrange: planning uses half the budget; user approval takes longer than the whole budget.
-      const wallNow = Date.now.bind(Date);
-      let approvalElapsedMs = 0;
-      let reviewStarted = false;
-      const fixture = await recallReviewHarness((_input, signal) => {
-        reviewStarted = true;
-        return new Promise<never>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        });
-      }, {
-        deadlineMs: 400,
-        modelTimeoutMs: 1_500,
-        plan: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          t.mock.method(Date, "now", () => wallNow() + clockJumpMs);
-          return {
-            search: true, queries: ["MiniCPM context size"], queryIntent: "Serving limits",
-            entities: [], scopeOverride: { scope: "project", reason: "Use local settings." },
-          };
+for (const configured of ["global", "project"] as const) {
+  test(`automatic recall keeps configured ${configured} scope without an approval dialog`,
+    async () => {
+      // Arrange: use a normal plan and observe the scope sent to Forgetful.
+      let confirmations = 0;
+      const searches: Array<Record<string, unknown>> = [];
+      const fixture = await recallReviewHarness(
+        () => ({
+          summary: "Serving limit is 4096 tokens.",
+          memoryIds: [42],
+          reason: "Relevant.",
+        }),
+        {
+          plan: () => ({
+            search: true,
+            queries: ["MiniCPM context size"],
+            queryIntent: "Serving limits",
+            entities: [],
+          }),
+          fetchImpl: async (_url, init) => {
+            searches.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+            return new Response(JSON.stringify({
+              primary_memories: [{
+                id: 42,
+                title: "MiniCPM serving",
+                content: "VLLM_MAX_MODEL_LEN=4096",
+                context: "Local serving configuration",
+                project_ids: [7],
+                keywords: [],
+                tags: [],
+                is_obsolete: false,
+              }],
+              linked_memories: [],
+            }));
+          },
         },
-      });
+      );
       fixture.ctx.ui.confirm = async () => {
-        const startedAt = performance.now();
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        approvalElapsedMs = performance.now() - startedAt;
+        confirmations += 1;
         return true;
       };
       try {
+        if (configured === "project") {
+          const settingsDirectory = join(fixture.root, ".pi", "forgetful");
+          await mkdir(settingsDirectory, { recursive: true });
+          await writeFile(
+            join(settingsDirectory, "settings.json"),
+            JSON.stringify({ scope: "project" }),
+          );
+        }
         await fixture.emit("session_start", { type: "session_start", reason: "new" });
 
-        // Act: approve the narrower scope, then let review exhaust the remaining active budget.
-        const startedAt = performance.now();
+        // Act: run recall using the default or persisted project-local setting.
         await fixture.emit("before_agent_start", {
           type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
         });
         await waitForRecallTerminal(fixture);
-        const activeElapsedMs = performance.now() - startedAt - approvalElapsedMs;
 
-        // Assert: approval time is excluded, but planning time is not refunded on resume.
-        const debug = fixture.notifications.join("\n");
-        assert.equal(reviewStarted, true, debug);
-        assert.ok(approvalElapsedMs >= 550);
-        assert.match(debug,
-          /recall review: TimeoutError: Overall recall deadline exceeded \(400 ms/);
-        assert.ok(activeElapsedMs >= 350 && activeElapsedMs < 500,
-          `Active recall took ${activeElapsedMs} ms.\n${debug}`);
+        // Assert: the configured scope wins without asking the user.
+        assert.equal(confirmations, 0);
+        assert.equal(searches.length, 1);
+        assert.equal(searches[0]?.strict_project_filter, configured === "project");
+        assert.deepEqual(
+          searches[0]?.project_ids,
+          configured === "project" ? [7] : undefined,
+        );
       } finally {
-        t.mock.restoreAll();
         await fixture.cleanup();
       }
     });

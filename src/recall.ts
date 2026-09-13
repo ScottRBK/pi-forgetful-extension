@@ -124,7 +124,7 @@ export interface RecallRequest {
   recallPolicy: string;
   signal?: AbortSignal;
   deadlineMs?: number;
-  authorizeScope?: (scope: Scope, reason: string) => Promise<boolean>;
+  authorizeProject?: (projectId: number, reason: string) => Promise<boolean>;
   /** Existing project choices supplied by the active Pi work context. */
   projects?: Project[];
   sessionContext?: EvidenceEntry[];
@@ -166,8 +166,6 @@ export interface RecallPlan {
   entities: string[];
   /** Optional planner signal for repository-aware global query construction. */
   repositorySpecific?: boolean;
-  scope?: Scope;
-  scopeReason?: string;
   projectId?: number;
 }
 
@@ -190,12 +188,6 @@ interface DeadlineSignal {
 interface ScopeResolution {
   projectId?: number;
   reason?: string;
-}
-
-interface PlannedScope {
-  scope: Scope;
-  reason?: string;
-  blockedReason?: string;
 }
 
 interface SearchOutcome {
@@ -229,10 +221,6 @@ function positiveInteger(value: unknown, field: string): number {
     throw new Error(`Planner field ${field} must be a positive integer`);
   }
   return value;
-}
-
-function isScope(value: unknown): value is Scope {
-  return value === "global" || value === "project";
 }
 
 function abortError(): Error {
@@ -463,7 +451,7 @@ function parseEntities(value: unknown): string[] {
   );
 }
 
-function parsePlan(value: unknown, currentScope: Scope): RecallPlan {
+function parsePlan(value: unknown): RecallPlan {
   if (!isObject(value) || typeof value.search !== "boolean") {
     throw new Error("Planner output must contain a boolean search field");
   }
@@ -487,31 +475,6 @@ function parsePlan(value: unknown, currentScope: Scope): RecallPlan {
     ...(repositorySpecific === undefined ? {} : { repositorySpecific }),
   };
 
-  const override = value.scopeOverride;
-  let requestedScope: unknown;
-  let scopeReason: unknown;
-  if (override !== undefined && !isObject(override)) {
-    throw new Error("Planner scopeOverride must be an object");
-  }
-  if (isObject(override)) {
-    if (!("scope" in override) || !("reason" in override)) {
-      throw new Error("Planner scopeOverride requires scope and reason");
-    }
-    requestedScope = override.scope;
-    scopeReason = override.reason;
-  }
-  if (requestedScope !== undefined) {
-    if (!isScope(requestedScope)) {
-      throw new Error("Planner scope override must be global or project");
-    }
-    const reason = boundedString(
-      scopeReason,
-      "scopeOverride.reason",
-      MAX_INTENT_CHARS,
-    );
-    if (requestedScope !== currentScope) plan.scope = requestedScope;
-    plan.scopeReason = reason;
-  }
   const projectId = value.projectId ?? value.project_id;
   if (projectId !== undefined)
     plan.projectId = positiveInteger(projectId, "projectId");
@@ -824,23 +787,22 @@ export class RecallService {
         deadline.signal,
       ).then((value) => {
         stage = "plan validation";
-        return parsePlan(value, request.scope);
+        return parsePlan(value);
       });
       this.ensureLive(deadline);
       request.onPlan?.(plan);
       stage = "scope resolution";
-      const plannedScope = await this.applyScopeOverrides(
+      const scope = request.scope;
+      if (!plan.search) {
+        this.recordSuccess();
+        return this.empty(scope, "planner-no-search");
+      }
+      const blockedReason = await this.authorizeProjectSelection(
         request,
         deadline,
         plan,
       );
-      const { scope, reason } = plannedScope;
-      if (!plan.search) {
-        this.recordSuccess();
-        return this.empty(scope, reason ?? "planner-no-search");
-      }
-      if (plannedScope.blockedReason)
-        return this.empty(scope, plannedScope.blockedReason);
+      if (blockedReason) return this.empty(scope, blockedReason);
       const resolution = await raceAbort(
         this.resolveScope(
           request.context,
@@ -879,11 +841,11 @@ export class RecallService {
         deadline.signal,
       );
       if (valid.length === 0 && !expansion?.text) {
-        return this.finishEmptySearch(search, scope, reason, debugTrace);
+        return this.finishEmptySearch(search, scope, debugTrace);
       }
       const formatted = formatRecall(valid, [], "", expansion);
       const candidates = this.resultWithKnowledge(
-        { text: formatted.text, memoryIds: formatted.ids, scope, reason,
+        { text: formatted.text, memoryIds: formatted.ids, scope,
           diagnostic: search.diagnostic },
         expansion,
         formatted.knowledgeText,
@@ -975,13 +937,12 @@ export class RecallService {
   private finishEmptySearch(
     search: SearchOutcome,
     scope: Scope,
-    reason: string | undefined,
     debugTrace: string,
   ): RecallResult {
     if (search.failed) this.recordFailure();
     else this.recordSuccess();
     return {
-      ...this.empty(scope, search.failed ? "recall-unavailable" : (reason ?? "no-matches")),
+      ...this.empty(scope, search.failed ? "recall-unavailable" : "no-matches"),
       diagnostic: search.diagnostic,
       debugTrace,
     };
@@ -1223,52 +1184,26 @@ export class RecallService {
     return input;
   }
 
-  private async authorizeScope(
-    request: RecallRequest,
-    deadline: DeadlineSignal,
-    scope: Scope,
-    reason: string,
-  ): Promise<boolean> {
-    if (!request.authorizeScope) return false;
-    deadline.pause();
-    try {
-      return await raceAbort(
-        request.authorizeScope(scope, reason),
-        deadline.signal,
-      );
-    } finally {
-      deadline.resume();
-    }
-  }
-
-  private async applyScopeOverrides(
+  private async authorizeProjectSelection(
     request: RecallRequest,
     deadline: DeadlineSignal,
     plan: RecallPlan,
-  ): Promise<PlannedScope> {
-    let scope = request.scope;
-    let reason: string | undefined;
-    if (plan.scope && plan.scope !== scope) {
-      const authorized = await this.authorizeScope(
-        request,
-        deadline,
-        plan.scope,
-        plan.scopeReason ?? "Planner requested a different recall scope",
+  ): Promise<string | undefined> {
+    if (!this.requestsDifferentProject(request, plan, request.scope)) return undefined;
+    if (!request.authorizeProject) return "project-override-declined";
+    deadline.pause();
+    try {
+      const authorized = await raceAbort(
+        request.authorizeProject(
+          plan.projectId!,
+          `Use existing project ${plan.projectId} instead of the current work project`,
+        ),
+        deadline.signal,
       );
-      if (authorized) scope = plan.scope;
-      else reason = "scope-override-declined";
+      return authorized ? undefined : "project-override-declined";
+    } finally {
+      deadline.resume();
     }
-    if (!this.requestsDifferentProject(request, plan, scope))
-      return { scope, reason };
-    const authorized = await this.authorizeScope(
-      request,
-      deadline,
-      "project",
-      `Planner requested existing project ${plan.projectId} instead of the current work project`,
-    );
-    return authorized
-      ? { scope, reason }
-      : { scope, reason, blockedReason: "project-override-declined" };
   }
 
   private requestsDifferentProject(

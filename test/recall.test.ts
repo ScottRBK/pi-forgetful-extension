@@ -415,17 +415,13 @@ describe("RecallService", () => {
     assert.equal(client.searches[0]?.strict_project_filter, false);
   });
 
-  it("authorizes a planner scope override and sends strict project filtering", async () => {
+  it("uses configured global scope", async () => {
     const client = new FakeForgetfulClient();
     const model = new FakeModel({
       search: true,
       queries: ["project decision"],
       queryIntent: "Find project decisions",
       entities: [],
-      scopeOverride: {
-        scope: "project",
-        reason: "The prompt names this repository.",
-      },
     });
     const service = new RecallService(client, model);
 
@@ -435,43 +431,34 @@ describe("RecallService", () => {
       scope: "global",
       classificationPolicy: "policy",
       recallPolicy: "policy",
-      authorizeScope: async (scope, reason) => {
-        assert.equal(scope, "project");
-        assert.match(reason, /repository/);
-        return true;
-      },
     });
 
-    assert.equal(result.scope, "project");
-    assert.equal(client.searches[0].strict_project_filter, true);
-    assert.deepEqual(client.searches[0].project_ids, [3]);
+    assert.equal(result.scope, "global");
+    assert.equal(result.reason, undefined);
+    assert.equal(client.searches[0].strict_project_filter, false);
+    assert.equal(client.searches[0].project_ids, undefined);
   });
 
-  it("never broadens scope when the planner override is not authorized", async () => {
+  it("uses configured project scope", async () => {
     const client = new FakeForgetfulClient();
     const model = new FakeModel({
       search: true,
-      queries: ["global context"],
-      queryIntent: "Find global context",
+      queries: ["project context"],
+      queryIntent: "Find project context",
       entities: [],
-      scopeOverride: {
-        scope: "global",
-        reason: "The user asked for a cross-project comparison.",
-      },
     });
     const service = new RecallService(client, model);
 
     const result = await service.recall({
-      prompt: "Compare this with other projects",
+      prompt: "What did we decide in this project?",
       context,
       scope: "project",
       classificationPolicy: "policy",
       recallPolicy: "policy",
-      authorizeScope: async () => false,
     });
 
     assert.equal(result.scope, "project");
-    assert.equal(result.reason, "scope-override-declined");
+    assert.equal(result.reason, undefined);
     assert.equal(client.searches[0].strict_project_filter, true);
     assert.deepEqual(client.searches[0].project_ids, [3]);
   });
@@ -591,28 +578,33 @@ describe("RecallService", () => {
     assert.equal(model.calls, 2);
   });
 
-  it("pauses the network deadline while scope authorization is pending", async () => {
-    const client = new FakeForgetfulClient();
+  it("pauses the network deadline while alternate-project authorization is pending", async () => {
+    class AlternateProjectClient extends FakeForgetfulClient {
+      override async search(request: SearchRequest): Promise<Memory[]> {
+        this.searches.push(request);
+        return [{ ...memory, project_ids: [9] }];
+      }
+    }
+    const client = new AlternateProjectClient();
     const model = new FakeModel({
       search: true,
       queries: ["project decision"],
       queryIntent: "Find project decisions",
       entities: [],
-      scopeOverride: {
-        scope: "project",
-        reason: "The prompt names this repository.",
-      },
+      projectId: 9,
     });
     const service = new RecallService(client, model);
 
     const result = await service.recall({
       prompt: "What project decision did we make?",
       context,
-      scope: "global",
+      projects: [{ id: 9, name: "Other project", repo_name: "owner/other" }],
+      scope: "project",
       classificationPolicy: "policy",
       recallPolicy: "policy",
       deadlineMs: 20,
-      authorizeScope: async () => {
+      authorizeProject: async (projectId) => {
+        assert.equal(projectId, 9);
         await new Promise((resolve) => setTimeout(resolve, 40));
         return true;
       },

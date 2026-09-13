@@ -74,8 +74,6 @@ No SonarQube scan was requested or run for this change.
 The isolated tmux run loaded this checkout explicitly, used synthetic memories, and disabled
 capture. It displayed `Review attempts: 1`, the relevant facts, and `PI_REVIEW_TOOL_OK`.
 Automatic recall took 4,042 ms in the final TUI run. Temporary sessions and servers were removed.
-An earlier TUI attempt stopped at a legitimate scope-override approval dialog; the rerun explicitly
-requested global, cross-project recall rather than bypassing approval.
 
 - `npm run check`: 265 passed, 31 skipped (30 optional REST tests and the paid live test).
 - Serial suite with `FORGETFUL_TEST_SOURCE`: 295 passed, only the paid live test skipped.
@@ -98,5 +96,4 @@ Local artifacts, deliberately ignored by Git:
 - `test-results/recall-submission-live-refined-first-batch.json`: first refined batch.
 - `test-results/recall-submission-pre-review-batch.log`: the passing 33-run ordinary batch.
 - `test-results/recall-submission-tui.txt`: final TUI capture.
-- `test-results/recall-submission-tui-scope-dialog.txt`: initial approval-dialog run.
 - `test-results/grok-recall-submission-review.md`: Grok's full review.

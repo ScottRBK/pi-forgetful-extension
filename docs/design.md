@@ -98,9 +98,8 @@ The following choices are intentional for the first implementation:
   recall skips with setup guidance. Global recall can still run without a project mapping.
 - The effective recall scope defaults to global. An explicit choice is persisted per repository
   in `.pi/forgetful/settings.json` and is reloaded whenever the project is revisited.
-- The recall planner may request a scope different from the persisted setting. The extension must
-  obtain explicit user authorization before applying that override. Authorization is for the
-  current operation unless the user separately changes the persisted setting.
+- The persisted recall scope is authoritative. The recall planner cannot change it for an
+  individual operation; the user changes it through the scope command or project settings.
 - HTTP is the only Forgetful transport in the MVP. Application services depend on a
   transport-neutral `ForgetfulClient` port so a CLI adapter can be added later without changing
   the core services or policies.
@@ -161,11 +160,9 @@ smaller failure surface.
    - `search`: boolean;
    - one or two topic queries;
    - query intent;
-   - zero or more entity names;
-   - an optional project/global scope override request and rationale.
-3. Resolve the effective scope from the persisted project setting. If the planner requests a
-   different scope, ask the user for explicit authorization before applying it. A declined
-   request uses the persisted setting, and the planner must never change that setting directly.
+   - zero or more entity names.
+3. Resolve the effective scope from the persisted project setting. The planner cannot replace
+   this user-controlled scope for an individual operation.
 4. Search a warm Forgetful HTTP service. When the plan selects retrieval, the next model boundary
    renders retrieval-underway state if the result is not ready; this passive update does not steer
    or trigger a model turn.
@@ -223,10 +220,10 @@ Project-scoped recall is opt-in through the scope command or the persistent per-
 
 `/forgetful scope` reports the effective scope and its source. The scope commands update
 `.pi/forgetful/settings.json` so the choice is retained when the project is revisited. If the
-settings file is absent, global scope is used. If the scope setting is malformed, reject the
-override, surface configuration guidance, and use the global default; never interpret malformed
-data as project scope. A planner-requested override does not update this file unless the user
-explicitly chooses to persist the new scope.
+settings file is absent, global scope is used. If the scope setting is malformed, ignore it,
+surface configuration guidance, and use the global default; never interpret malformed data as
+project scope. Only the user-controlled scope command or a direct settings edit changes
+this file.
 
 If project setup is missing or invalid, project-scoped recall skips and provides setup guidance.
 It must never silently fall back to global search. Debug output shows the effective recall scope
@@ -594,10 +591,8 @@ application services, scope policy, prompt policy, or capture queue.
 - Pi exits with capture pending: preserve durable work for later recovery; post-exit completion
   is deferred beyond MVP;
 - persisted scope setting is absent: use global scope;
-- persisted scope setting is malformed: reject the override, surface configuration guidance, and
-  use global scope.
-- planner requests a scope override: ask for authorization; if declined, continue with the
-  persisted scope without changing it.
+- persisted scope setting is malformed: ignore the malformed setting, surface configuration
+  guidance, and use global scope.
 
 ## Delivery slices
 
@@ -634,9 +629,9 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    creates or ordered supersession, and retains uncertain conflicts. Invalid decisions receive
    bounded correction feedback. A stale decision never knowingly changes a newer memory.
 6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
-   and project choices are loaded per repository; planner-requested overrides require explicit
-   authorization; project requests set `strict_project_filter: true` and use the resolved
-   numeric project ID, while returned-memory filtering remains a Forgetful responsibility.
+   and project choices are loaded per repository and cannot be replaced by the planner; project
+   requests set `strict_project_filter: true` and use the resolved numeric project ID, while
+   returned-memory filtering remains a Forgetful responsibility.
    Capture defaults to the current project independently of recall scope; an agent-selected
    existing destination needs no separate approval and does not change persisted recall scope.
 7. **Capture lifecycle seam**: `agent_settled` snapshots and durably enqueues quickly; watermark,
@@ -681,8 +676,8 @@ intelligence. For example:
 - restart with a pending capture record and assert recovery processes the fixed snapshot once;
 - open a fresh repository and assert global scope is used, then change the scope and revisit the
   repository to assert `.pi/forgetful/settings.json` restores the choice;
-- request a scope override, assert authorization is required, and verify a declined request
-  leaves the persisted scope unchanged;
+- assert automatic recall uses the configured global or project scope without opening an
+  approval dialog;
 - document, rather than deny, the accepted race/retry behaviour of query-before-create.
 
 For the session handoff, verify that an escalation reaches the originating session at
