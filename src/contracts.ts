@@ -179,6 +179,7 @@ export interface SearchRequest {
 
 export interface ForgetfulClient {
   knowledge?: KnowledgeClient;
+  getMemoryEntityIds?(id: number, signal?: AbortSignal): Promise<number[]>;
   search(request: SearchRequest, signal?: AbortSignal): Promise<Memory[]>;
   /** Query memory while retaining the server's grouped result and budget metadata. */
   queryMemory?(request: SearchRequest, signal?: AbortSignal): Promise<MemorySearchResult>;

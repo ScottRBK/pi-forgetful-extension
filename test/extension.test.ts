@@ -4688,3 +4688,30 @@ test("knowledge read renders a compact summary and expands the full result", asy
     await fixture.cleanup();
   }
 });
+
+test("forgetful_resolve reports a useful bounded and sanitized resolution error", async () => {
+  // Arrange: an owned conflict reaches the resolver but link migration fails.
+  const fixture = await harness();
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.capture.conflicts = [{ id: "partial-conflict", sessionId: "session-1",
+      branchId: "session-1:root", sourceEntryIds: [] }];
+    fixture.capture.resolveConflict = async () => {
+      throw new Error("Entity link migration failed; replacement 100 retained; conflict pending. " +
+        "api_key=private-resolution-secret " + "details ".repeat(200));
+    };
+
+    // Act / Assert: Pi receives enough detail to explain the pending conflict safely.
+    const tool = fixture.tools.get("forgetful_resolve");
+    await assert.rejects(tool.execute("resolve-error", {
+      conflict_id: "partial-conflict", action: "supersede", reason: "Confirmed change",
+    }, undefined, undefined, fixture.ctx), (error: Error) => {
+      assert.match(error.message, /Entity link migration failed.*replacement 100.*pending/);
+      assert.doesNotMatch(error.message, /private-resolution-secret/);
+      assert.ok(error.message.length <= 600);
+      return true;
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});

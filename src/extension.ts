@@ -924,6 +924,21 @@ function logFailure(
   log(ctx, config, message + detail, level, message + ".");
 }
 
+async function findResolutionConflict(
+  runtime: Runtime, ctx: ExtensionContext, conflictId: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (!runtime.capture?.pendingConflicts) return undefined;
+  const conflicts = await runtime.capture.pendingConflicts({ sessionId: runtime.sessionId });
+  const found = conflicts.find((conflict) =>
+    typeof conflict === "object" && conflict !== null &&
+    (conflict as { id?: unknown }).id === conflictId &&
+    conflictBelongsToActiveBranch(conflict as Record<string, unknown>, runtime, ctx),
+  );
+  if (!found || typeof found !== "object")
+    throw new Error("No pending Forgetful conflict can be resolved.");
+  return found as Record<string, unknown>;
+}
+
 function resolutionStatus(value: unknown): string {
   if (typeof value === "string") return value;
   const status =
@@ -3023,36 +3038,13 @@ export function createForgetfulExtension(
           }
           await waitForCaptureCheckpoint(runtime, ctx, signal);
           let preferredEvidenceIds: string[] = params.evidenceEntryIds ?? [];
-          let pendingConflict: Record<string, unknown> | undefined;
-          if (runtime.capture.pendingConflicts) {
-            const conflicts = await runtime.capture.pendingConflicts({
-              sessionId: runtime.sessionId,
-            });
-            const found = conflicts.find(
-              (conflict) =>
-                typeof conflict === "object" &&
-                conflict !== null &&
-                (conflict as { id?: unknown }).id === params.conflict_id &&
-                conflictBelongsToActiveBranch(
-                  conflict as Record<string, unknown>,
-                  runtime,
-                  ctx,
-                ),
-            );
-            if (!found || typeof found !== "object") {
-              throw new Error("No pending Forgetful conflict can be resolved.");
-            }
-            pendingConflict = found as Record<string, unknown>;
-            const sourceEntryIds = (pendingConflict as Record<string, unknown>)
-              .sourceEntryIds;
-            if (Array.isArray(sourceEntryIds)) {
-              preferredEvidenceIds = [
-                ...sourceEntryIds.filter(
-                  (id): id is string => typeof id === "string",
-                ),
-                ...preferredEvidenceIds,
-              ];
-            }
+          const pendingConflict = await findResolutionConflict(runtime, ctx, params.conflict_id);
+          const sourceEntryIds = pendingConflict?.sourceEntryIds;
+          if (Array.isArray(sourceEntryIds)) {
+            preferredEvidenceIds = [
+              ...sourceEntryIds.filter((id): id is string => typeof id === "string"),
+              ...preferredEvidenceIds,
+            ];
           }
           if (
             signal?.aborted ||
@@ -3085,7 +3077,10 @@ export function createForgetfulExtension(
           ) {
             throw error;
           }
-          throw new Error("Forgetful conflict could not be resolved.");
+          const detail = sanitizeText(
+            error instanceof Error ? error.message : String(error),
+          ).slice(0, 500);
+          throw new Error(`Forgetful conflict could not be resolved: ${detail}`);
         }
       },
     });

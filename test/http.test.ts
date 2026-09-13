@@ -378,3 +378,53 @@ describe("project administration HTTP contract", () => {
     assert.equal(requests, 0);
   });
 });
+
+describe("memory entity discovery", () => {
+  it("reads only direct entity links from the bounded memory graph", async () => {
+    // Arrange: entities on neighboring memories must not migrate to the replacement.
+    const requests: string[] = [];
+    const client = new ApiForgetfulClient({ baseUrl: "http://localhost/api/v1",
+      fetchImpl: async (url) => {
+        requests.push(String(url));
+        return Response.json({ center_memory_id: 87, nodes: [], edges: [
+          { type: "entity_memory", source: "entity_5", target: "memory_87" },
+          { type: "entity_memory", source: "memory_87", target: "entity_6" },
+          { type: "entity_memory", source: "entity_5", target: "memory_87" },
+          { type: "entity_memory", source: "entity_9", target: "memory_88" },
+          { type: "memory_link", source: "memory_87", target: "memory_88" },
+        ] });
+      } });
+
+    // Act / Assert.
+    assert.deepEqual(await client.getMemoryEntityIds(87), [5, 6]);
+    assert.deepEqual(requests, ["http://localhost/api/v1/graph/memory/87?depth=1"]);
+  });
+});
+
+describe("memory graph validation", () => {
+  it("rejects incomplete, malformed, oversized and misdirected entity discovery", async () => {
+    // Arrange / Act / Assert: incomplete discovery must never silently drop old entity links.
+    for (const payload of [
+      { center_memory_id: 88, edges: [] },
+      { center_memory_id: 87 },
+      { center_memory_id: 87, edges: [null] },
+      { center_memory_id: 87, edges: [{ source: "entity_1", target: "memory_87" }] },
+      { center_memory_id: 87, edges: [], meta: { truncated: true } },
+      { center_memory_id: 87, edges: [], meta: { has_more: true } },
+      { center_memory_id: 87, edges: [
+        { type: "entity_memory", source: "entity_bad", target: "memory_87" },
+      ] },
+      { center_memory_id: 87, edges: Array.from({ length: 101 }, (_, i) =>
+        ({ type: "entity_memory", source: `entity_${i + 1}`, target: "memory_87" })) },
+      { center_memory_id: 87, edges: Array(2_001).fill({ type: "memory_link",
+        source: "memory_87", target: "memory_88" }) },
+    ]) {
+      const client = new ApiForgetfulClient({ baseUrl: "http://localhost/api/v1",
+        fetchImpl: async () => Response.json(payload) });
+      await assert.rejects(client.getMemoryEntityIds(87), ForgetfulSchemaError);
+    }
+    const oversized = new ApiForgetfulClient({ baseUrl: "http://localhost/api/v1",
+      maxResponseBytes: 100, fetchImpl: async () => Response.json({ padding: "x".repeat(101) }) });
+    await assert.rejects(oversized.getMemoryEntityIds(87), /size limit/);
+  });
+});

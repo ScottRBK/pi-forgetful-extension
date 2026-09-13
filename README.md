@@ -333,6 +333,25 @@ the private `submit_capture_decision` tool. The worker then creates novel knowle
 clearly outdated memory, or preserves an uncertain conflict for the originating session. Queue
 records include per-candidate outcomes so partial writes can be retried safely.
 
+When a pending conflict changes only part of one memory, `forgetful_resolve` can ask the configured
+memory model for a complete revised replacement that retains the unaffected claims. The old memory
+must belong only to the destination project. Shared, global, cross-project and multi-memory partial
+conflicts remain blocked. All seven revision fields are required: title, content, context, keywords,
+tags, importance and evidence entry IDs. Invalid output gets up to three bounded submission
+attempts; exhaustion leaves the conflict pending without writes.
+
+Resolution creates a new memory and preserves provenance and old/new project, document, code
+artifact, file, memory and entity links without duplicates. The durable conflict receipt records the
+complete replacement, its returned ID and link progress. Each attempt refreshes the old memory's
+direct memory/entity links before migration, then rechecks them immediately before obsolescence.
+Links discovered in the final check are checkpointed and leave the conflict pending for retry;
+each attempt makes only one migration pass. Verification also checks the replacement's title,
+content, context, keywords, tags and importance. A failed migration keeps the old memory active;
+retry resumes without creating another replacement. If creation's response or ID checkpoint is
+lost, retry stops for reconciliation because the server has no idempotency key. The tool reports a
+bounded reason when resolution cannot finish. Model judgment quality and concurrent external writes
+remain limits.
+
 Each private capture tool allows at most three attempts within its existing model request and
 15-second deadline. Invalid calls receive bounded error feedback so the model can correct them;
 text-only replies are not parsed as fallback JSON. A non-empty candidate call with no valid

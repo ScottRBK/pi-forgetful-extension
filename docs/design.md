@@ -394,8 +394,41 @@ The main model can resolve a pending conflict through an extension tool. The cur
 `forgetful_recall` tool remains read-only; a separate, bounded `forgetful_resolve` tool accepts
 a pending conflict ID, a decision, and evidence entry IDs or a reason. The extension reads the
 actual session evidence. The tool cannot name arbitrary memories or supply an unvalidated
-replacement. Conflicts involving partial or shared claims remain deferred or can be skipped
-when the bounded replacement cannot safely preserve the old memory's remaining meaning.
+replacement. A partial contradiction involving exactly one old memory can be resolved when that
+memory belongs only to the destination project. Shared, global, cross-project and multi-memory
+partial conflicts remain deferred or can be skipped.
+
+For an eligible partial conflict, the configured memory model receives the complete old memory,
+old/new claims, candidate, trusted evidence and resolution reason. Its dedicated temporary
+`submit_memory_revision` tool requires a complete `title`, `content`, `context`, `keywords`, `tags`,
+`importance` and `sourceEntryIds`. The revision must retain unaffected claims. There is no text
+patch, in-place semantic update or cannot-revise result. Invalid submissions receive the existing
+three bounded adapter attempts; exhaustion leaves the conflict pending without memory writes.
+
+The durable partial-resolution order is:
+
+1. Recheck the old memory and project scope; checkpoint the complete revised replacement and its
+   link plan in the conflict receipt. Provenance remains extension-controlled. Preserve and
+   deduplicate old/new project, document, code artifact, file, memory and entity associations.
+   Discover direct old entity links through `GET /graph/memory/{id}?depth=1`; reject malformed,
+   incomplete or oversized graphs instead of silently losing links.
+2. Recheck the old memory and write enablement, record the create attempt, create a new memory,
+   then checkpoint its returned ID before further writes.
+3. Add candidate resources, refresh the old memory and its direct entity links, and checkpoint any
+   newly discovered memory/entity links. Migrate once, preserving links already on the replacement.
+   Store rich-write receipts in the conflict itself so recovery does not need the original job.
+   Verify the replacement's title, content, context, keywords, tags, importance and associations,
+   then checkpoint link completion.
+4. Immediately before supersession, recheck the old memory and its direct entity links. Checkpoint
+   any further links with incomplete migration and leave the conflict pending for retry. Otherwise,
+   mark the old memory obsolete with `superseded_by`, then resolve the conflict.
+
+A failed migration leaves the old memory active and the conflict pending. Retry reads the saved
+replacement and finishes missing links without repeating creation. If a create response or its
+ID checkpoint is lost, the durable attempt marker blocks another create: the outcome needs
+reconciliation. The REST API has no idempotency key, so automatic recovery from that ambiguous
+outcome cannot be guaranteed. Useful, sanitized, bounded errors reach `forgetful_resolve`.
+The existing non-atomic read/write race limitation still applies.
 
 1. Persist a pending conflict with its originating session/branch, destination project, old
    claim, proposed replacement, memory IDs, and source evidence in the existing queue store.

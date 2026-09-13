@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import type {
   CaptureSnapshot,
   EvidenceEntry,
+  MemoryInput,
   WorkContext,
 } from "./contracts.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
@@ -79,6 +80,15 @@ export interface PendingConflict {
   reason: string;
   status: "pending" | "resolved" | "rejected";
   replacementId?: number;
+  replacement?: {
+    input: MemoryInput;
+    candidate: unknown;
+    entityIds: number[];
+    memoryIds: number[];
+    linksComplete?: boolean;
+    creationAttempted?: boolean;
+    knowledgeState?: unknown;
+  };
   resolution?: unknown;
   createdAt: string;
   updatedAt: string;

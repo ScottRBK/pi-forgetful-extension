@@ -63,6 +63,21 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function directEntityId(edge: unknown, memoryId: number): number | undefined {
+  if (!isObject(edge) || typeof edge.type !== "string" ||
+      typeof edge.source !== "string" || typeof edge.target !== "string")
+    throw new ForgetfulSchemaError("Forgetful memory graph contains an invalid edge");
+  if (edge.type !== "entity_memory") return undefined;
+  const center = `memory_${memoryId}`;
+  let other: string;
+  if (edge.source === center) other = edge.target;
+  else if (edge.target === center) other = edge.source;
+  else return undefined;
+  if (!/^entity_[1-9]\d*$/.test(other))
+    throw new ForgetfulSchemaError("Forgetful memory graph contains an invalid entity link");
+  return requiredInteger(Number(other.slice(7)), "graph.entity_id");
+}
+
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new ForgetfulSchemaError(
@@ -606,6 +621,26 @@ export class ApiForgetfulClient implements ForgetfulClient {
       [200],
     );
     return parseMemory(payload, "get");
+  }
+
+  async getMemoryEntityIds(id: number, signal?: AbortSignal): Promise<number[]> {
+    const memoryId = this.validId(id);
+    const payload = await this.request(`/graph/memory/${memoryId}?depth=1`, "GET",
+      undefined, signal, [200]);
+    if (!isObject(payload) || payload.center_memory_id !== memoryId ||
+        !Array.isArray(payload.edges) || payload.edges.length > 2_000) {
+      throw new ForgetfulSchemaError("Forgetful memory graph is invalid or exceeds link limits");
+    }
+    if (isObject(payload.meta) && (payload.meta.truncated || payload.meta.has_more))
+      throw new ForgetfulSchemaError("Forgetful memory graph is incomplete");
+    const ids = new Set<number>();
+    for (const edge of payload.edges) {
+      const entityId = directEntityId(edge, memoryId);
+      if (entityId !== undefined) ids.add(entityId);
+    }
+    if (ids.size > 100)
+      throw new ForgetfulSchemaError("Forgetful memory graph exceeds 100 entity links");
+    return [...ids];
   }
 
   async supersede(

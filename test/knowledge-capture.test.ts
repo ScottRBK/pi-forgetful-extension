@@ -904,3 +904,114 @@ test(
     assert.equal((await client.knowledge.listCodeArtifacts(projectId)).length, 2);
   },
 );
+
+test("partial resolution preserves old links alongside new rich capture through real REST",
+  realOptions, async (t) => {
+    // Arrange: existing architecture has attachments and entity/memory links.
+    const baseUrl = await startForgetful(t);
+    const writer = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+    let addLateLinks: (() => Promise<void>) | undefined;
+    const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000,
+      fetchImpl: async (url, init) => {
+        const response = await fetch(url, init);
+        if (addLateLinks && init?.method === "POST" && String(url).endsWith("/memories")) {
+          const add = addLateLinks;
+          addLateLinks = undefined;
+          await add();
+        }
+        return response;
+      } });
+    const projectId = await createProject(client);
+    const directory = await mkdtemp(join(tmpdir(), "partial-rich-rest-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const oldDocument = await client.knowledge.createDocument({ title: "Deployment",
+      description: "Unchanged deployment", content: "Deploy with Docker", tags: [],
+      project_id: projectId });
+    const oldCode = await client.knowledge.createCodeArtifact({ title: "Deploy script",
+      description: "Unchanged deployment", code: "docker compose up", language: "bash",
+      tags: [], project_id: projectId });
+    const oldEntity = await client.knowledge.createEntity({ name: "Docker", entity_type: "System",
+      tags: [], aka: [], project_ids: [projectId] });
+    const response = await fetch(`${baseUrl}/files`, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        filename: "deployment.txt", description: "Deployment", mime_type: "text/plain",
+        data: Buffer.from("Docker deployment").toString("base64"), tags: [], project_id: projectId,
+      }) });
+    assert.equal(response.status, 201);
+    const fileId = (await response.json() as { id: number }).id;
+    const oldInput = { title: "Architecture", content: "API uses database v1. Deploy with Docker.",
+      context: "Architecture decisions", keywords: ["database"], tags: ["architecture"],
+      importance: 8, project_ids: [projectId], document_ids: [oldDocument.id],
+      code_artifact_ids: [oldCode.id], file_ids: [fileId] };
+    const old = await client.create(oldInput);
+    const related = await client.create({ ...oldInput, title: "Deployment background" });
+    await client.knowledge.linkMemories(old.id, [related.id]);
+    await client.knowledge.linkEntityMemory(oldEntity.id, old.id);
+    const candidate = richCandidate("partial-user");
+    candidate.content = "The API now depends on database v2.";
+    const model: MemoryModelClient = { complete: async (request) => {
+      if (request.submission?.name === "submit_memory_revision") {
+        return request.submission.validate({ title: "Architecture",
+          content: "API uses database v2. Deploy with Docker.",
+          context: "Only the database changed",
+          keywords: [" database", "docker "], tags: [" architecture "], importance: 9,
+          sourceEntryIds: ["partial-user"] });
+      }
+      return request.purpose === "capture" ? { candidates: [candidate] } : {
+        action: "escalate", conflictingMemoryId: old.id, partial: true,
+        oldClaim: "API uses database v1", newClaim: "API uses database v2",
+        sourceEntryIds: ["partial-user"], reason: "Retain deployment claims",
+      };
+    } };
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-rich" });
+    const service = new CaptureService({ queue, client, model, instanceId: "instance-rich" });
+    await service.enqueue(snapshot("partial", "partial-user",
+      "The API uses database v2 now. Keep Docker deployment and record the new API architecture.",
+      projectId));
+    await service.checkpoint();
+    const conflict = (await service.pendingConflicts())[0]!;
+    assert.ok(conflict);
+    const lateEntity = await writer.knowledge.createEntity({ name: "Deployment operator",
+      entity_type: "System", tags: [], aka: [], project_ids: [projectId] });
+    let lateMemoryId: number | undefined;
+    addLateLinks = async () => {
+      const late = await writer.create({ ...oldInput, title: "Later deployment context" });
+      lateMemoryId = late.id;
+      await writer.knowledge.linkMemories(old.id, [late.id]);
+      await writer.knowledge.linkEntityMemory(lateEntity.id, old.id);
+    };
+
+    // Act: add new rich resources, retain old associations, then obsolete the old memory.
+    const result = await service.resolveConflict(conflict.id, { action: "supersede",
+      reason: "Confirmed database change only", evidenceEntryIds: ["partial-user"] });
+
+    // Assert only through REST and durable queue boundaries.
+    const replacement = await client.get(result.conflict.replacementId!);
+    assert.equal(replacement.content, "API uses database v2. Deploy with Docker.");
+    assert.deepEqual(replacement.keywords, ["database", "docker"]);
+    assert.deepEqual(replacement.tags, ["architecture"]);
+    assert.equal(replacement.importance, 9);
+    assert.deepEqual(replacement.project_ids, [projectId]);
+    assert.equal(replacement.document_ids!.length, 2);
+    assert.ok(replacement.document_ids!.includes(oldDocument.id));
+    assert.equal(replacement.code_artifact_ids!.length, 2);
+    assert.ok(replacement.code_artifact_ids!.includes(oldCode.id));
+    assert.deepEqual(replacement.file_ids, [fileId]);
+    assert.ok(replacement.linked_memory_ids!.includes(related.id));
+    assert.ok(replacement.linked_memory_ids!.includes(lateMemoryId!));
+    const entityIds = await client.getMemoryEntityIds(replacement.id);
+    assert.ok(entityIds.includes(oldEntity.id));
+    assert.ok(entityIds.includes(lateEntity.id));
+    assert.equal(entityIds.length, 4);
+    assert.equal(new Set(entityIds).size, 4);
+    assert.equal((await client.get(old.id)).superseded_by, replacement.id);
+    const receipt = await queue.getConflict(conflict.id);
+    assert.equal(receipt!.status, "resolved");
+    assert.deepEqual(receipt!.replacement!.input.keywords, ["database", "docker"]);
+    assert.deepEqual(receipt!.replacement!.input.tags, ["architecture"]);
+    const revision = receipt!.replacement!.candidate as { keywords: string[]; tags: string[] };
+    assert.deepEqual(revision.keywords, ["database", "docker"]);
+    assert.deepEqual(revision.tags, ["architecture"]);
+    assert.ok(receipt!.replacement!.memoryIds.includes(lateMemoryId!));
+    assert.ok(receipt!.replacement!.entityIds.includes(lateEntity.id));
+  });
