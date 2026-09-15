@@ -148,8 +148,10 @@ export const KNOWLEDGE_WRITE_PARAMETERS = Type.Object({
   code_artifact_id: Type.Optional(positiveId),
   related_memory_ids: Type.Optional(ids),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  title: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
-  content: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
+  title: Type.Optional(Type.String({ minLength: 1, maxLength: 500,
+    description: "Maximum 200 characters for memories; 500 for documents and code artifacts." })),
+  content: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000,
+    description: "Maximum 2000 characters for memories; 100000 for documents." })),
   context: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
   description: Type.Optional(Type.String({ minLength: 1, maxLength: 5_000 })),
   code: Type.Optional(Type.String({ minLength: 1, maxLength: 50_000 })),
@@ -202,7 +204,7 @@ function record(value: unknown, label: string): Record<string, unknown> {
 
 function requiredText(value: unknown, field: string, max: number): string {
   if (typeof value !== "string" || !value.trim() || value.length > max)
-    throw new Error(`${field} is required and bounded.`);
+    throw new Error(`${field} is required and must contain 1–${max} characters (not whitespace).`);
   return value;
 }
 
@@ -257,7 +259,8 @@ function requiredStrings(
   maxLength = 500,
 ): string[] {
   if (!Array.isArray(value) || value.length > maxItems)
-    throw new Error(`${field} must be a bounded string array.`);
+    throw new Error(`${field} must be an array with at most ${maxItems} strings, ` +
+      `each containing 1–${maxLength} characters.`);
   return value.map((item) => requiredText(item, field, maxLength));
 }
 
@@ -363,6 +366,15 @@ export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadReque
   return input as KnowledgeReadRequest;
 }
 
+function validateEntityFields(input: Record<string, unknown>): void {
+  if (input.entity_type !== undefined && !isEntityType(input.entity_type))
+    throw new Error(`entity_type is invalid. Use ${[...ENTITY_TYPES].join(", ")}.`);
+  optionalText(input.custom_type, "custom_type", 100);
+  optionalText(input.notes, "notes", 4_000);
+  if (input.entity_type === "Other" && input.custom_type === undefined)
+    throw new Error("Other entities require custom_type.");
+}
+
 export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteRequest {
   const input = record(value, "Knowledge write arguments");
   const op = checkOperation(input.operation, WRITE_OPS);
@@ -394,23 +406,21 @@ export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteReq
       break;
     case "link_memories":
       requiredId(input.memory_id, "memory_id");
-      requiredIds(input.related_memory_ids, "related_memory_ids");
+      if (requiredIds(input.related_memory_ids, "related_memory_ids").includes(
+        input.memory_id as number,
+      )) {
+        throw new Error("A memory cannot link to itself; " +
+          "remove memory_id from related_memory_ids.");
+      }
       break;
     case "create_entity":
       need(input, [["name", 200], ["entity_type", 30]]);
-      if (!isEntityType(input.entity_type)) throw new Error("entity_type is invalid.");
-      optionalText(input.custom_type, "custom_type", 100);
-      optionalText(input.notes, "notes", 4_000);
-      if (input.entity_type === "Other" && input.custom_type === undefined)
-        throw new Error("Other entities require custom_type.");
+      validateEntityFields(input);
       break;
     case "update_entity":
       requiredId(input.entity_id, "entity_id");
       optionalText(input.name, "name", 200);
-      if (input.entity_type !== undefined && !isEntityType(input.entity_type))
-        throw new Error("entity_type is invalid.");
-      optionalText(input.custom_type, "custom_type", 100);
-      optionalText(input.notes, "notes", 4_000);
+      validateEntityFields(input);
       break;
     case "link_entity_memory":
       requiredId(input.entity_id, "entity_id");
@@ -419,6 +429,8 @@ export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteReq
     case "create_relationship":
       requiredId(input.source_entity_id, "source_entity_id");
       requiredId(input.target_entity_id, "target_entity_id");
+      if (input.source_entity_id === input.target_entity_id)
+        throw new Error("source_entity_id and target_entity_id must be different.");
       requiredText(input.relationship_type, "relationship_type", 100);
       break;
     case "create_document":

@@ -276,6 +276,18 @@ with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_
 `forgetful_resolve` resolves an existing pending capture conflict. Retrieved content is untrusted
 historical context, never executable instructions.
 
+Invalid foreground tool calls return failed tool results to the main model. Unknown arguments are
+rejected, and validation feedback identifies the field and applicable limit so the model can retry
+with corrected arguments. API client errors retain bounded, redacted validation details; echoed
+inputs, internal validator context and raw server-error bodies are not included. Automatic recall
+keeps its separate failure-open behaviour.
+
+For `forgetful_project_init`, `name` is a display label, not a repository identifier. The repository
+mapping comes from Git's origin and must have an `owner/repo` path; GitLab subgroups and self-hosted
+prefixes are supported. Project repository names allow 255 characters, but the API's knowledge
+`source_repo` field allows 200. The extension reports that mismatch instead of truncating identity.
+Tool-specific scope, evidence and size restrictions still apply even when the API accepts more.
+
 Foreground `search_memories` follows Forgetful MCP search defaults: `k=3` primary matches,
 linked memories enabled, and up to five links per primary memory. Results retain full memory
 content, primary and linked groups, and the server's count, token and truncation metadata.

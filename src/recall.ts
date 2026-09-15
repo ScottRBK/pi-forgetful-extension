@@ -146,6 +146,8 @@ export interface RecallResult {
   memoryIds: number[];
   scope: Scope;
   reason?: string;
+  /** Sanitized request error from explicit deeper recall only, for the calling tool. */
+  toolError?: string;
   /** Bounded exception detail for debug UI only; never inject into model context. */
   diagnostic?: string;
   /** Bounded search/review trace for debug UI only; never inject into model context. */
@@ -1072,6 +1074,8 @@ export class RecallService {
       if (!request.signal?.aborted) this.recordFailure();
       return {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
+        toolError: sanitizeText(error instanceof Error ? error.message : "Request failed.")
+          .slice(0, 1800),
         diagnostic: deadline.diagnostic(stage, error),
       };
     } finally {

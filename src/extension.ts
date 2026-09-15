@@ -23,6 +23,8 @@ import type {
   WorkContext,
 } from "./contracts.ts";
 import { ApiForgetfulClient } from "./http.ts";
+import { registerForegroundTool } from "./foreground-tools.ts";
+import { repositoryName } from "./repository.ts";
 import {
   initialiseProject,
   initialiseProjectForAgent,
@@ -788,23 +790,25 @@ export function canonicalRepository(remote: string): string | undefined {
   if (scp) {
     const host = scp[1].toLowerCase();
     const path = scp[2].replace(/^\/+/, "");
-    if (!path || path.length > 300) return undefined;
-    return /^(?:github\.com|gitlab\.com|bitbucket\.org)$/.test(host)
-      ? path
-      : `${host}/${path}`;
+    return qualifiedRepository(host, path);
   }
   try {
     const url = new URL(value);
-    if (url.username || url.password) return undefined;
+    if (url.username || url.password || url.search || url.hash) return undefined;
     const host = url.hostname.toLowerCase();
     const path = url.pathname.replace(/^\/+/, "");
-    if (!path || path.length > 300) return undefined;
-    return /^(?:github\.com|gitlab\.com|bitbucket\.org)$/.test(host)
-      ? path
-      : `${host}/${path}`;
+    return qualifiedRepository(host, path);
   } catch {
     return undefined;
   }
+}
+
+function qualifiedRepository(host: string, path: string): string | undefined {
+  try {
+    const name = repositoryName(path);
+    return repositoryName(/^(?:github\.com|gitlab\.com|bitbucket\.org)$/.test(host)
+      ? name : `${host}/${name}`);
+  } catch { return undefined; }
 }
 
 async function discoverWorkContext(
@@ -2625,14 +2629,14 @@ export function createForgetfulExtension(
       };
       return { client, context, signal: activeSignal, beforeWrite, checkSession };
     };
-    const knowledgeError = (error: unknown): never => {
+    const foregroundError = (error: unknown): never => {
       const message = error instanceof Error
-        ? sanitizeText(error.message).slice(0, 500)
-        : "Forgetful knowledge is unavailable.";
-      throw new Error(message || "Forgetful knowledge is unavailable.");
+        ? sanitizeText(error.message).slice(0, 2_000)
+        : "Forgetful operation is unavailable.";
+      throw new Error(message || "Forgetful operation is unavailable.");
     };
 
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_knowledge_read",
       label: "Read Forgetful knowledge",
       description: "Read memories, entities, relationships, documents, code or stored files. " +
@@ -2669,10 +2673,10 @@ export function createForgetfulExtension(
               text: `Stored file downloaded to ${path}. Use normal Pi tools to inspect it.` }],
             details: { ...response.details, path },
           };
-        } catch (error) { return knowledgeError(error); }
+        } catch (error) { return foregroundError(error); }
       },
     });
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_knowledge_write",
       label: "Write Forgetful knowledge",
       description: "Store evidenced repository knowledge in the current project. Search first; " +
@@ -2695,18 +2699,20 @@ export function createForgetfulExtension(
               access.signal, access.beforeWrite);
             access.checkSession();
             return result;
-          } catch (error) { return knowledgeError(error); }
+          } catch (error) { return foregroundError(error); }
         });
         knowledgeWriteTail = operation.then(() => undefined, () => undefined);
         return operation;
       },
     });
 
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_project_init",
       label: "Initialise Forgetful project",
       description:
-        "Create or link the current trusted Git repository to a Forgetful project.",
+        "Create or link the current trusted Git repository to a Forgetful project. " +
+        "name is a display label; repo_name is derived from the Git origin in owner/repo format. " +
+        "Supply name and description to create, or project_id to link an existing project.",
       promptSnippet: "Initialise the current repository's Forgetful project mapping",
       parameters: Type.Object({
         name: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
@@ -2733,7 +2739,8 @@ export function createForgetfulExtension(
           const discovered = await discoverWorkContext(pi, ctx, runtime.branchId);
           const repoName = discovered.repoName;
           if (!repoName || repoName.length > 255) {
-            throw new Error("No supported Git origin remote was found.");
+            throw new Error("No supported Git origin remote was found. Configure origin with " +
+              "an owner/repo path (for example https://github.com/owner/repo.git), then retry.");
           }
           const ensureCurrent = async (): Promise<void> => {
             const current = await discoverWorkContext(pi, ctx, runtime.branchId);
@@ -2779,28 +2786,11 @@ export function createForgetfulExtension(
             ],
             details: { projectId: project.id, repoName },
           };
-        } catch (error) {
-          const message =
-            error instanceof ProjectInitError
-              ? error.message
-              : "Forgetful project setup failed. Check the connection and try again.";
-          if (
-            error instanceof Error &&
-            [
-              "Forgetful project setup is unavailable.",
-              "Project trust is required to initialise Forgetful.",
-              "Forgetful project setup was cancelled.",
-              "No supported Git origin remote was found.",
-            ].includes(error.message)
-          ) {
-            throw error;
-          }
-          throw new Error(sanitizeText(message));
-        }
+        } catch (error) { return foregroundError(error); }
       },
     });
 
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_recall_wait",
       label: "Wait for Forgetful recall",
       description:
@@ -2900,7 +2890,7 @@ export function createForgetfulExtension(
       },
     });
 
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_recall",
       label: "Forgetful recall",
       description:
@@ -2944,6 +2934,8 @@ export function createForgetfulExtension(
         );
       },
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        if (typeof params.query !== "string" || !params.query.trim() || params.query.length > 240)
+          throw new Error("query must contain 1–240 characters and cannot be whitespace only.");
         try {
           const runtime = await loadRuntime(ctx);
           if (!runtime.recall || !runtime.config.enabled) {
@@ -2991,7 +2983,8 @@ export function createForgetfulExtension(
           const unavailable = !result.text && [
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");
-          if (unavailable) throw new Error("Forgetful recall is unavailable.");
+          if (unavailable) throw new Error("Forgetful recall is unavailable." +
+            (result.toolError ? ` ${result.toolError}` : ""));
           checkSession();
           return {
             content: [
@@ -3006,13 +2999,11 @@ export function createForgetfulExtension(
             } satisfies RecallToolDetails,
             isError: false,
           };
-        } catch {
-          throw new Error("Forgetful recall is unavailable.");
-        }
+        } catch (error) { return foregroundError(error); }
       },
     });
 
-    pi.registerTool({
+    registerForegroundTool(pi, {
       name: "forgetful_resolve",
       label: "Resolve Forgetful conflict",
       description:

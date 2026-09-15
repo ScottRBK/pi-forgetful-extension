@@ -6,11 +6,14 @@ import { type TestContext } from "node:test";
 
 const source = process.env.FORGETFUL_TEST_SOURCE;
 
-export async function startForgetful(t: TestContext): Promise<string> {
+export async function startForgetful(
+  t: TestContext, environment: Record<string, string> = {},
+): Promise<string> {
   const child = spawn(
     join(source!, ".venv/bin/python"),
     [resolve("scripts/forgetful-test-server.py"), source!],
-    { cwd: "/tmp", stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: "/tmp", stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...environment } },
   );
   const exited = once(child, "exit");
   t.after(async () => {

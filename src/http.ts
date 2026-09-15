@@ -9,6 +9,8 @@ import type {
   SearchRequest,
 } from "./contracts.ts";
 import { ApiKnowledgeClient, memoryMetadata } from "./http-knowledge.ts";
+import { apiErrorDetail } from "./http-errors.ts";
+import { repositoryName } from "./repository.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
@@ -94,10 +96,6 @@ function projectText(value: string, field: string, max: number): string {
     );
   }
   return value.trim();
-}
-
-function projectRepository(value: string): string {
-  return projectText(value, "repository", PROJECT_REPO_MAX);
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
@@ -558,7 +556,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
         "description",
         PROJECT_DESCRIPTION_MAX,
       ),
-      repo_name: projectRepository(input.repo_name),
+      repo_name: repositoryName(input.repo_name),
       project_type: "development",
     };
     const payload = await this.request(
@@ -579,7 +577,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
     const payload = await this.request(
       `/projects/${this.validId(id)}`,
       "PUT",
-      { repo_name: projectRepository(repoName) },
+      { repo_name: repositoryName(repoName) },
       signal,
       [200],
     );
@@ -778,13 +776,10 @@ export class ApiForgetfulClient implements ForgetfulClient {
         redirect: "error",
       });
       const maxBytes = this.responseByteLimit(method, url);
-      const text = await this.readResponse(response, controller.signal, maxBytes);
       if (!expectedStatuses.includes(response.status)) {
-        throw new ForgetfulHttpError(
-          `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}`,
-          response.status,
-        );
+        await this.throwResponseError(response, method, url, controller.signal, maxBytes);
       }
+      const text = await this.readResponse(response, controller.signal, maxBytes);
       if (callerAborted || callerSignal?.aborted) throw makeAbortError();
       if (timedOut) throw new ForgetfulTimeoutError();
       return parseJson(text, `${method} ${url.pathname}`);
@@ -806,6 +801,23 @@ export class ApiForgetfulClient implements ForgetfulClient {
     }
   }
 
+  private async throwResponseError(
+    response: Response, method: string, url: URL, signal: AbortSignal, maxBytes: number,
+  ): Promise<never> {
+    let detail: string;
+    try {
+      const text = await this.readResponse(response, signal, maxBytes);
+      detail = apiErrorDetail(text, response.status, this.token);
+    } catch (error) {
+      if (!(error instanceof ForgetfulSchemaError)) throw error;
+      detail = "Error response exceeded the configured size limit.";
+    }
+    throw new ForgetfulHttpError(
+      `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}` +
+        (detail ? `: ${detail}` : ""), response.status,
+    );
+  }
+
   private async readResponse(
     response: Response,
     signal: AbortSignal,
@@ -816,6 +828,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
       contentLength !== null &&
       Number(contentLength) > maxBytes
     ) {
+      await response.body?.cancel();
       throw new ForgetfulSchemaError(
         "Forgetful response exceeded the configured size limit",
       );

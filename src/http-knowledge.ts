@@ -18,9 +18,10 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown, max: number, empty = false): string {
+function text(value: unknown, max: number, empty = false, field = "knowledge text"): string {
   if (typeof value !== "string" || (!empty && !value.trim()) || value.length > max) {
-    throw new ForgetfulSchemaError("Forgetful knowledge text is invalid or exceeds its limit");
+    throw new ForgetfulSchemaError(`Forgetful ${field} must be a string containing ` +
+      `${empty ? 0 : 1}–${max} characters${empty ? "" : ", not whitespace only"}.`);
   }
   return value;
 }
@@ -56,11 +57,15 @@ function records(value: unknown, key: string): unknown[] {
 
 function provenance(value: Record<string, unknown>): Provenance {
   return {
-    ...(value.source_repo == null ? {} : { source_repo: text(value.source_repo, 200) }),
+    ...(value.source_repo == null ? {} : {
+      source_repo: text(value.source_repo, 200, false, "source_repo"),
+    }),
     ...(value.source_files == null ? {} : { source_files: strings(value.source_files, 100, 1000) }),
-    ...(value.source_url == null ? {} : { source_url: text(value.source_url, 2048) }),
+    ...(value.source_url == null ? {} : {
+      source_url: text(value.source_url, 2048, false, "source_url"),
+    }),
     ...(value.encoding_version == null ? {} : {
-      encoding_version: text(value.encoding_version, 50),
+      encoding_version: text(value.encoding_version, 50, false, "encoding_version"),
     }),
   };
 }
@@ -70,18 +75,19 @@ const entityTypes = new Set(["Organization", "Individual", "Team", "Device", "Sy
 function entityBody(input: Partial<EntityInput>, partial = false): Record<string, unknown> {
   const value = object(input);
   const result: Record<string, unknown> = { ...provenance(value) };
-  if (!partial || value.name !== undefined) result.name = text(value.name, 200);
+  if (!partial || value.name !== undefined) result.name = text(value.name, 200, false, "name");
   if (!partial || value.entity_type !== undefined) {
     if (!entityTypes.has(value.entity_type as string)) {
       throw new ForgetfulSchemaError("Forgetful entity type is invalid");
     }
     result.entity_type = value.entity_type;
   }
-  if (value.custom_type != null) result.custom_type = text(value.custom_type, 100);
+  if (value.custom_type != null)
+    result.custom_type = text(value.custom_type, 100, false, "custom_type");
   if (value.entity_type === "Other" && !result.custom_type) {
-    throw new ForgetfulSchemaError("Other entities require a custom type");
+    throw new ForgetfulSchemaError("Other entities require custom_type");
   }
-  if (value.notes != null) result.notes = text(value.notes, 4000, true);
+  if (value.notes != null) result.notes = text(value.notes, 4000, true, "notes");
   for (const key of ["aka", "tags"] as const) {
     if (!partial || value[key] !== undefined) result[key] = strings(value[key] ?? []);
   }
@@ -101,7 +107,7 @@ function relationshipBody(input: EntityRelationshipInput): Record<string, unknow
     ...provenance(object(input)),
     source_entity_id: id(input.source_entity_id),
     target_entity_id: id(input.target_entity_id),
-    relationship_type: text(input.relationship_type, 100),
+    relationship_type: text(input.relationship_type, 100, false, "relationship_type"),
   };
 }
 
@@ -129,14 +135,14 @@ function resourceBody(
   if (code) fields.push(["code", 50_000], ["language", 100]);
   else fields.push(["content", 100_000]);
   for (const [key, max] of fields) {
-    if (!partial || value[key] !== undefined) result[key] = text(value[key], max);
+    if (!partial || value[key] !== undefined) result[key] = text(value[key], max, false, key);
   }
   if (!partial || value.tags !== undefined) result.tags = strings(value.tags ?? []);
   if (value.project_id !== undefined) {
     result.project_id = value.project_id === null ? null : id(value.project_id);
   }
   if (!code && value.document_type != null) {
-    result.document_type = text(value.document_type, 100);
+    result.document_type = text(value.document_type, 100, false, "document_type");
   }
   return result;
 }
@@ -193,7 +199,7 @@ export class ApiKnowledgeClient implements KnowledgeClient {
       throw new TypeError("Entity search limit must be between 1 and 100");
     }
     const result = await this.request("/entities/search", "POST", {
-      query: text(query, 240), limit,
+      query: text(query, 240, false, "query"), limit,
     }, signal, [200]);
     return records(result, "entities").map(entity);
   }
@@ -289,7 +295,7 @@ export class ApiKnowledgeClient implements KnowledgeClient {
     const value = object(input);
     const body = memoryMetadata(value);
     for (const [key, max] of [["title", 200], ["content", 2000], ["context", 500]] as const) {
-      if (value[key] !== undefined) body[key] = text(value[key], max, key === "context");
+      if (value[key] !== undefined) body[key] = text(value[key], max, key === "context", key);
     }
     for (const key of ["keywords", "tags"] as const) {
       if (value[key] !== undefined) body[key] = strings(value[key]);
