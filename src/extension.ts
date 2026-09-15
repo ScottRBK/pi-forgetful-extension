@@ -2732,7 +2732,7 @@ export function createForgetfulExtension(
           }
           const discovered = await discoverWorkContext(pi, ctx, runtime.branchId);
           const repoName = discovered.repoName;
-          if (!repoName || !/^[^/\s]+\/[^/\s]+$/.test(repoName)) {
+          if (!repoName || repoName.length > 255) {
             throw new Error("No supported Git origin remote was found.");
           }
           const ensureCurrent = async (): Promise<void> => {
@@ -3402,11 +3402,7 @@ export function createForgetfulExtension(
         return;
       }
       const context = await discoverWorkContext(pi, ctx, runtime.branchId);
-      if (
-        !context.repoName ||
-        context.repoName.length > 255 ||
-        !/^[^/\s]+\/[^/\s]+$/.test(context.repoName)
-      ) {
+      if (!context.repoName || context.repoName.length > 255) {
         notify(
           ctx,
           "No supported Git origin remote found. Add an origin remote, then run " +

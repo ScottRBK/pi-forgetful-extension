@@ -97,13 +97,7 @@ function projectText(value: string, field: string, max: number): string {
 }
 
 function projectRepository(value: string): string {
-  const repo = projectText(value, "repository", PROJECT_REPO_MAX);
-  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
-    throw new TypeError(
-      "Forgetful project repository must use owner/repo format",
-    );
-  }
-  return repo;
+  return projectText(value, "repository", PROJECT_REPO_MAX);
 }
 
 function optionalString(value: unknown, field: string): string | undefined {

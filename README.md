@@ -110,7 +110,7 @@ The wizard detects the Git `origin` remote and reuses its existing Forgetful pro
 matches, choose to create a project with a name and description, or link an existing project
 that has no repository. Review the link before saving. Large project lists prompt for a name
 filter first. Initialisation requires an interactive Pi session, project trust, and an origin
-remote that resolves to `owner/repo`.
+remote.
 
 The link is stored on the project in Forgetful and applies to other checkouts of that repository
 using the same Forgetful account. The active session picks it up immediately; future sessions

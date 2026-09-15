@@ -4202,6 +4202,45 @@ test("project init creates once and activates capture in the session", async () 
   }
 });
 
+test("project init accepts any origin repository name", async () => {
+  // Arrange: Azure DevOps is not owner/repo, but it is a usable origin.
+  const writes: unknown[] = [];
+  const projects: Project[] = [];
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "https://dev.azure.com/contoso/widgets/_git/api",
+    uiInputs: ["Azure repo", "Widgets API"],
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (_url, init) => {
+          if (init?.method === "POST") {
+            const body = JSON.parse(String(init.body));
+            writes.push(body);
+            projects.push({ id: 31, ...body });
+            return Response.json(projects[0], { status: 201 });
+          }
+          return Response.json({ projects });
+        },
+      }),
+  });
+  try {
+    // Act.
+    await fixture.command("project init");
+    // Assert: the mapping is the origin path, not a GitHub owner/repo rewrite.
+    assert.deepEqual(writes, [
+      {
+        name: "Azure repo",
+        description: "Widgets API",
+        project_type: "development",
+        repo_name: "dev.azure.com/contoso/widgets/_git/api",
+      },
+    ]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("project init links an unassigned project and preserves other repositories", async () => {
   // Arrange: two identically named projects, only one available to link.
   const projects: Project[] = [
@@ -4641,6 +4680,52 @@ test("agent project init creates a trusted current repository mapping", async ()
       },
     ]);
     assert.match(String(result.content[0]?.text), /Agent repository/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("agent project init accepts any origin repository name", async () => {
+  // Arrange: Azure DevOps is not owner/repo, but it is a usable origin.
+  const writes: unknown[] = [];
+  const projects: Project[] = [];
+  const fixture = await harness({
+    withoutProject: true,
+    gitRemote: "https://dev.azure.com/contoso/widgets/_git/api",
+    createClient: (options) =>
+      new ApiForgetfulClient({
+        ...options,
+        fetchImpl: async (_url, init) => {
+          if (init?.method === "POST") {
+            const body = JSON.parse(String(init.body));
+            writes.push(body);
+            projects.push({ id: 32, ...body });
+            return Response.json(projects[0], { status: 201 });
+          }
+          return Response.json({ projects });
+        },
+      }),
+  });
+  const tool = fixture.tools.get("forgetful_project_init");
+  assert.ok(tool);
+  try {
+    // Act.
+    await tool.execute(
+      "project-init-azure",
+      { name: "Azure repo", description: "Widgets API" },
+      undefined,
+      undefined,
+      fixture.ctx,
+    );
+    // Assert.
+    assert.deepEqual(writes, [
+      {
+        name: "Azure repo",
+        description: "Widgets API",
+        repo_name: "dev.azure.com/contoso/widgets/_git/api",
+        project_type: "development",
+      },
+    ]);
   } finally {
     await fixture.cleanup();
   }

@@ -359,9 +359,8 @@ describe("project administration HTTP contract", () => {
       { name: "x".repeat(501) },
       { description: "" },
       { description: "x".repeat(5001) },
-      { repo_name: "missing-slash" },
-      { repo_name: "owner/group/repo" },
-      { repo_name: "x".repeat(250) + "/long-repo" },
+      { repo_name: " " },
+      { repo_name: "x".repeat(256) },
     ]) {
       await assert.rejects(
         client.createProject({
@@ -373,7 +372,7 @@ describe("project administration HTTP contract", () => {
         TypeError,
       );
     }
-    await assert.rejects(client.linkProject(3, "bad"), TypeError);
+    await assert.rejects(client.linkProject(3, " "), TypeError);
     await assert.rejects(client.linkProject(-1, "owner/repo"), TypeError);
     assert.equal(requests, 0);
   });

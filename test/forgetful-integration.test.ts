@@ -266,5 +266,17 @@ test(
     );
     assert.equal(linked.name, "Existing");
     assert.equal(linked.description, "Preserve existing knowledge");
+
+    const azure = await client.createProject({
+      name: "Azure project",
+      description: "Azure origin",
+      repo_name: "dev.azure.com/contoso/widgets/_git/api",
+    });
+    assert.deepEqual(
+      (await client.listProjects("dev.azure.com/contoso/widgets/_git/api")).map(
+        (p) => p.id,
+      ),
+      [azure.id],
+    );
   },
 );
