@@ -70,6 +70,9 @@ const writeOperation = Type.Union([
 ]);
 const strings = Type.Array(Type.String({ maxLength: 500 }), { maxItems: 10 });
 const ids = Type.Array(positiveId, { maxItems: 100 });
+function leftoverSearchField(description: string) {
+  return Type.Optional(Type.Unknown({ description }));
+}
 const DEFAULT_RECORD_LIMIT = 50;
 const MAX_RECORD_LIMIT = 100;
 const DEFAULT_CONTENT_LIMIT = 4_000;
@@ -112,14 +115,12 @@ export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
   file_id: Type.Optional(Type.Integer({
     minimum: 1, description: "Required for get_file.",
   })),
-  k: Type.Optional(Type.Integer({
-    minimum: 1, maximum: 20,
-    description: "Primary memories for search_memories; defaults to 3 and is bounded from 1 to 20.",
-  })),
-  max_links_per_primary: Type.Optional(Type.Integer({
-    minimum: 0, maximum: 10,
-    description: "Linked memories per primary search_memories result; defaults to 5.",
-  })),
+  k: leftoverSearchField(
+    "Primary memories for search_memories; defaults to 3 and is bounded from 1 to 20.",
+  ),
+  max_links_per_primary: leftoverSearchField(
+    "Linked memories per primary search_memories result; integer from 0 to 10, defaults to 5.",
+  ),
   limit: Type.Optional(Type.Integer({
     minimum: 1, maximum: 5_000,
     description: "Page size: list_projects, entity-memory/relationship, document, " +
@@ -131,9 +132,9 @@ export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
     minimum: 0, maximum: 10_000_000,
     description: "Offset for list operations and readable content pages.",
   })),
-  include_links: Type.Optional(Type.Boolean({
-    description: "Include linked memories for search_memories; defaults to true.",
-  })),
+  include_links: leftoverSearchField(
+    "Include linked memories for search_memories; defaults to true.",
+  ),
 });
 
 export const KNOWLEDGE_WRITE_PARAMETERS = Type.Object({
@@ -311,13 +312,14 @@ function validateReadSearch(input: Record<string, unknown>, op: string): void {
   requiredText(input.query, "query", 240);
   optionalId(input.project_id, "project_id");
   if (op === "search_entities") {
-    optionalText(input.query_context, "query_context", 500);
     boundedId(input.limit, "limit", 100);
     return;
   }
   requiredText(input.query_context, "query_context", 500);
   boundedId(input.k, "k", 20);
   boundedNonNegativeInteger(input.max_links_per_primary, "max_links_per_primary", 10);
+  if (input.include_links !== undefined && typeof input.include_links !== "boolean")
+    throw new Error("include_links must be a boolean.");
   if (input.limit !== undefined)
     throw new Error("search_memories uses k; limit is not supported.");
   if (input.offset !== undefined)
@@ -354,7 +356,8 @@ export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadReque
   const op = checkOperation(input.operation, READ_OPS);
   validateReadSearch(input, op);
   // k, include_links and max_links_per_primary are search_memories fields. The flat schema
-  // advertises them on every op, so leftover values are ignored rather than rejected.
+  // advertises them on every op with loose leftover types, so Pi and runtime ignore them
+  // rather than reject other operations.
   validateReadIdentity(input, op);
   validateReadPagination(input, op);
   return input as KnowledgeReadRequest;

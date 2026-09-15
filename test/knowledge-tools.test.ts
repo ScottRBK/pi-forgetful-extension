@@ -1,14 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 
 import { ApiForgetfulClient } from "../src/http.ts";
 import {
   executeKnowledgeRead,
   executeKnowledgeWrite,
+  KNOWLEDGE_READ_PARAMETERS,
   validateKnowledgeReadRequest,
   type KnowledgeToolContext,
 } from "../src/knowledge-tools.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+
+const knowledgeReadTool = {
+  name: "forgetful_knowledge_read",
+  description: "test",
+  parameters: KNOWLEDGE_READ_PARAMETERS,
+};
+
+function piRead(args: Record<string, unknown>) {
+  return validateToolArguments(knowledgeReadTool, {
+    type: "toolCall", id: "t", name: knowledgeReadTool.name, arguments: args,
+  });
+}
+
+function piThenRuntime(args: Record<string, unknown>) {
+  return validateKnowledgeReadRequest(piRead(args));
+}
 
 function context(projectId: number, commit = "a".repeat(40)): KnowledgeToolContext {
   return {
@@ -55,6 +73,25 @@ test("knowledge read validation keeps list and content bounds distinct", () => {
     () => validateKnowledgeReadRequest({ operation: "search_memories", query: "database" }),
     /query_context is required/,
   );
+  assert.throws(
+    () => validateKnowledgeReadRequest({
+      operation: "search_memories", query: "database", query_context: "Test", offset: 0,
+    }),
+    /does not support offset/,
+  );
+  assert.throws(
+    () => validateKnowledgeReadRequest({
+      operation: "search_memories", query: "database", query_context: "Test", k: 21,
+    }),
+    /at most 20/,
+  );
+  assert.throws(
+    () => validateKnowledgeReadRequest({
+      operation: "search_memories", query: "database", query_context: "Test",
+      include_links: "invalid",
+    }),
+    /include_links must be a boolean/,
+  );
 });
 
 test("knowledge read ignores leftover search fields on other operations", () => {
@@ -66,6 +103,47 @@ test("knowledge read ignores leftover search fields on other operations", () => 
   }));
   assert.doesNotThrow(() => validateKnowledgeReadRequest({
     operation: "get_memory", memory_id: 1, k: 3, include_links: false,
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "list_projects", k: 21,
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "get_memory", memory_id: 1, k: "invalid",
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "search_entities", query: "API", include_links: "invalid",
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "search_entities", query: "API", query_context: "",
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "list_projects", k: [],
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "get_memory", memory_id: 1, max_links_per_primary: {},
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "search_entities", query: "API", include_links: [],
+  }));
+});
+
+test("Pi schema accepts leftover search fields on other knowledge read operations", () => {
+  assert.doesNotThrow(() => piThenRuntime({ operation: "list_projects", k: 21 }));
+  assert.doesNotThrow(() => piThenRuntime({
+    operation: "get_memory", memory_id: 1, k: "invalid",
+  }));
+  assert.doesNotThrow(() => piThenRuntime({
+    operation: "search_entities", query: "API", include_links: "invalid",
+  }));
+  assert.doesNotThrow(() => piThenRuntime({
+    operation: "search_entities", query: "API", query_context: "",
+  }));
+  assert.doesNotThrow(() => piThenRuntime({ operation: "list_projects", k: [] }));
+  assert.doesNotThrow(() => piThenRuntime({
+    operation: "get_memory", memory_id: 1, max_links_per_primary: {},
+  }));
+  assert.doesNotThrow(() => piThenRuntime({
+    operation: "search_entities", query: "API", include_links: [],
   }));
 });
 
@@ -154,6 +232,30 @@ test(
   }, context(project.id)));
   assert.equal((search.items as Array<{ id: number }>).length, 1);
   assert.equal(search.next_offset, 1);
+  },
+);
+
+test(
+  "entity search pages by limit when leftover k differs",
+  realOptions,
+  async (t) => {
+    const baseUrl = await startForgetful(t);
+    const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+    const project = await client.createProject({
+      name: "Limit", description: "Entity limit vs k", repo_name: "test/entity-limit",
+    });
+    await client.knowledge.createEntity({
+      name: "Limit Alpha", entity_type: "System", tags: [], aka: [], project_ids: [project.id],
+    });
+    await client.knowledge.createEntity({
+      name: "Limit Beta", entity_type: "System", tags: [], aka: [], project_ids: [project.id],
+    });
+
+    const search = value(await executeKnowledgeRead(client, {
+      operation: "search_entities", query: "Limit", limit: 1, k: 20,
+    }, context(project.id)));
+
+    assert.equal((search.items as Array<{ id: number }>).length, 1);
   },
 );
 
