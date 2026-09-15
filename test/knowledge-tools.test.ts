@@ -57,6 +57,18 @@ test("knowledge read validation keeps list and content bounds distinct", () => {
   );
 });
 
+test("knowledge read ignores leftover search fields on other operations", () => {
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "list_projects", k: 3, include_links: true, max_links_per_primary: 5,
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "search_entities", query: "API", k: 3,
+  }));
+  assert.doesNotThrow(() => validateKnowledgeReadRequest({
+    operation: "get_memory", memory_id: 1, k: 3, include_links: false,
+  }));
+});
+
 test(
   "foreground memory search returns the server's grouped query metadata",
   realOptions,

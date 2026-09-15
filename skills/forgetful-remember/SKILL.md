@@ -1,6 +1,6 @@
 ---
 name: forgetful-remember
-description: Store durable decisions, verified solutions and repository knowledge in the right form.
+description: Write durable decisions, verified solutions and repository knowledge. Use when saving facts, not when searching or checking whether a repository is in Forgetful.
 license: MIT
 ---
 

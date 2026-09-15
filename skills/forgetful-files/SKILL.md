@@ -6,9 +6,9 @@ license: MIT
 
 # Reading stored files
 
-File operations depend on Forgetful's optional file feature. An unavailable feature is a gap to
-report; ordinary memory and document operations can still proceed. This extension currently
-supports retrieval and citation, not uploads.
+Use `forgetful_knowledge_read` for file operations. They depend on Forgetful's optional file
+feature. An unavailable feature is a gap to report; ordinary memory and document operations can
+still proceed. This extension currently supports retrieval and citation, not uploads.
 
 1. Find a file through a memory's file_ids or `list_files`. Judge its description: what does it
    show and when would it be useful? Done when: the relevant file ID is identified.

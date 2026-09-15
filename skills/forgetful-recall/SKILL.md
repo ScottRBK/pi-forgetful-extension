@@ -25,8 +25,9 @@ Done when: the query communicates the topic and why it matters to this task.
 
 Recall is global by default. Project scope confines results and expanded records to the current
 verified project. A tool call must not bypass the selected scope; change the setting explicitly
-if broader access is needed. Choose k for breadth, up to 20.
-For `search_memories`, use `k` and omit `limit`; `limit` does not control search breadth.
+if broader access is needed.
+For `search_memories`, use `k` (up to 20) and omit `limit`; `limit` does not control search
+breadth. Other read operations ignore `k`.
 Start with a small result count and expand if needed. For `list_projects`, omit `repo_name`
 to use the current repository, or supply its full `owner/repo` identifier, not just the repo name.
 The default is three primary memories with links enabled (`max_links_per_primary=5`). The

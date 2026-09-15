@@ -312,8 +312,6 @@ function validateReadSearch(input: Record<string, unknown>, op: string): void {
   optionalId(input.project_id, "project_id");
   if (op === "search_entities") {
     optionalText(input.query_context, "query_context", 500);
-    if (input.k !== undefined)
-      throw new Error("search_entities uses limit; k is not supported.");
     boundedId(input.limit, "limit", 100);
     return;
   }
@@ -355,12 +353,8 @@ export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadReque
   const input = record(value, "Knowledge read arguments");
   const op = checkOperation(input.operation, READ_OPS);
   validateReadSearch(input, op);
-  if (op !== "search_memories") {
-    for (const field of ["k", "max_links_per_primary", "include_links"]) {
-      if (input[field] !== undefined)
-        throw new Error(`${field} is only supported by search_memories.`);
-    }
-  }
+  // k, include_links and max_links_per_primary are search_memories fields. The flat schema
+  // advertises them on every op, so leftover values are ignored rather than rejected.
   validateReadIdentity(input, op);
   validateReadPagination(input, op);
   return input as KnowledgeReadRequest;
