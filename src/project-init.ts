@@ -32,13 +32,18 @@ function validateAgentProjectDetails(
     if (!Number.isSafeInteger(input.projectId) || input.projectId <= 0) {
       throw new ProjectInitError("The project ID must be a positive integer.");
     }
+    if (input.name !== undefined || input.description !== undefined) {
+      throw new ProjectInitError(
+        "To link an existing project, provide project_id only; omit name and description.",
+      );
+    }
   }
   const name = input.name?.trim();
   const description = input.description?.trim();
   if (input.projectId !== undefined) {
     return {
-      name: name ?? "",
-      description: description ?? "",
+      name: "",
+      description: "",
       repo_name: repoName,
     };
   }

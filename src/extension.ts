@@ -2712,12 +2712,22 @@ export function createForgetfulExtension(
       description:
         "Create or link the current trusted Git repository to a Forgetful project. " +
         "name is a display label; repo_name is derived from the Git origin in owner/repo format. " +
-        "Supply name and description to create, or project_id to link an existing project.",
+        "Choose exactly one mode: create with `name` and `description`, omitting `project_id`; " +
+        "or link an existing unassigned project with `project_id` only, omitting `name` and " +
+        "`description`.",
       promptSnippet: "Initialise the current repository's Forgetful project mapping",
       parameters: Type.Object({
         name: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
         description: Type.Optional(Type.String({ minLength: 1, maxLength: 5_000 })),
         project_id: Type.Optional(Type.Integer({ minimum: 1 })),
+      }, {
+        required: [],
+        oneOf: [
+          { required: ["name", "description"], not: { required: ["project_id"] } },
+          { required: ["project_id"], not: { anyOf: [
+            { required: ["name"] }, { required: ["description"] },
+          ] } },
+        ],
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         try {

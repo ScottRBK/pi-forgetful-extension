@@ -122,9 +122,10 @@ Repeated initialisation reuses the existing link. If a request fails, run init a
 whether it was saved. Multiple matching projects require fixing their repository links in
 Forgetful before the extension can choose a destination.
 
-The active agent can also initialise the repository through `forgetful_project_init`, using a
-name and description or linking an existing unassigned project. This uses the same repository
-mapping and trust checks as the wizard.
+The active agent can also initialise the repository through `forgetful_project_init`. Choose
+exactly one mode: create with `name` and `description`, omitting `project_id`; or link an existing
+unassigned project with `project_id` only, omitting `name` and `description`. This uses the same
+repository mapping and trust checks as the wizard.
 
 ### Encode a repository
 
@@ -282,7 +283,9 @@ with corrected arguments. API client errors retain bounded, redacted validation 
 inputs, internal validator context and raw server-error bodies are not included. Automatic recall
 keeps its separate failure-open behaviour.
 
-For `forgetful_project_init`, `name` is a display label, not a repository identifier. The repository
+For `forgetful_project_init`, choose exactly one mode: create with `name` and `description`,
+omitting `project_id`; or link an existing unassigned project with `project_id` only, omitting
+`name` and `description`. `name` is a display label, not a repository identifier. The repository
 mapping comes from Git's origin and must have an `owner/repo` path; GitLab subgroups and self-hosted
 prefixes are supported. Project repository names allow 255 characters, but the API's knowledge
 `source_repo` field allows 200. The extension reports that mismatch instead of truncating identity.

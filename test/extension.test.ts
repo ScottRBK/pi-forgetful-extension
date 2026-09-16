@@ -4651,6 +4651,35 @@ test("encode dispatches the bundled repository workflow to the active agent", as
   }
 });
 
+test("agent project init exposes exclusive create and link request modes", async () => {
+  // Arrange: the registered Pi tool is the public contract seen by an agent.
+  const fixture = await projectFixture();
+  const tool = fixture.tools.get("forgetful_project_init");
+  assert.ok(tool);
+  try {
+    // Act / Assert: each mode accepts its complete input and rejects ambiguous input.
+    assert.deepEqual(tool.parameters.required, []);
+    assert.match(String(tool.description), /Choose exactly one mode/i);
+    assert.match(String(tool.description), /omit(?:ting)? `project_id`/i);
+    assert.doesNotThrow(() => tool.prepareArguments({
+      name: "Agent repository", description: "Repository knowledge",
+    }));
+    assert.doesNotThrow(() => tool.prepareArguments({ project_id: 41 }));
+    for (const invalid of [
+      {},
+      { name: "Agent repository" },
+      { description: "Repository knowledge" },
+      { name: "Agent repository", description: "Repository knowledge", project_id: 41 },
+      { name: "Agent repository", project_id: 41 },
+      { description: "Repository knowledge", project_id: 41 },
+    ]) {
+      assert.throws(() => tool.prepareArguments(invalid));
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("agent project init creates a trusted current repository mapping", async () => {
   // Arrange: no project mapping exists and the background memory model is absent.
   const fixture = await projectFixture();

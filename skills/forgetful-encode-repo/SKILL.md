@@ -13,9 +13,10 @@ is an update pass, not a second copy. Follow the bundled remember and entities w
 
 ## 1. Resolve the project
 
-Inspect Git origin. Call `forgetful_project_init` with a useful name and description; it reuses
-an existing exact repository mapping or creates the missing project. A supplied `project_id`
-can link an existing unassigned project. Ambiguous mappings require clarification.
+Inspect Git origin. Choose exactly one `forgetful_project_init` mode: create with a useful
+`name` and `description`, omitting `project_id`; or link an existing unassigned project with
+`project_id` only, omitting `name` and `description`. The tool reuses an existing exact
+repository mapping. Ambiguous mappings require clarification.
 
 Done when: a verified project ID exists and the run is identified as initial encoding or refresh.
 
