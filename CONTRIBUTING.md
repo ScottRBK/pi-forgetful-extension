@@ -90,8 +90,6 @@ FORGETFUL_TEST_SOURCE=/path/to/forgetful \
 
 The README hero is rendered from the architecture source at
 [`docs/assets/architecture.svg`](docs/assets/architecture.svg) and committed as
-[`docs/assets/architecture.png`](docs/assets/architecture.png) at 1536×1024 to stay consistent with
-the AgentShell extension. The detailed layer-by-layer source remains
 [`docs/code-architecture.excalidraw`](docs/code-architecture.excalidraw).
 
 Update the SVG and regenerate the PNG whenever the architecture changes. Keep the README and
