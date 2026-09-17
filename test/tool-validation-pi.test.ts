@@ -1,9 +1,38 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import test from "node:test";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { RecallService } from "../src/recall.ts";
 import { createToolSession, resultText, type ToolCall } from "./pi-tool-session.ts";
 import { startForgetful, realOptions } from "./real-forgetful.ts";
+
+test("Pi gives the model the complete Forgetful error response", async (t) => {
+  // Arrange: a Forgetful response that is larger than the old foreground error limit.
+  const body = JSON.stringify({ detail: "Forgetful diagnostic: " + "x".repeat(2_100) + " END" });
+  const server = createServer((_request, response) => {
+    response.writeHead(422, { "content-type": "application/json" });
+    response.end(body);
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
+  const { session, modelResults } = await createToolSession(t, baseUrl, [
+    { name: "forgetful_knowledge_read", arguments: { operation: "get_memory", memory_id: 1 } },
+  ]);
+
+  // Act.
+  await session.prompt("Read the requested Forgetful memory.");
+
+  // Assert: the next model call receives the complete service-owned diagnostic unchanged.
+  const result = modelResults[1]![0]!;
+  assert.equal(result.isError, true);
+  assert.match(resultText(result), /HTTP 422/);
+  assert.match(resultText(result), new RegExp(body.replace(/[{}]/g, "\\$&")));
+});
 
 test("Pi returns API field validation to the main model and accepts a corrected project retry",
   realOptions, async (t) => {
@@ -91,8 +120,9 @@ test("explicit recall returns validation failures to Pi without changing automat
     assert.equal(results[0]!.isError, true);
     assert.match(resultText(results[0]!), /query.*240/);
     assert.equal(results[1]!.isError, true);
-    assert.match(resultText(results[1]!), /HTTP 400.*query: Use a more specific query/);
-    assert.doesNotMatch(resultText(results[1]!), /private-echo-canary/);
+    assert.match(resultText(results[1]!), /HTTP 400/);
+    assert.match(resultText(results[1]!), /Use a more specific query/);
+    assert.match(resultText(results[1]!), /private-echo-canary/);
     assert.equal(results[2]!.isError, false);
     assert.match(resultText(results[2]!), /No matching/);
     assert.equal(results[3]!.isError, true);

@@ -51,6 +51,14 @@ const SOURCE_FIELDS = {
   fileIds: "File",
 } as const;
 const SUBMIT_RECALL_REVIEW = "submit_recall_review";
+
+function isForgetfulResponseError(
+  error: unknown,
+): error is Error & { responseBody: string } {
+  return error instanceof Error &&
+    typeof (error as { responseBody?: unknown }).responseBody === "string";
+}
+
 const REVIEW_POLICY = [
   "You review retrieved Forgetful history for the main agent's current request.",
   "Supply historical facts useful to the main agent; do not answer the user or write a",
@@ -146,8 +154,10 @@ export interface RecallResult {
   memoryIds: number[];
   scope: Scope;
   reason?: string;
-  /** Sanitized request error from explicit deeper recall only, for the calling tool. */
+  /** Request error from explicit deeper recall only, for the calling tool. */
   toolError?: string;
+  /** Whether toolError is a direct Forgetful HTTP response rather than a local failure. */
+  toolErrorFromForgetful?: boolean;
   /** Bounded exception detail for debug UI only; never inject into model context. */
   diagnostic?: string;
   /** Bounded search/review trace for debug UI only; never inject into model context. */
@@ -1072,10 +1082,13 @@ export class RecallService {
     } catch (error) {
       // Recall is failure-open: convert search failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
+      const responseError = isForgetfulResponseError(error);
       return {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
-        toolError: sanitizeText(error instanceof Error ? error.message : "Request failed.")
-          .slice(0, 1800),
+        toolError: responseError
+          ? error.message
+          : sanitizeText(error instanceof Error ? error.message : "Request failed.").slice(0, 1800),
+        toolErrorFromForgetful: responseError,
         diagnostic: deadline.diagnostic(stage, error),
       };
     } finally {

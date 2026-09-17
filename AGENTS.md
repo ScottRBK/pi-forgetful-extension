@@ -101,9 +101,21 @@ flowchart TB
 An editable Excalidraw version is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).
 
+## Forgetful Integration and Agent Tool behaviour
+It is important to note that responses from forgetful are not masked or obscured to by the tools
+and that the agent is able too understand why a request to forgetful failed, as such we should
+pass the execption or response body to the model without translation into our own interpretation.
+
+That means the model should see what Forgetful actually said, including for:
+
+ - all HTTP statuses, including 5xx;
+ - JSON and non-JSON bodies;
+ - validation field details;
+ - plain 404 bodies such as Not Found;
+ - service diagnostics when they are present.
 ## Status
 
-MVP implemented for Pi 0.85.1 with TDD and parent review. Run `npm run check` for deterministic
+MVP implemented for Pi 1. Run `npm run check` for deterministic
 regression and real Pi SDK integration tests. Set `FORGETFUL_TEST_SOURCE` to a Forgetful checkout
 for isolated real REST tests. Real-model judgment and latency checks are separately opt-in.
 See [setup and controls](README.md).

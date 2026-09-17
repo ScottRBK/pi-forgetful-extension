@@ -9,7 +9,6 @@ import type {
   SearchRequest,
 } from "./contracts.ts";
 import { ApiKnowledgeClient, memoryMetadata } from "./http-knowledge.ts";
-import { apiErrorDetail } from "./http-errors.ts";
 import { repositoryName } from "./repository.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -32,11 +31,13 @@ export interface ApiForgetfulClientOptions {
 
 export class ForgetfulHttpError extends Error {
   readonly status?: number;
+  readonly responseBody?: string;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, responseBody?: string) {
     super(message);
     this.name = "ForgetfulHttpError";
     this.status = status;
+    this.responseBody = responseBody;
   }
 }
 
@@ -804,17 +805,18 @@ export class ApiForgetfulClient implements ForgetfulClient {
   private async throwResponseError(
     response: Response, method: string, url: URL, signal: AbortSignal, maxBytes: number,
   ): Promise<never> {
-    let detail: string;
+    let body: string;
     try {
-      const text = await this.readResponse(response, signal, maxBytes);
-      detail = apiErrorDetail(text, response.status, this.token);
+      body = await this.readResponse(response, signal, maxBytes);
     } catch (error) {
       if (!(error instanceof ForgetfulSchemaError)) throw error;
-      detail = "Error response exceeded the configured size limit.";
+      body = "Forgetful response exceeded the configured size limit.";
     }
     throw new ForgetfulHttpError(
       `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}` +
-        (detail ? `: ${detail}` : ""), response.status,
+        (body ? `: ${body}` : ""),
+      response.status,
+      body,
     );
   }
 

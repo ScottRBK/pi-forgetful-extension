@@ -2301,7 +2301,7 @@ test("debug reports search exceptions for automatic and manual recall", async ()
     await assert.rejects(
       tool.execute("call-1", { query: "decisions" }, undefined,
         undefined, fixture.ctx),
-      /Forgetful recall is unavailable/,
+      /Forgetful POST \/api\/v1\/memories\/search returned HTTP 503: \{\}/,
     );
     notifications = fixture.notifications.join("\n");
     assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);

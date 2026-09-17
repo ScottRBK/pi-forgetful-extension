@@ -2630,10 +2630,8 @@ export function createForgetfulExtension(
       return { client, context, signal: activeSignal, beforeWrite, checkSession };
     };
     const foregroundError = (error: unknown): never => {
-      const message = error instanceof Error
-        ? sanitizeText(error.message).slice(0, 2_000)
-        : "Forgetful operation is unavailable.";
-      throw new Error(message || "Forgetful operation is unavailable.");
+      if (error instanceof Error) throw error;
+      throw new Error("Forgetful operation is unavailable.");
     };
 
     registerForegroundTool(pi, {
@@ -2993,8 +2991,13 @@ export function createForgetfulExtension(
           const unavailable = !result.text && [
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");
-          if (unavailable) throw new Error("Forgetful recall is unavailable." +
-            (result.toolError ? ` ${result.toolError}` : ""));
+          if (unavailable) {
+            const message = result.toolErrorFromForgetful
+              ? result.toolError
+              : "Forgetful recall is unavailable." +
+                (result.toolError ? ` ${result.toolError}` : "");
+            throw new Error(message || "Forgetful recall is unavailable.");
+          }
           checkSession();
           return {
             content: [
