@@ -14,8 +14,7 @@ Automatic recall uses a separate memory-model prompt; this skill guides the acti
 
 For `search_memories`, supply both `query` and `query_context`. Include exact function names,
 error codes and configuration keys alongside a description of the information needed.
-Both search tools limit `query` to 240 characters. Keep it focused; put the reason for a direct
-`search_memories` call in `query_context` (up to 500 characters).
+Keep `query` focused; put the reason for a direct `search_memories` call in `query_context`.
 For questions about this repository, include its `owner/repo` identity in the query. Keep global
 queries for preferences or other repositories focused on their own subject.
 
