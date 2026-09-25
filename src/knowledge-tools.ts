@@ -499,8 +499,8 @@ async function resolveWriteProject(
   if (requested === undefined || requested === current) {
     return { id: current, repoName: context.repoName };
   }
-  const matches = (await client.listProjects(undefined, signal))
-    .filter((project) => project.id === requested);
+  const allProjects = await client.listProjects(undefined, signal);
+  const matches = allProjects.filter((project) => project.id === requested);
   if (matches.length === 0) {
     throw new Error(
       `Destination project ${requested} was not found or is unavailable. ` +
@@ -518,6 +518,15 @@ async function resolveWriteProject(
     throw new Error(
       `Destination project ${requested} is not assigned to a repository. ` +
       "Link it before writing cross-project knowledge.",
+    );
+  }
+  const sharedRepo = allProjects.filter(
+    (project) => project.repo_name === destination.repo_name,
+  );
+  if (sharedRepo.length > 1) {
+    throw new Error(
+      `Destination project ${requested} is ambiguous. ` +
+      "Resolve the duplicate project records before writing.",
     );
   }
   return { id: requested, repoName: destination.repo_name };

@@ -215,10 +215,10 @@ test("knowledge writes use the default or explicit project consistently", async 
 });
 
 test("cross-project writes reject an ambiguous destination before searching", async () => {
-  // Arrange: a malformed project response contains the same requested ID twice.
+  // Arrange: two distinct projects are both mapped to the same repository.
   const projects: Project[] = [
-    { id: 9, name: "First", repo_name: "test/first" },
-    { id: 9, name: "Second", repo_name: "test/second" },
+    { id: 9, name: "First", repo_name: "test/shared" },
+    { id: 10, name: "Second", repo_name: "test/shared" },
   ];
   let searches = 0;
   const client = {
@@ -228,7 +228,7 @@ test("cross-project writes reject an ambiguous destination before searching", as
     async create(input: MemoryInput) { return { id: 1, ...input, is_obsolete: false }; },
   } as unknown as ForgetfulClient;
 
-  // Act and assert: the extension refuses to guess between duplicate project records.
+  // Act and assert: the extension refuses to guess between projects sharing a repository.
   await assert.rejects(executeKnowledgeWrite(client, {
     operation: "create_memory", project_id: 9,
     title: "Ambiguous destination", content: "No project may be guessed.",
