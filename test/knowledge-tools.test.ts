@@ -309,6 +309,76 @@ test("cross-project writes revalidate the destination immediately before mutatio
 });
 
 test(
+  "list_projects allows an exact repo_name lookup outside the current repository in project " +
+  "scope",
+  async () => {
+    // Arrange: the target project lives under a different repository than the current one.
+    const target: Project[] = [{ id: 9, name: "Target", repo_name: "test/target" }];
+    let queriedRepoName: string | undefined;
+    const client = {
+      knowledge: {},
+      async listProjects(repoName?: string) {
+        queriedRepoName = repoName;
+        return repoName === "test/target" ? target : [];
+      },
+    } as unknown as ForgetfulClient;
+
+    // Act: request the destination project's metadata by its exact repository name.
+    const result = value(await executeKnowledgeRead(client, {
+      operation: "list_projects", repo_name: "test/target",
+    }, context(7)));
+
+    // Assert: the verified destination project is discoverable, not rejected.
+    assert.equal(queriedRepoName, "test/target");
+    assert.deepEqual(result.items, target);
+  },
+);
+
+test(
+  "list_projects filters out unrelated repos when the server over-returns on a cross-repo lookup",
+  async () => {
+    // Arrange: a nonconforming/stale server ignores the repo_name filter and returns extras.
+    const target: Project = { id: 9, name: "Target", repo_name: "test/target" };
+    const unrelated: Project = { id: 11, name: "Unrelated", repo_name: "test/unrelated" };
+    const client = {
+      knowledge: {},
+      async listProjects() { return [target, unrelated]; },
+    } as unknown as ForgetfulClient;
+
+    // Act: request the destination project's metadata by its exact repository name.
+    const result = value(await executeKnowledgeRead(client, {
+      operation: "list_projects", repo_name: "test/target",
+    }, context(7)));
+
+    // Assert: only the exact repo_name match is returned, not the unrelated project.
+    assert.deepEqual(result.items, [target]);
+  },
+);
+
+test(
+  "list_projects with no repo_name stays limited to the current project in project scope",
+  async () => {
+    // Arrange: Forgetful holds both the current project and another one in the same repo.
+    const projects: Project[] = [
+      { id: 7, name: "Current", repo_name: "test/tools" },
+      { id: 8, name: "Other", repo_name: "test/tools" },
+    ];
+    const client = {
+      knowledge: {},
+      async listProjects() { return projects; },
+    } as unknown as ForgetfulClient;
+
+    // Act: list projects without an explicit repo_name.
+    const result = value(await executeKnowledgeRead(client, {
+      operation: "list_projects",
+    }, context(7)));
+
+    // Assert: only the current project is returned.
+    assert.deepEqual(result.items, [projects[0]]);
+  },
+);
+
+test(
   "foreground memory search returns the server's grouped query metadata",
   realOptions,
   async (t) => {

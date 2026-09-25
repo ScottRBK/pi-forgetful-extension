@@ -692,10 +692,15 @@ function requestedReadProject(read: KnowledgeReadContext): number | undefined {
 
 async function readProjects(read: KnowledgeReadContext): Promise<KnowledgeToolResult> {
   const repoName = read.request.repo_name as string | undefined;
-  if (read.context.scope === "project" && repoName && repoName !== read.context.repoName)
-    throw new Error("Project reads must stay inside the current repository.");
+  // An explicit, exact repo_name may look up another repository's project metadata (e.g. to
+  // verify a cross-project write destination) without widening this project's other recall.
+  const crossRepoLookup = read.context.scope === "project" && repoName !== undefined &&
+    repoName !== read.context.repoName;
   let projects = await read.client.listProjects(repoName ?? read.context.repoName, read.signal);
-  if (read.projectId !== undefined)
+  // Enforce the exact repo_name locally: the server is not trusted to have filtered precisely.
+  if (repoName !== undefined)
+    projects = projects.filter((item) => item.repo_name === repoName);
+  if (!crossRepoLookup && read.projectId !== undefined)
     projects = projects.filter((item) => item.id === read.projectId);
   const result = boundedListPage(
     projects,
