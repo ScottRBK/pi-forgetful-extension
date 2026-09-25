@@ -29,8 +29,17 @@ Done when: each piece of knowledge has an appropriate record type.
 
 ## 2. Resolve the project
 
-Use the verified current repository project. If absent, call `forgetful_project_init` before
-writing. Do not infer project IDs from names or silently repurpose another repository's project.
+Default to the verified current repository project. If it is absent, call
+`forgetful_project_init` before writing.
+
+For an explicit cross-project save, first use `list_projects` with the target's exact repository
+name. Continue only when it returns one existing project with that repository assignment, then pass
+its numeric ID as `project_id` on every related write. New records use the active repository as
+their provenance source; updates preserve existing provenance. The selected project is only the
+storage destination and does not change recall scope.
+
+Never infer an ID from a display name, select an unassigned project, create a project silently, or
+fall back to the current project after destination validation fails.
 
 Done when: each write has an explicit, verified destination.
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 
+import type { ForgetfulClient, MemoryInput, Project } from "../src/contracts.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import {
   executeKnowledgeRead,
@@ -148,6 +149,151 @@ test("Pi schema accepts leftover search fields on other knowledge read operation
 });
 
 test(
+  "cross-project writes reject missing and unassigned destinations before searching",
+  async () => {
+    // Arrange: Forgetful exposes the requested project, but it has no repository assignment.
+    const projects: Project[] = [{ id: 7, name: "Current", repo_name: "test/tools" },
+      { id: 9, name: "Unassigned", repo_name: null }];
+    let searches = 0;
+    let creates = 0;
+    const client = {
+      knowledge: {},
+      async listProjects() { return projects; },
+      async search() { searches += 1; return []; },
+      async create(input: MemoryInput) {
+        creates += 1;
+        return { id: 1, ...input, is_obsolete: false };
+      },
+    } as unknown as ForgetfulClient;
+
+    // Act and assert: destination validation stops before overlap checks or mutation.
+    await assert.rejects(executeKnowledgeWrite(client, {
+      operation: "create_memory", project_id: 9,
+      title: "Unassigned destination", content: "This write must not be redirected.",
+      context: "Cross-project validation", keywords: [], tags: [],
+    }, context(7)), /not assigned to a repository/);
+    await assert.rejects(executeKnowledgeWrite(client, {
+      operation: "create_memory", project_id: 99,
+      title: "Missing destination", content: "This write must not be redirected.",
+      context: "Cross-project validation", keywords: [], tags: [],
+    }, context(7)), /not found or is unavailable/);
+    assert.equal(searches, 0);
+    assert.equal(creates, 0);
+  },
+);
+
+test("knowledge writes use the default or explicit project consistently", async () => {
+  // Arrange: record project scopes used for overlap checks and mutations.
+  const searched: number[][] = [];
+  const created: number[][] = [];
+  const projects: Project[] = [{ id: 9, name: "Target", repo_name: "test/target" }];
+  const client = {
+    knowledge: {},
+    async listProjects() { return projects; },
+    async search(input: { project_ids?: number[] }) {
+      searched.push(input.project_ids ?? []);
+      return [];
+    },
+    async create(input: MemoryInput) {
+      created.push(input.project_ids);
+      return { id: created.length, ...input, is_obsolete: false };
+    },
+  } as unknown as ForgetfulClient;
+  const request = {
+    operation: "create_memory", title: "Scoped destination",
+    content: "Overlap and mutation must use one project.",
+    context: "Cross-project validation", keywords: [], tags: [],
+  };
+
+  // Act: omit the destination once, then explicitly select another assigned project.
+  await executeKnowledgeWrite(client, request, context(7));
+  await executeKnowledgeWrite(client, { ...request, project_id: 9 }, context(7));
+
+  // Assert.
+  assert.deepEqual(searched, [[7], [9]]);
+  assert.deepEqual(created, [[7], [9]]);
+});
+
+test("cross-project writes reject an ambiguous destination before searching", async () => {
+  // Arrange: a malformed project response contains the same requested ID twice.
+  const projects: Project[] = [
+    { id: 9, name: "First", repo_name: "test/first" },
+    { id: 9, name: "Second", repo_name: "test/second" },
+  ];
+  let searches = 0;
+  const client = {
+    knowledge: {},
+    async listProjects() { return projects; },
+    async search() { searches += 1; return []; },
+    async create(input: MemoryInput) { return { id: 1, ...input, is_obsolete: false }; },
+  } as unknown as ForgetfulClient;
+
+  // Act and assert: the extension refuses to guess between duplicate project records.
+  await assert.rejects(executeKnowledgeWrite(client, {
+    operation: "create_memory", project_id: 9,
+    title: "Ambiguous destination", content: "No project may be guessed.",
+    context: "Cross-project validation", keywords: [], tags: [],
+  }, context(7)), /ambiguous/);
+  assert.equal(searches, 0);
+});
+
+test("cross-project writes reject a reassigned destination before mutation", async () => {
+  // Arrange: the project ID remains valid but is remapped after the overlap search.
+  let projectReads = 0;
+  let creates = 0;
+  const client = {
+    knowledge: {},
+    async listProjects() {
+      projectReads += 1;
+      const repo_name = projectReads === 1 ? "test/target" : "test/reassigned";
+      return [{ id: 9, name: "Target", repo_name }];
+    },
+    async search() { return []; },
+    async create(input: MemoryInput) {
+      creates += 1;
+      return { id: 1, ...input, is_obsolete: false };
+    },
+  } as unknown as ForgetfulClient;
+
+  // Act and assert: a stable numeric ID cannot hide a changed repository assignment.
+  await assert.rejects(executeKnowledgeWrite(client, {
+    operation: "create_memory", project_id: 9,
+    title: "Reassigned destination", content: "The mapping must remain stable.",
+    context: "Cross-project validation", keywords: [], tags: [],
+  }, context(7)), /destination project changed/i);
+  assert.equal(projectReads, 2);
+  assert.equal(creates, 0);
+});
+
+test("cross-project writes revalidate the destination immediately before mutation", async () => {
+  // Arrange: the destination disappears after resolution and overlap search.
+  const assigned: Project[] = [{ id: 9, name: "Target", repo_name: "test/target" }];
+  let projectReads = 0;
+  let creates = 0;
+  const client = {
+    knowledge: {},
+    async listProjects() {
+      projectReads += 1;
+      return projectReads === 1 ? assigned : [];
+    },
+    async search() { return []; },
+    async create(input: MemoryInput) {
+      creates += 1;
+      return { id: 1, ...input, is_obsolete: false };
+    },
+  } as unknown as ForgetfulClient;
+
+  // Act and assert: stale validation cannot authorize a later mutation.
+  await assert.rejects(executeKnowledgeWrite(client, {
+    operation: "create_memory", project_id: 9,
+    title: "Changed destination", content: "The target must still be assigned.",
+    context: "Cross-project validation", keywords: [], tags: [],
+  }, context(7)), /not found or is unavailable/);
+  assert.equal(projectReads, 2);
+  assert.equal(creates, 0);
+});
+
+test(
   "foreground memory search returns the server's grouped query metadata",
   realOptions,
   async (t) => {
@@ -196,6 +342,83 @@ test("entity updates reject coercible types before preparing a write", realOptio
   assert.equal(preparedWrites, 0);
   assert.equal((await client.knowledge.getEntity(entity.id)).entity_type, "System");
 });
+
+test("explicit destinations cover update, link, and supersede write families",
+  realOptions, async (t) => {
+    // Arrange: seed target-owned records while the active context belongs to another project.
+    const client = new ApiForgetfulClient({
+      baseUrl: await startForgetful(t), timeoutMs: 4_000,
+    });
+    const source = await client.createProject({
+      name: "Source", description: "Active source", repo_name: "test/source",
+    });
+    const target = await client.createProject({
+      name: "Target", description: "Explicit destination", repo_name: "test/target",
+    });
+    const document = await client.knowledge.createDocument({
+      title: "Original", description: "Target document", content: "Original content",
+      tags: [], project_id: target.id, source_repo: "test/target",
+      source_files: ["target.md"], encoding_version: "b".repeat(40),
+    });
+    const entity = await client.knowledge.createEntity({
+      name: "Target API", entity_type: "System", tags: [], aka: [], project_ids: [target.id],
+    });
+    const old = await client.create({
+      title: "Old target claim", content: "The old claim.", context: "Target history",
+      keywords: [], tags: [], project_ids: [target.id],
+    });
+    const related = await client.create({
+      title: "Related target claim", content: "Supporting context.", context: "Target history",
+      keywords: [], tags: [], project_ids: [target.id],
+    });
+    const duplicate = await client.create({
+      title: "Existing target claim", content: "Keep target provenance.",
+      context: "Target history", keywords: [], tags: [], project_ids: [target.id],
+      source_repo: "test/target", source_files: ["target.md"],
+      encoding_version: "b".repeat(40),
+    });
+    const active = context(source.id);
+
+    // Act: exercise representative mutation families through one explicit destination.
+    await executeKnowledgeWrite(client, {
+      operation: "update_document", project_id: target.id, document_id: document.id,
+      title: "Updated target document",
+    }, active);
+    await executeKnowledgeWrite(client, {
+      operation: "link_entity_memory", project_id: target.id,
+      entity_id: entity.id, memory_id: old.id,
+    }, active);
+    await executeKnowledgeWrite(client, {
+      operation: "link_memories", project_id: target.id,
+      memory_id: old.id, related_memory_ids: [related.id],
+    }, active);
+    await executeKnowledgeWrite(client, {
+      operation: "supersede_memory", project_id: target.id, memory_id: old.id,
+      title: "Current target claim", content: "The current claim.",
+      context: "Target history", keywords: [], tags: [],
+      reason: "The source now proves the current claim.", source_files: ["README.md"],
+    }, active);
+    await executeKnowledgeWrite(client, {
+      operation: "create_memory", project_id: target.id,
+      title: "Existing target claim", content: "Keep target provenance.",
+      context: "Target history", keywords: [], tags: [], source_files: ["source.md"],
+    }, active);
+
+    // Assert: each operation stayed within the explicit target project.
+    const updatedDocument = await client.knowledge.getDocument(document.id);
+    assert.equal(updatedDocument.title, "Updated target document");
+    assert.equal(updatedDocument.source_repo, "test/target");
+    assert.deepEqual(updatedDocument.source_files, ["target.md"]);
+    assert.equal(updatedDocument.encoding_version, "b".repeat(40));
+    const reused = await client.get(duplicate.id);
+    assert.equal(reused.source_repo, "test/target");
+    assert.deepEqual(reused.source_files, ["target.md"]);
+    assert.equal(reused.encoding_version, "b".repeat(40));
+    assert.deepEqual((await client.knowledge.getEntityMemories(entity.id)).map((item) => item.id),
+      [old.id]);
+    assert.ok((await client.get(old.id)).linked_memory_ids?.includes(related.id));
+    assert.equal((await client.get(old.id)).is_obsolete, true);
+  });
 
 test(
   "knowledge tools hydrate entity search results before scoped dedupe",

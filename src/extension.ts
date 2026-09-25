@@ -2667,8 +2667,10 @@ export function createForgetfulExtension(
     registerForegroundTool(pi, {
       name: "forgetful_knowledge_write",
       label: "Write Forgetful knowledge",
-      description: "Store evidenced repository knowledge in the current project. Search first; " +
-        "link memories to documents and entities. Use supersede_memory for clear contradictions. " +
+      description: "Store evidenced repository knowledge. The verified current project is the " +
+        "default; project_id may select another existing assigned project when the user or clear " +
+        "session evidence identifies it. Search first; link memories to documents and entities. " +
+        "Use supersede_memory for clear contradictions. " +
         "File uploads are not supported. Source files should identify each write's evidence. " +
         "Create requirements: memory=title,content,context,keywords,tags; " +
         "entity=name,entity_type; document=title,description,content; " +
@@ -2684,7 +2686,7 @@ export function createForgetfulExtension(
           try {
             const access = await foregroundKnowledge(ctx, signal, true);
             const result = await executeKnowledgeWrite(access.client, params, access.context,
-              access.signal, access.beforeWrite);
+              access.signal, access.beforeWrite, access.checkSession);
             access.checkSession();
             return result;
           } catch (error) { return foregroundError(error); }

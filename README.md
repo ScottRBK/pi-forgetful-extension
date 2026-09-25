@@ -153,6 +153,13 @@ by the completed work. The extension never silently creates a project or falls b
 capture destination. Explicit repository encoding can initialise its project through the agent
 tool.
 
+Explicit knowledge writes also default to the verified current project. When the user or clear
+session evidence identifies another repository, resolve its existing assigned project first and
+pass that numeric `project_id` to `forgetful_knowledge_write`. Destination validation happens before
+project-scoped overlap checks and again before mutation. A failed override never falls back to the
+current project. New records and superseding replacements identify the active source repository;
+updates preserve the existing record's provenance.
+
 | Command | Effect |
 | --- | --- |
 | `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |

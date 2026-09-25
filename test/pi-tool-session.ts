@@ -83,7 +83,7 @@ export async function createToolSession(
   });
   t.after(() => session.dispose());
   await session.bindExtensions({});
-  return { session, modelResults, root };
+  return { session, modelResults, root, settings };
 }
 
 export function resultText(result: ToolResultMessage): string {

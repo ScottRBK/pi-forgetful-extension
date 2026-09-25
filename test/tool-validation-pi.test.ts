@@ -126,7 +126,7 @@ test("explicit recall returns validation failures to Pi without changing automat
     assert.equal(results[2]!.isError, false);
     assert.match(resultText(results[2]!), /No matching/);
     assert.equal(results[3]!.isError, true);
-    assert.match(resultText(results[3]!), /HTTP 404: Memory not found/);
+    assert.match(resultText(results[3]!), /HTTP 404: \{"error":"Memory not found"\}/);
   });
 
 test("Pi preserves server validation on all rich create/update routes and recovers on retry",

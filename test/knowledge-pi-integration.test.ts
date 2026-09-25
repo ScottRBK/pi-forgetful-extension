@@ -11,9 +11,127 @@ import {
 import {
   createAssistantMessageEventStream, type AssistantMessage, type Context,
 } from "@earendil-works/pi-ai";
+import type { ForgetfulClient, MemoryInput, Project } from "../src/contracts.ts";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
+import { createToolSession, resultText } from "./pi-tool-session.ts";
 import { startForgetful, realOptions } from "./real-forgetful.ts";
+
+test("real Pi writes explicit knowledge to another verified project", realOptions, async (t) => {
+  // Arrange: the source repository and requested destination are both mapped in Forgetful.
+  const baseUrl = await startForgetful(t);
+  const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+  const current = await client.createProject({
+    name: "Source", description: "Active source repository", repo_name: "test/source",
+  });
+  const destination = await client.createProject({
+    name: "Destination", description: "Explicit write destination", repo_name: "test/target",
+  });
+  const { session, modelResults } = await createToolSession(t, baseUrl, [{
+    name: "forgetful_knowledge_write",
+    arguments: {
+      operation: "create_memory", project_id: destination.id,
+      title: "Cross-project decision", content: "The target owns this decision.",
+      context: "Explicit user-directed save", keywords: ["cross-project"], tags: ["decision"],
+    },
+  }], "https://github.com/test/source.git");
+
+  // Act: invoke the registered extension tool through Pi's real validation and execution path.
+  await session.prompt("Save this decision to the requested target project.");
+
+  // Assert: the target receives the write while provenance still identifies the source session.
+  const result = modelResults[1]![0]!;
+  assert.equal(result.isError, false, resultText(result));
+  const search = (projectId: number) => client.search({
+    query: "Cross-project decision", query_context: "Verify explicit destination",
+    project_ids: [projectId], strict_project_filter: true, k: 20, include_links: false,
+  });
+  const inCurrent = await search(current.id);
+  const inDestination = await search(destination.id);
+  assert.equal(inCurrent.length, 0);
+  assert.equal(inDestination.length, 1);
+  assert.equal(inDestination[0]!.source_repo, "test/source");
+});
+
+test("real Pi blocks mutation when trust is revoked during destination revalidation", async (t) => {
+  // Arrange: revoke trust inside the final external destination lookup.
+  const source: Project = { id: 7, name: "Source", repo_name: "test/source" };
+  const destination: Project = { id: 9, name: "Target", repo_name: "test/target" };
+  let destinationReads = 0;
+  let creates = 0;
+  let revokeTrust: () => void = () => undefined;
+  const client = {
+    knowledge: {},
+    async listProjects(repoName?: string) {
+      if (repoName) return repoName === source.repo_name ? [source] : [];
+      destinationReads += 1;
+      if (destinationReads === 2) revokeTrust();
+      return [source, destination];
+    },
+    async search() { return []; },
+    async create(input: MemoryInput) {
+      creates += 1;
+      return { id: 1, ...input, is_obsolete: false };
+    },
+  } as unknown as ForgetfulClient;
+  const fixture = await createToolSession(t, "http://127.0.0.1:1", [{
+    name: "forgetful_knowledge_write",
+    arguments: {
+      operation: "create_memory", project_id: destination.id,
+      title: "Trust race", content: "This must not be stored after trust is revoked.",
+      context: "Cross-project validation", keywords: [], tags: [],
+    },
+  }], "https://github.com/test/source.git", { client });
+  revokeTrust = () => fixture.settings.setProjectTrusted(false);
+
+  // Act.
+  await fixture.session.prompt("Save this decision to the requested target project.");
+
+  // Assert: trust revocation is checked after the awaited destination lookup and before mutation.
+  const result = fixture.modelResults[1]![0]!;
+  assert.equal(result.isError, true);
+  assert.match(resultText(result), /Project trust is required to write/);
+  assert.equal(creates, 0);
+});
+
+test("real Pi rejects an unassigned explicit write destination", realOptions, async (t) => {
+  // Arrange: the active repository is mapped, while the requested destination is not.
+  const baseUrl = await startForgetful(t);
+  const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+  const current = await client.createProject({
+    name: "Source", description: "Active source repository", repo_name: "test/source",
+  });
+  const response = await fetch(`${baseUrl}/projects`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Unassigned", description: "No repository mapping", project_type: "development",
+    }),
+  });
+  assert.equal(response.status, 201);
+  const destination = await response.json() as { id: number };
+  const { session, modelResults } = await createToolSession(t, baseUrl, [{
+    name: "forgetful_knowledge_write",
+    arguments: {
+      operation: "create_memory", project_id: destination.id,
+      title: "Rejected cross-project decision", content: "This must not be stored.",
+      context: "Explicit user-directed save", keywords: [], tags: [],
+    },
+  }], "https://github.com/test/source.git");
+
+  // Act.
+  await session.prompt("Save this decision to the requested target project.");
+
+  // Assert: Pi receives clear guidance and neither project is mutated.
+  const result = modelResults[1]![0]!;
+  assert.equal(result.isError, true);
+  assert.match(resultText(result), /not assigned to a repository/);
+  const search = (projectId: number) => client.search({
+    query: "Rejected cross-project decision", query_context: "Verify rejected destination",
+    project_ids: [projectId], strict_project_filter: true, k: 20, include_links: false,
+  });
+  assert.equal((await search(current.id)).length, 0);
+  assert.equal((await search(destination.id)).length, 0);
+});
 
 test("real Pi encodes linked repository knowledge through real REST without a background model",
   { ...realOptions, timeout: 40_000 }, async (t) => {

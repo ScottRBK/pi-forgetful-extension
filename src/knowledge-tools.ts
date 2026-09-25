@@ -13,6 +13,7 @@ import type {
   Memory,
   MemorySearchResult,
   MemoryInput,
+  Provenance,
   Scope,
   StoredFile,
 } from "./contracts.ts";
@@ -138,6 +139,10 @@ export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
 
 export const KNOWLEDGE_WRITE_PARAMETERS = Type.Object({
   operation: writeOperation,
+  project_id: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Optional explicit destination project; defaults to the verified current project.",
+  })),
   memory_id: Type.Optional(positiveId),
   replacement_memory_id: Type.Optional(positiveId),
   entity_id: Type.Optional(positiveId),
@@ -377,6 +382,7 @@ function validateEntityFields(input: Record<string, unknown>): void {
 export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteRequest {
   const input = record(value, "Knowledge write arguments");
   const op = checkOperation(input.operation, WRITE_OPS);
+  optionalId(input.project_id, "project_id");
   switch (op) {
     case "create_memory":
       need(input, [["title", 200], ["content", 2_000], ["context", 500]]);
@@ -476,6 +482,45 @@ function currentProject(context: KnowledgeToolContext, requested?: number): numb
   if (requested !== undefined && requested !== context.project.id)
     throw new Error("Knowledge operations must stay inside the current project.");
   return context.project.id;
+}
+
+interface ResolvedWriteProject {
+  id: number;
+  repoName?: string;
+}
+
+async function resolveWriteProject(
+  client: ForgetfulClient,
+  context: KnowledgeToolContext,
+  requested: number | undefined,
+  signal?: AbortSignal,
+): Promise<ResolvedWriteProject> {
+  const current = currentProject(context);
+  if (requested === undefined || requested === current) {
+    return { id: current, repoName: context.repoName };
+  }
+  const matches = (await client.listProjects(undefined, signal))
+    .filter((project) => project.id === requested);
+  if (matches.length === 0) {
+    throw new Error(
+      `Destination project ${requested} was not found or is unavailable. ` +
+      "Use list_projects to choose an existing assigned project.",
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Destination project ${requested} is ambiguous. ` +
+      "Resolve the duplicate project records before writing.",
+    );
+  }
+  const destination = matches[0]!;
+  if (typeof destination.repo_name !== "string" || !destination.repo_name.trim()) {
+    throw new Error(
+      `Destination project ${requested} is not assigned to a repository. ` +
+      "Link it before writing cross-project knowledge.",
+    );
+  }
+  return { id: requested, repoName: destination.repo_name };
 }
 
 function inMemoryProject(memory: Memory, projectId: number): boolean {
@@ -974,6 +1019,27 @@ function effectiveCommit(
   return context.commit ?? supplied;
 }
 
+function updateProvenance(
+  existing: Provenance,
+  request: Record<string, unknown>,
+  context: KnowledgeToolContext,
+  destinationProjectId: number,
+): Provenance {
+  if (destinationProjectId !== context.project?.id) {
+    return {
+      source_repo: existing.source_repo,
+      source_files: existing.source_files,
+      encoding_version: existing.encoding_version,
+    };
+  }
+  return {
+    source_repo: existing.source_repo ?? context.repoName,
+    source_files: request.source_files === undefined
+      ? existing.source_files : request.source_files as string[],
+    encoding_version: effectiveCommit(context, request) ?? existing.encoding_version,
+  };
+}
+
 async function beforeMutation(
   beforeWrite: (() => Promise<void>) | undefined,
   signal?: AbortSignal,
@@ -992,7 +1058,7 @@ async function memoryInProject(
 ): Promise<Memory> {
   const value = await client.get(memoryId, signal);
   if (!value.project_ids.includes(projectId))
-    throw new Error("The memory is outside the current project.");
+    throw new Error("The memory is outside the destination project.");
   if (editable && value.project_ids.length > 1)
     throw new Error("Shared memories cannot be edited from one project.");
   return value;
@@ -1041,7 +1107,7 @@ async function entityInProject(
 ): Promise<Entity> {
   const value = await knowledge.getEntity(entityId, signal);
   if (!value.project_ids.includes(projectId))
-    throw new Error("The entity is outside the current project.");
+    throw new Error("The entity is outside the destination project.");
   if (editable && value.project_ids.length > 1)
     throw new Error("Shared entities cannot be edited from one project.");
   return value;
@@ -1071,17 +1137,17 @@ async function validateAttachments(
   for (const id of (request.document_ids as number[] | undefined) ?? []) {
     const document = await knowledge.getDocument(id, signal);
     if (document.project_id !== projectId)
-      throw new Error("A document attachment is outside the current project.");
+      throw new Error("A document attachment is outside the destination project.");
   }
   for (const id of (request.code_artifact_ids as number[] | undefined) ?? []) {
     const artifact = await knowledge.getCodeArtifact(id, signal);
     if (artifact.project_id !== projectId)
-      throw new Error("A code artifact attachment is outside the current project.");
+      throw new Error("A code artifact attachment is outside the destination project.");
   }
   for (const id of (request.file_ids as number[] | undefined) ?? []) {
     const file = await knowledge.getFile(id, signal);
     if (file.project_id !== projectId)
-      throw new Error("A file attachment is outside the current project.");
+      throw new Error("A file attachment is outside the destination project.");
   }
 }
 
@@ -1103,7 +1169,11 @@ function containsAllIds(existing: number[] | undefined, requested: number[] | un
   return (requested ?? []).every((id) => available.has(id));
 }
 
-function sharedMemoryHasChanges(memory: Memory, input: MemoryInput): boolean {
+function sharedMemoryHasChanges(
+  memory: Memory,
+  input: MemoryInput,
+  preserveProvenance = false,
+): boolean {
   return input.context !== memory.context ||
     !sameStrings(input.keywords, memory.keywords) ||
     !sameStrings(input.tags, memory.tags) ||
@@ -1111,8 +1181,10 @@ function sharedMemoryHasChanges(memory: Memory, input: MemoryInput): boolean {
     !containsAllIds(memory.document_ids, input.document_ids) ||
     !containsAllIds(memory.code_artifact_ids, input.code_artifact_ids) ||
     !containsAllIds(memory.file_ids, input.file_ids) ||
-    (input.source_files !== undefined && !sameStrings(input.source_files, memory.source_files)) ||
-    (input.encoding_version !== undefined && input.encoding_version !== memory.encoding_version);
+    (!preserveProvenance && input.source_files !== undefined &&
+      !sameStrings(input.source_files, memory.source_files)) ||
+    (!preserveProvenance && input.encoding_version !== undefined &&
+      input.encoding_version !== memory.encoding_version);
 }
 
 function compactString(value: unknown): unknown {
@@ -1164,7 +1236,11 @@ function isExactMemoryMatch(memory: Memory, input: MemoryInput, projectId: numbe
     memory.content.trim() === input.content.trim();
 }
 
-function memoryUpdates(memory: Memory, input: MemoryInput): Partial<MemoryInput> {
+function memoryUpdates(
+  memory: Memory,
+  input: MemoryInput,
+  preserveProvenance = false,
+): Partial<MemoryInput> {
   const updates: Partial<MemoryInput> = {};
   const documentIds = mergeIds(memory.document_ids, input.document_ids);
   const codeIds = mergeIds(memory.code_artifact_ids, input.code_artifact_ids);
@@ -1176,11 +1252,16 @@ function memoryUpdates(memory: Memory, input: MemoryInput): Partial<MemoryInput>
   if (JSON.stringify(fileIds) !== JSON.stringify(memory.file_ids) && fileIds)
     updates.file_ids = fileIds;
   if (
+    !preserveProvenance &&
     input.source_files &&
     JSON.stringify(input.source_files) !== JSON.stringify(memory.source_files)
   )
     updates.source_files = input.source_files;
-  if (input.encoding_version && input.encoding_version !== memory.encoding_version)
+  if (
+    !preserveProvenance &&
+    input.encoding_version &&
+    input.encoding_version !== memory.encoding_version
+  )
     updates.encoding_version = input.encoding_version;
   return updates;
 }
@@ -1191,16 +1272,17 @@ async function existingMemoryResult(
   input: MemoryInput,
   signal: AbortSignal | undefined,
   beforeWrite: (() => Promise<void>) | undefined,
+  preserveProvenance = false,
 ): Promise<KnowledgeToolResult> {
   if (memory.project_ids.length > 1) {
-    if (sharedMemoryHasChanges(memory, input)) {
+    if (sharedMemoryHasChanges(memory, input, preserveProvenance)) {
       return writeResult({ status: "needs_review", existing_memory_id: memory.id,
         reason: "A shared memory has requested changes; choose an explicit project-safe edit." },
       "create_memory");
     }
     return writeResult({ status: "existing", memory }, "create_memory");
   }
-  const updates = memoryUpdates(memory, input);
+  const updates = memoryUpdates(memory, input, preserveProvenance);
   if (Object.keys(updates).length === 0)
     return writeResult({ status: "existing", memory }, "create_memory");
   await beforeMutation(beforeWrite, signal);
@@ -1241,7 +1323,11 @@ async function createMemory(
     project_ids: [projectId], strict_project_filter: true, k: 20, include_links: false,
   }, signal);
   const exact = matches.find((item) => isExactMemoryMatch(item, input, projectId));
-  if (exact) return existingMemoryResult(knowledge, exact, input, signal, beforeWrite);
+  if (exact) {
+    return existingMemoryResult(
+      knowledge, exact, input, signal, beforeWrite, projectId !== context.project?.id,
+    );
+  }
   const sameTitle = matches.find((item) =>
     isCurrentMemory(item, projectId) && normalized(item.title) === normalized(input.title));
   if (sameTitle) {
@@ -1270,7 +1356,7 @@ async function createEntity(
       (item.entity_type !== "Other" ||
         normalized(item.custom_type ?? "") === normalized(request.custom_type as string)));
   if (matches.length > 1)
-    throw new Error("Entity name matches multiple current-project entities; choose an ID.");
+    throw new Error("Entity name matches multiple destination-project entities; choose an ID.");
   if (matches[0]) return writeResult({ status: "existing", entity: matches[0] }, "create_entity");
   const input: EntityInput = {
     name: request.name as string,
@@ -1309,7 +1395,7 @@ async function createDocument(
   const matches = (await knowledge.listDocuments(projectId, signal)).filter((item) =>
     normalized(item.title) === normalized(input.title));
   if (matches.length > 1)
-    throw new Error("Document title matches multiple current-project documents; choose an ID.");
+    throw new Error("Document title matches multiple destination-project documents; choose an ID.");
   if (matches[0]) {
     const existing = await knowledge.getDocument(matches[0].id, signal);
     if (existing.content === input.content && existing.description === input.description)
@@ -1345,7 +1431,7 @@ async function createCodeArtifact(
     normalized(item.title) === normalized(input.title));
   if (matches.length > 1)
     throw new Error(
-      "Code artifact title matches multiple current-project artifacts; choose an ID.",
+      "Code artifact title matches multiple destination-project artifacts; choose an ID.",
     );
   if (matches[0]) {
     const existing = await knowledge.getCodeArtifact(matches[0].id, signal);
@@ -1449,10 +1535,7 @@ async function updateMemory(write: KnowledgeWriteContext): Promise<KnowledgeTool
     file_ids: mergeIds(
       memory.file_ids, request.file_ids as number[] | undefined,
     ),
-    source_repo: memory.source_repo ?? context.repoName,
-    source_files: request.source_files === undefined
-      ? memory.source_files : request.source_files as string[],
-    encoding_version: effectiveCommit(context, request) ?? memory.encoding_version,
+    ...updateProvenance(memory, request, context, projectId),
   };
   await beforeMutation(beforeWrite, signal);
   return writeResult({ status: "updated", memory: await knowledge.updateMemory(
@@ -1528,10 +1611,7 @@ async function updateEntity(write: KnowledgeWriteContext): Promise<KnowledgeTool
     ...(request.tags === undefined ? {} : { tags: request.tags as string[] }),
     ...(request.aka === undefined ? {} : { aka: request.aka as string[] }),
     project_ids: [...entity.project_ids],
-    source_repo: entity.source_repo ?? context.repoName,
-    source_files: request.source_files === undefined
-      ? entity.source_files : request.source_files as string[],
-    encoding_version: effectiveCommit(context, request) ?? entity.encoding_version,
+    ...updateProvenance(entity, request, context, projectId),
   };
   return writeResult({ status: "updated", entity: await knowledge.updateEntity(
     entity.id, input, signal,
@@ -1585,7 +1665,7 @@ async function updateDocument(write: KnowledgeWriteContext): Promise<KnowledgeTo
   const { knowledge, request, context, projectId, signal, beforeWrite } = write;
   const document = await knowledge.getDocument(request.document_id as number, signal);
   if (document.project_id !== projectId)
-    throw new Error("The document is outside the current project.");
+    throw new Error("The document is outside the destination project.");
   await beforeMutation(beforeWrite, signal);
   const input: Partial<DocumentInput> = {
     ...(request.title === undefined ? {} : { title: request.title as string }),
@@ -1596,10 +1676,7 @@ async function updateDocument(write: KnowledgeWriteContext): Promise<KnowledgeTo
       : { document_type: request.document_type as string }),
     ...(request.tags === undefined ? {} : { tags: request.tags as string[] }),
     project_id: document.project_id,
-    source_repo: document.source_repo ?? context.repoName,
-    source_files: request.source_files === undefined
-      ? document.source_files : request.source_files as string[],
-    encoding_version: effectiveCommit(context, request) ?? document.encoding_version,
+    ...updateProvenance(document, request, context, projectId),
   };
   return writeResult({ status: "updated", document: await knowledge.updateDocument(
     document.id, input, signal,
@@ -1610,7 +1687,7 @@ async function updateCodeArtifact(write: KnowledgeWriteContext): Promise<Knowled
   const { knowledge, request, context, projectId, signal, beforeWrite } = write;
   const artifact = await knowledge.getCodeArtifact(request.code_artifact_id as number, signal);
   if (artifact.project_id !== projectId)
-    throw new Error("The code artifact is outside the current project.");
+    throw new Error("The code artifact is outside the destination project.");
   await beforeMutation(beforeWrite, signal);
   const input: Partial<CodeArtifactInput> = {
     ...(request.title === undefined ? {} : { title: request.title as string }),
@@ -1619,10 +1696,7 @@ async function updateCodeArtifact(write: KnowledgeWriteContext): Promise<Knowled
     ...(request.language === undefined ? {} : { language: request.language as string }),
     ...(request.tags === undefined ? {} : { tags: request.tags as string[] }),
     project_id: artifact.project_id,
-    source_repo: artifact.source_repo ?? context.repoName,
-    source_files: request.source_files === undefined
-      ? artifact.source_files : request.source_files as string[],
-    encoding_version: effectiveCommit(context, request) ?? artifact.encoding_version,
+    ...updateProvenance(artifact, request, context, projectId),
   };
   return writeResult({ status: "updated", code_artifact: await knowledge.updateCodeArtifact(
     artifact.id, input, signal,
@@ -1635,25 +1709,50 @@ export async function executeKnowledgeWrite(
   context: KnowledgeToolContext,
   signal?: AbortSignal,
   beforeWrite?: () => Promise<void>,
+  checkWriteState?: () => void,
 ): Promise<KnowledgeToolResult> {
   rejectSensitiveInput(rawRequest);
   const request = validateKnowledgeWriteRequest(rawRequest);
   if (signal?.aborted) throw new Error("Knowledge write was cancelled.");
   effectiveCommit(context, request);
-  const projectId = currentProject(context);
+  const requestedProject = request.project_id as number | undefined;
+  const destination = await resolveWriteProject(client, context, requestedProject, signal);
+  const projectId = destination.id;
+  const beforeDestinationMutation = async () => {
+    if (beforeWrite) await beforeWrite();
+    const currentDestination = await resolveWriteProject(
+      client, context, requestedProject, signal,
+    );
+    if (
+      currentDestination.id !== destination.id ||
+      currentDestination.repoName !== destination.repoName
+    ) {
+      throw new Error("The Forgetful destination project changed. Retry the operation.");
+    }
+    if (checkWriteState) checkWriteState();
+  };
   const knowledge = rich(client);
   const write: KnowledgeWriteContext = {
-    client, knowledge, request, context, projectId, signal, beforeWrite,
+    client, knowledge, request, context, projectId, signal,
+    beforeWrite: beforeDestinationMutation,
   };
   switch (request.operation) {
     case "create_memory":
-      return createMemory(client, request, context, projectId, signal, beforeWrite);
+      return createMemory(
+        client, request, context, projectId, signal, beforeDestinationMutation,
+      );
     case "create_entity":
-      return createEntity(knowledge, request, context, projectId, signal, beforeWrite);
+      return createEntity(
+        knowledge, request, context, projectId, signal, beforeDestinationMutation,
+      );
     case "create_document":
-      return createDocument(knowledge, request, context, projectId, signal, beforeWrite);
+      return createDocument(
+        knowledge, request, context, projectId, signal, beforeDestinationMutation,
+      );
     case "create_code_artifact":
-      return createCodeArtifact(knowledge, request, context, projectId, signal, beforeWrite);
+      return createCodeArtifact(
+        knowledge, request, context, projectId, signal, beforeDestinationMutation,
+      );
     case "update_memory": return updateMemory(write);
     case "supersede_memory": return supersedeMemory(write);
     case "link_memories": return linkMemories(write);

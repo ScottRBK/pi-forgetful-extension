@@ -245,6 +245,13 @@ If the intended destination cannot be resolved, skip that candidate with setup g
 of silently writing to the current project or without a project. Global recall does not imply
 project-free capture; personal facts that do not belong to a project need a separate policy.
 
+Explicit foreground writes follow the same destination boundary. They default to the verified
+current project, but may supply a numeric `project_id` for another existing repository-assigned
+project. Resolve that destination before overlap checks, revalidate it before mutation, and never
+fall back to the current project. Recall scope remains unchanged. New records and superseding
+replacements identify the active source repository separately from the selected destination;
+updates preserve the existing record's provenance.
+
 Scope enforcement uses the existing Forgetful service contract. The extension adds only local
 persistence for the user's per-project scope preference; it does not add a new cross-project API
 or memory persistence mechanism.
