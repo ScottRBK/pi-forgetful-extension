@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 
-import type { ForgetfulClient, MemoryInput, Project } from "../src/contracts.ts";
+import type {
+  CodeArtifact, CodeArtifactInput, Document, DocumentInput, Entity, EntityInput,
+  EntityRelationshipInput, ForgetfulClient, Memory, MemoryInput, Project,
+} from "../src/contracts.ts";
 import { bundledSkillPaths } from "../src/encode.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import {
@@ -12,6 +15,7 @@ import {
   KNOWLEDGE_READ_PARAMETERS,
   validateKnowledgeReadRequest,
   type KnowledgeToolContext,
+  type KnowledgeWriteRequest,
 } from "../src/knowledge-tools.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
@@ -504,6 +508,377 @@ test("explicit destinations cover update, link, and supersede write families",
     assert.ok((await client.get(old.id)).linked_memory_ids?.includes(related.id));
     assert.equal((await client.get(old.id)).is_obsolete, true);
   });
+
+function raceKnowledgeClient(seed: {
+  memories?: Map<number, Memory>;
+  entities?: Map<number, Entity>;
+  documents?: Map<number, Document>;
+  codeArtifacts?: Map<number, CodeArtifact>;
+  searchResults?: Memory[];
+}): { client: ForgetfulClient; mutations: string[] } {
+  const memories = seed.memories ?? new Map<number, Memory>();
+  const entities = seed.entities ?? new Map<number, Entity>();
+  const documents = seed.documents ?? new Map<number, Document>();
+  const codeArtifacts = seed.codeArtifacts ?? new Map<number, CodeArtifact>();
+  const mutations: string[] = [];
+  let nextMemoryId = 1000;
+  const client = {
+    knowledge: {
+      async getEntity(id: number) {
+        const found = entities.get(id);
+        if (!found) throw new Error("Entity not found.");
+        return found;
+      },
+      async updateEntity(id: number, input: Partial<EntityInput>) {
+        mutations.push("updateEntity");
+        const next = { ...entities.get(id)!, ...input } as Entity;
+        entities.set(id, next);
+        return next;
+      },
+      async linkEntityMemory() { mutations.push("linkEntityMemory"); },
+      async getEntityMemories() { return []; },
+      async getRelationships() { return []; },
+      async createRelationship(input: EntityRelationshipInput) {
+        mutations.push("createRelationship");
+        return { id: 900, ...input };
+      },
+      async getDocument(id: number) {
+        const found = documents.get(id);
+        if (!found) throw new Error("Document not found.");
+        return found;
+      },
+      async updateDocument(id: number, input: Partial<DocumentInput>) {
+        mutations.push("updateDocument");
+        const next = { ...documents.get(id)!, ...input } as Document;
+        documents.set(id, next);
+        return next;
+      },
+      async getCodeArtifact(id: number) {
+        const found = codeArtifacts.get(id);
+        if (!found) throw new Error("Code artifact not found.");
+        return found;
+      },
+      async updateCodeArtifact(id: number, input: Partial<CodeArtifactInput>) {
+        mutations.push("updateCodeArtifact");
+        const next = { ...codeArtifacts.get(id)!, ...input } as CodeArtifact;
+        codeArtifacts.set(id, next);
+        return next;
+      },
+      async updateMemory(id: number, input: Partial<MemoryInput>) {
+        mutations.push("updateMemory");
+        const next = { ...memories.get(id)!, ...input } as Memory;
+        memories.set(id, next);
+        return next;
+      },
+      async linkMemories() { mutations.push("linkMemories"); },
+    },
+    async listProjects() { return []; },
+    async get(id: number) {
+      const found = memories.get(id);
+      if (!found) throw new Error("Memory not found.");
+      return found;
+    },
+    async search() { return seed.searchResults ?? []; },
+    async create(input: MemoryInput) {
+      mutations.push("create");
+      const id = nextMemoryId++;
+      const record = { id, ...input, is_obsolete: false } as Memory;
+      memories.set(id, record);
+      return record;
+    },
+    async supersede() { mutations.push("supersede"); },
+  } as unknown as ForgetfulClient;
+  return { client, mutations };
+}
+
+const raceTarget = 1;
+const raceElsewhere = 2;
+const raceContext = context(raceTarget);
+
+function raceMemory(id: number, overrides: Partial<Memory> = {}): Memory {
+  return {
+    id, title: "Race memory", content: "Original content", context: "race",
+    keywords: [], tags: [], project_ids: [raceTarget], is_obsolete: false, ...overrides,
+  };
+}
+
+function raceEntity(id: number, overrides: Partial<Entity> = {}): Entity {
+  return {
+    id, name: "Race entity", entity_type: "System", tags: [], aka: [],
+    project_ids: [raceTarget], ...overrides,
+  };
+}
+
+interface RaceCase {
+  name: string;
+  build(): {
+    client: ForgetfulClient;
+    mutations: string[];
+    request: KnowledgeWriteRequest;
+    race(): void;
+    allowedMutations?: string[];
+  };
+}
+
+async function runRaceCases(cases: RaceCase[]): Promise<void> {
+  // Act and assert: each write family must re-check the record and attachments it is about
+  // to mutate using state read after the destination-revalidation round trip, not a snapshot
+  // read before that network call.
+  for (const testCase of cases) {
+    const { client, mutations, request, race, allowedMutations } = testCase.build();
+    let raced = false;
+    await assert.rejects(
+      executeKnowledgeWrite(client, request, raceContext, undefined, async () => {
+        if (!raced) {
+          raced = true;
+          race();
+        }
+      }),
+      /outside the destination project|changed while preparing/i,
+      testCase.name,
+    );
+    assert.deepEqual(
+      mutations, allowedMutations ?? [],
+      `${testCase.name} must not mutate using state read before the destination revalidated`,
+    );
+  }
+}
+
+test(
+  "update, link, and relationship writes reject records moved during the destination " +
+  "revalidation gap",
+  async () => {
+    // Arrange: every case starts a record inside the target project and moves it to a
+    // sibling project from within the beforeWrite hook, simulating another client's write
+    // landing during the network round trip that revalidates the destination.
+    const cases: RaceCase[] = [
+      {
+        name: "update_memory",
+        build() {
+          const memories = new Map([[1, raceMemory(1)]]);
+          const { client, mutations } = raceKnowledgeClient({ memories });
+          return {
+            client, mutations,
+            request: { operation: "update_memory", memory_id: 1, tags: ["updated"] },
+            race: () => memories.set(1, { ...memories.get(1)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+      {
+        name: "link_memories",
+        build() {
+          const memories = new Map([[1, raceMemory(1)], [2, raceMemory(2)]]);
+          const { client, mutations } = raceKnowledgeClient({ memories });
+          return {
+            client, mutations,
+            request: { operation: "link_memories", memory_id: 1, related_memory_ids: [2] },
+            race: () => memories.set(2, { ...memories.get(2)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+      {
+        name: "update_entity",
+        build() {
+          const entities = new Map([[1, raceEntity(1)]]);
+          const { client, mutations } = raceKnowledgeClient({ entities });
+          return {
+            client, mutations,
+            request: { operation: "update_entity", entity_id: 1, notes: "updated" },
+            race: () => entities.set(1, { ...entities.get(1)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+      {
+        name: "link_entity_memory",
+        build() {
+          const entities = new Map([[1, raceEntity(1)]]);
+          const memories = new Map([[1, raceMemory(1)]]);
+          const { client, mutations } = raceKnowledgeClient({ entities, memories });
+          return {
+            client, mutations,
+            request: { operation: "link_entity_memory", entity_id: 1, memory_id: 1 },
+            race: () => entities.set(1, { ...entities.get(1)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+      {
+        name: "update_document",
+        build() {
+          const documents = new Map<number, Document>([[1, {
+            id: 1, title: "Race document", description: "Race", content: "Original",
+            tags: [], project_id: raceTarget,
+          }]]);
+          const { client, mutations } = raceKnowledgeClient({ documents });
+          return {
+            client, mutations,
+            request: { operation: "update_document", document_id: 1, title: "Updated document" },
+            race: () => documents.set(1, { ...documents.get(1)!, project_id: raceElsewhere }),
+          };
+        },
+      },
+      {
+        name: "update_code_artifact",
+        build() {
+          const codeArtifacts = new Map<number, CodeArtifact>([[1, {
+            id: 1, title: "Race artifact", description: "Race", code: "print(1)",
+            language: "python", tags: [], project_id: raceTarget,
+          }]]);
+          const { client, mutations } = raceKnowledgeClient({ codeArtifacts });
+          return {
+            client, mutations,
+            request: {
+              operation: "update_code_artifact", code_artifact_id: 1, title: "Updated artifact",
+            },
+            race: () =>
+              codeArtifacts.set(1, { ...codeArtifacts.get(1)!, project_id: raceElsewhere }),
+          };
+        },
+      },
+      {
+        name: "create_relationship",
+        build() {
+          const entities = new Map([[1, raceEntity(1)], [2, raceEntity(2)]]);
+          const { client, mutations } = raceKnowledgeClient({ entities });
+          return {
+            client, mutations,
+            request: {
+              operation: "create_relationship", source_entity_id: 1, target_entity_id: 2,
+              relationship_type: "race",
+            },
+            race: () => entities.set(2, { ...entities.get(2)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+    ];
+
+    await runRaceCases(cases);
+  },
+);
+
+test(
+  "create_memory dedup, replacement creation, and attachment checks reject records and " +
+  "attachments moved during the destination revalidation gap",
+  async () => {
+    // Arrange: these cases exercise the paths that decide *whether and how* to mutate
+    // (exact-match dedup, replacement-memory creation, attachment ownership) using state
+    // read before the destination-revalidation round trip. Each race moves the record or
+    // attachment that decision depended on, so the fix must re-check it afterward.
+    const cases: RaceCase[] = [
+      {
+        name: "create_memory (exact match moved)",
+        build() {
+          const exact = raceMemory(1, { title: "Dup title", content: "Dup content" });
+          const memories = new Map([[1, exact]]);
+          const { client, mutations } = raceKnowledgeClient({ memories, searchResults: [exact] });
+          return {
+            client, mutations,
+            request: {
+              operation: "create_memory", title: "Dup title", content: "Dup content",
+              context: "race", keywords: [], tags: ["new-tag"],
+            },
+            race: () => memories.set(1, { ...memories.get(1)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+      {
+        name: "create_memory (attachment moved)",
+        build() {
+          const documents = new Map<number, Document>([[1, {
+            id: 1, title: "Doc", description: "d", content: "c", tags: [], project_id: raceTarget,
+          }]]);
+          const { client, mutations } = raceKnowledgeClient({ documents, searchResults: [] });
+          return {
+            client, mutations,
+            request: {
+              operation: "create_memory", title: "New memory", content: "New content",
+              context: "race", keywords: [], tags: [], document_ids: [1],
+            },
+            race: () => documents.set(1, { ...documents.get(1)!, project_id: raceElsewhere }),
+          };
+        },
+      },
+      {
+        name: "update_memory (attachment moved)",
+        build() {
+          const memories = new Map([[1, raceMemory(1)]]);
+          const documents = new Map<number, Document>([[1, {
+            id: 1, title: "Doc", description: "d", content: "c", tags: [], project_id: raceTarget,
+          }]]);
+          const { client, mutations } = raceKnowledgeClient({ memories, documents });
+          return {
+            client, mutations,
+            request: { operation: "update_memory", memory_id: 1, document_ids: [1] },
+            race: () => documents.set(1, { ...documents.get(1)!, project_id: raceElsewhere }),
+          };
+        },
+      },
+      {
+        name: "supersede_memory (replacement attachment moved)",
+        build() {
+          const old = raceMemory(1, { title: "Old claim", content: "Old content" });
+          const memories = new Map([[1, old]]);
+          const documents = new Map<number, Document>([[1, {
+            id: 1, title: "Doc", description: "d", content: "c", tags: [], project_id: raceTarget,
+          }]]);
+          const { client, mutations } = raceKnowledgeClient(
+            { memories, documents, searchResults: [] },
+          );
+          return {
+            client, mutations,
+            request: {
+              operation: "supersede_memory", memory_id: 1, title: "New claim",
+              content: "New content", context: "race", keywords: [], tags: [],
+              reason: "test", source_files: ["README.md"], document_ids: [1],
+            },
+            race: () => documents.set(1, { ...documents.get(1)!, project_id: raceElsewhere }),
+          };
+        },
+      },
+      {
+        // The old memory's own membership is rechecked with a fresh fetch (memoryInProject)
+        // right before supersede; a replacement is created before that recheck runs, which
+        // is pre-existing, accepted behavior (not part of this fix) so it is allowed here.
+        name: "supersede_memory (old memory moved)",
+        build() {
+          const old = raceMemory(1, { title: "Old claim", content: "Old content" });
+          const memories = new Map([[1, old]]);
+          const { client, mutations } = raceKnowledgeClient({ memories, searchResults: [] });
+          return {
+            client, mutations,
+            request: {
+              operation: "supersede_memory", memory_id: 1, title: "New claim",
+              content: "New content", context: "race", keywords: [], tags: [],
+              reason: "test", source_files: ["README.md"],
+            },
+            race: () => memories.set(1, { ...memories.get(1)!, project_ids: [raceElsewhere] }),
+            allowedMutations: ["create"],
+          };
+        },
+      },
+      {
+        name: "supersede_memory (explicit replacement moved)",
+        build() {
+          const old = raceMemory(1, { title: "Old claim", content: "Old content" });
+          const replacement = raceMemory(2, {
+            title: "Replacement claim", content: "Replacement content",
+          });
+          const memories = new Map([[1, old], [2, replacement]]);
+          const { client, mutations } = raceKnowledgeClient({ memories, searchResults: [] });
+          return {
+            client, mutations,
+            request: {
+              operation: "supersede_memory", memory_id: 1, replacement_memory_id: 2,
+              reason: "test", source_files: ["README.md"],
+            },
+            race: () => memories.set(2, { ...memories.get(2)!, project_ids: [raceElsewhere] }),
+          };
+        },
+      },
+    ];
+
+    await runRaceCases(cases);
+  },
+);
 
 test(
   "knowledge tools hydrate entity search results before scoped dedupe",

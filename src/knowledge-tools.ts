@@ -1281,26 +1281,36 @@ function memoryUpdates(
 }
 
 async function existingMemoryResult(
+  client: ForgetfulClient,
   knowledge: KnowledgeClient,
   memory: Memory,
   input: MemoryInput,
+  request: Record<string, unknown>,
+  projectId: number,
   signal: AbortSignal | undefined,
   beforeWrite: (() => Promise<void>) | undefined,
   preserveProvenance = false,
 ): Promise<KnowledgeToolResult> {
-  if (memory.project_ids.length > 1) {
-    if (sharedMemoryHasChanges(memory, input, preserveProvenance)) {
-      return writeResult({ status: "needs_review", existing_memory_id: memory.id,
+  await beforeMutation(beforeWrite, signal);
+  const current = await client.get(memory.id, signal);
+  if (!sameMemoryState(current, memory)) {
+    throw new Error(
+      "The matched memory changed while preparing the write; retry with fresh evidence.",
+    );
+  }
+  if (current.project_ids.length > 1) {
+    if (sharedMemoryHasChanges(current, input, preserveProvenance)) {
+      return writeResult({ status: "needs_review", existing_memory_id: current.id,
         reason: "A shared memory has requested changes; choose an explicit project-safe edit." },
       "create_memory");
     }
-    return writeResult({ status: "existing", memory }, "create_memory");
+    return writeResult({ status: "existing", memory: current }, "create_memory");
   }
-  const updates = memoryUpdates(memory, input, preserveProvenance);
+  const updates = memoryUpdates(current, input, preserveProvenance);
   if (Object.keys(updates).length === 0)
-    return writeResult({ status: "existing", memory }, "create_memory");
-  await beforeMutation(beforeWrite, signal);
-  const updated = await knowledge.updateMemory(memory.id, updates, signal);
+    return writeResult({ status: "existing", memory: current }, "create_memory");
+  await validateAttachments(knowledge, projectId, request, signal);
+  const updated = await knowledge.updateMemory(current.id, updates, signal);
   return writeResult({ status: "existing", memory: updated }, "create_memory");
 }
 
@@ -1313,7 +1323,6 @@ async function createMemory(
   beforeWrite: (() => Promise<void>) | undefined,
 ): Promise<KnowledgeToolResult> {
   const knowledge = rich(client);
-  await validateAttachments(knowledge, projectId, request, signal);
   const input: MemoryInput = {
     title: request.title as string,
     content: request.content as string,
@@ -1339,7 +1348,8 @@ async function createMemory(
   const exact = matches.find((item) => isExactMemoryMatch(item, input, projectId));
   if (exact) {
     return existingMemoryResult(
-      knowledge, exact, input, signal, beforeWrite, projectId !== context.project?.id,
+      client, knowledge, exact, input, request, projectId, signal, beforeWrite,
+      projectId !== context.project?.id,
     );
   }
   const sameTitle = matches.find((item) =>
@@ -1349,6 +1359,7 @@ async function createMemory(
       reason: "A changed claim needs explicit supersede_memory." }, "create_memory");
   }
   await beforeMutation(beforeWrite, signal);
+  await validateAttachments(knowledge, projectId, request, signal);
   const created = await client.create(input, signal);
   return writeResult({ status: "created", memory: created }, "create_memory");
 }
@@ -1477,7 +1488,6 @@ async function replacementMemory(
     if (replacement.is_obsolete) throw new Error("The replacement memory is obsolete.");
     return replacement;
   }
-  await validateAttachments(knowledge, projectId, request, signal);
   const input: MemoryInput = {
     title: (request.title as string | undefined) ?? "Updated repository knowledge",
     content: request.content as string,
@@ -1506,6 +1516,7 @@ async function replacementMemory(
     item.content.trim() === input.content.trim());
   if (exact) return exact;
   await beforeMutation(beforeWrite, signal);
+  await validateAttachments(knowledge, projectId, request, signal);
   const created = await client.create(input, signal);
   return client.get(created.id, signal);
 }
@@ -1522,6 +1533,7 @@ interface KnowledgeWriteContext {
 
 async function updateMemory(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { client, knowledge, request, context, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   const memory = await memoryInProject(
     client, request.memory_id as number, projectId, signal, true,
   );
@@ -1551,7 +1563,6 @@ async function updateMemory(write: KnowledgeWriteContext): Promise<KnowledgeTool
     ),
     ...updateProvenance(memory, request, context, projectId),
   };
-  await beforeMutation(beforeWrite, signal);
   return writeResult({ status: "updated", memory: await knowledge.updateMemory(
     memory.id, input, signal,
   ) }, request.operation);
@@ -1574,12 +1585,9 @@ async function supersedeMemory(write: KnowledgeWriteContext): Promise<KnowledgeT
     client, knowledge, request, context, projectId, signal, beforeWrite,
   );
   if (replacement.id === oldMemory.id) throw new Error("A memory cannot supersede itself.");
-  const replacementSnapshot = await memoryInProject(
-    client, replacement.id, projectId, signal, true,
-  );
   await beforeMutation(beforeWrite, signal);
-  const currentOld = await client.get(oldMemory.id, signal);
-  const currentReplacement = await client.get(replacement.id, signal);
+  const currentOld = await memoryInProject(client, oldMemory.id, projectId, signal, true);
+  const currentReplacement = await memoryInProject(client, replacement.id, projectId, signal, true);
   if (currentOld.is_obsolete && currentOld.superseded_by === replacement.id) {
     return writeResult({ status: "already", old_memory_id: oldMemory.id,
       replacement_memory_id: replacement.id }, request.operation);
@@ -1589,9 +1597,8 @@ async function supersedeMemory(write: KnowledgeWriteContext): Promise<KnowledgeT
       "The old memory changed while preparing supersession; retry with fresh evidence.",
     );
   }
-  if (!sameMemoryState(currentReplacement, replacementSnapshot))
+  if (!sameMemoryState(currentReplacement, replacement))
     throw new Error("The replacement memory changed while preparing supersession; retry.");
-  await beforeMutation(beforeWrite, signal);
   await client.supersede(oldMemory.id, replacement.id, request.reason as string, signal);
   return writeResult({ status: "superseded", old_memory_id: oldMemory.id,
     replacement_memory_id: replacement.id }, request.operation);
@@ -1599,10 +1606,10 @@ async function supersedeMemory(write: KnowledgeWriteContext): Promise<KnowledgeT
 
 async function linkMemories(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { client, knowledge, request, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   await memoryInProject(client, request.memory_id as number, projectId, signal);
   for (const id of request.related_memory_ids as number[])
     await memoryInProject(client, id, projectId, signal);
-  await beforeMutation(beforeWrite, signal);
   await knowledge.linkMemories(
     request.memory_id as number, request.related_memory_ids as number[], signal,
   );
@@ -1611,10 +1618,10 @@ async function linkMemories(write: KnowledgeWriteContext): Promise<KnowledgeTool
 
 async function updateEntity(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { knowledge, request, context, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   const entity = await entityInProject(
     knowledge, request.entity_id as number, projectId, signal, true,
   );
-  await beforeMutation(beforeWrite, signal);
   const input: Partial<EntityInput> = {
     ...(request.name === undefined ? {} : { name: request.name as string }),
     ...(request.entity_type === undefined
@@ -1634,9 +1641,9 @@ async function updateEntity(write: KnowledgeWriteContext): Promise<KnowledgeTool
 
 async function linkEntityMemory(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { client, knowledge, request, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   await entityInProject(knowledge, request.entity_id as number, projectId, signal);
   await memoryInProject(client, request.memory_id as number, projectId, signal);
-  await beforeMutation(beforeWrite, signal);
   await knowledge.linkEntityMemory(
     request.entity_id as number, request.memory_id as number, signal,
   );
@@ -1664,6 +1671,8 @@ async function createRelationship(write: KnowledgeWriteContext): Promise<Knowled
     return writeResult({ status: "existing", relationship: existing }, request.operation);
   }
   await beforeMutation(beforeWrite, signal);
+  await entityInProject(knowledge, request.source_entity_id as number, projectId, signal);
+  await entityInProject(knowledge, request.target_entity_id as number, projectId, signal);
   const input: EntityRelationshipInput = {
     source_entity_id: request.source_entity_id as number,
     target_entity_id: request.target_entity_id as number,
@@ -1677,10 +1686,10 @@ async function createRelationship(write: KnowledgeWriteContext): Promise<Knowled
 
 async function updateDocument(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { knowledge, request, context, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   const document = await knowledge.getDocument(request.document_id as number, signal);
   if (document.project_id !== projectId)
     throw new Error("The document is outside the destination project.");
-  await beforeMutation(beforeWrite, signal);
   const input: Partial<DocumentInput> = {
     ...(request.title === undefined ? {} : { title: request.title as string }),
     ...(request.description === undefined ? {} : { description: request.description as string }),
@@ -1699,10 +1708,10 @@ async function updateDocument(write: KnowledgeWriteContext): Promise<KnowledgeTo
 
 async function updateCodeArtifact(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
   const { knowledge, request, context, projectId, signal, beforeWrite } = write;
+  await beforeMutation(beforeWrite, signal);
   const artifact = await knowledge.getCodeArtifact(request.code_artifact_id as number, signal);
   if (artifact.project_id !== projectId)
     throw new Error("The code artifact is outside the destination project.");
-  await beforeMutation(beforeWrite, signal);
   const input: Partial<CodeArtifactInput> = {
     ...(request.title === undefined ? {} : { title: request.title as string }),
     ...(request.description === undefined ? {} : { description: request.description as string }),
