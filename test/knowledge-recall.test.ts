@@ -2,9 +2,102 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ApiForgetfulClient } from "../src/http.ts";
-import { KnowledgeReadService, chunkText } from "../src/knowledge-read.ts";
+import type { KnowledgeClient, Memory } from "../src/contracts.ts";
+import { KnowledgeReadService } from "../src/knowledge-read.ts";
 import { RecallService } from "../src/recall.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+
+test("rich recall renders complete stored records", async () => {
+  // Arrange: every marker is beyond a former rendering or chunk cutoff.
+  const notes = `${"entity note ".repeat(50)}ENTITY_NOTES_END`;
+  const documentContent = `${"document body ".repeat(220)}DOCUMENT_END`;
+  const artifactCode = `${"const value = 1;\n".repeat(180)}CODE_END`;
+  const documentDescription = `${"document description ".repeat(20)}DOCUMENT_DESCRIPTION_END`;
+  const artifactDescription = `${"artifact description ".repeat(20)}ARTIFACT_DESCRIPTION_END`;
+  const fileDescription = `${"file description ".repeat(25)}FILE_DESCRIPTION_END`;
+  const client = {
+    searchEntities: async () => [{
+      id: 21,
+      name: "API",
+      entity_type: "System" as const,
+      notes,
+      aka: [],
+      tags: [],
+      project_ids: [3],
+    }],
+    getEntity: async () => ({
+      id: 21,
+      name: "API",
+      entity_type: "System" as const,
+      notes,
+      aka: [],
+      tags: [],
+      project_ids: [3],
+    }),
+    getRelationships: async () => [],
+    getEntityMemories: async () => [],
+    getDocument: async () => ({
+      id: 31,
+      title: "Architecture",
+      description: documentDescription,
+      content: documentContent,
+      tags: [],
+      project_id: 3,
+    }),
+    getCodeArtifact: async () => ({
+      id: 41,
+      title: "Handler",
+      description: artifactDescription,
+      code: artifactCode,
+      language: "typescript",
+      tags: [],
+      project_id: 3,
+    }),
+    listFiles: async () => [{
+      id: 51,
+      filename: "architecture.txt",
+      description: fileDescription,
+      mime_type: "text/plain",
+      size_bytes: 100,
+      tags: [],
+      project_id: 3,
+    }],
+  } as unknown as KnowledgeClient;
+  const memory = {
+    id: 11,
+    title: "API architecture",
+    content: "Architecture evidence",
+    context: "Design",
+    keywords: [],
+    tags: [],
+    project_ids: [3],
+    document_ids: [31],
+    code_artifact_ids: [41],
+    file_ids: [51],
+    is_obsolete: false,
+  } satisfies Memory;
+  const service = new KnowledgeReadService(client);
+
+  // Act.
+  const result = await service.expand({
+    memories: [memory],
+    entityNames: ["API"],
+    scope: "project",
+    projectId: 3,
+  });
+
+  // Assert: API-validated record fields reach the recall evidence in full.
+  for (const marker of [
+    "ENTITY_NOTES_END",
+    "DOCUMENT_DESCRIPTION_END",
+    "DOCUMENT_END",
+    "ARTIFACT_DESCRIPTION_END",
+    "CODE_END",
+    "FILE_DESCRIPTION_END",
+  ]) {
+    assert.match(result.text, new RegExp(marker));
+  }
+});
 
 test(
   "recall expands scoped graph records and linked readable artifacts",
@@ -127,7 +220,6 @@ test(
     assert.deepEqual(result.documentIds, [document.id]);
     assert.deepEqual(result.codeArtifactIds, [artifact.id]);
     assert.deepEqual(result.fileIds, [storedFile.id]);
-    assert.deepEqual(chunkText("one two three", 7), ["one two", "three"]);
   },
 );
 
@@ -346,7 +438,7 @@ test(
 );
 
 test(
-  "long candidates yield a bounded summary with reviewed rich sources and policy",
+  "long candidates yield a reviewed summary with rich sources and policy",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -416,7 +508,6 @@ test(
     assert.match(result.text, new RegExp(`Entity #${entity.id}`));
     assert.match(result.text, /Long architecture document/);
     assert.match(result.text, /Recall handling policy/);
-    assert.ok(result.text.length <= 6_000);
     assert.deepEqual(result.entityIds, [entity.id]);
     assert.deepEqual(result.documentIds, [document.id]);
   },

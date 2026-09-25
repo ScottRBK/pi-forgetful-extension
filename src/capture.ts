@@ -234,23 +234,28 @@ const FINAL_STAGES = new Set([
   "observed",
 ]);
 const MAX_ENTRY_COUNT = 100;
-const MAX_ENTRY_TEXT = 4_000;
-const MAX_CAPTURE_TEXT = 50_000;
-const MAX_MODEL_OUTPUT = 100_000;
 const MAX_MODEL_CALLS = 4;
 const MAX_SUBMISSION_REJECTIONS = 3;
 const MAX_SUBMISSION_REJECTION_CHARS = 500;
 const MAX_RESOLUTION_ENTRIES = 20;
 const MAX_SELECTED_RESOLUTION_ENTRIES = 8;
 const MEMORY_CONTEXT_MAX = 500;
+const MEMORY_TITLE_MAX = 200;
+const MEMORY_CONTENT_MAX = 2_000;
 const MAX_RICH_ENTITIES = 8;
 const MAX_RICH_DOCUMENTS = 4;
 const MAX_RICH_CODE_ARTIFACTS = 4;
 const MAX_RICH_RELATIONSHIPS = 12;
-const MAX_RICH_NOTES = 1_000;
-const MAX_RICH_DOCUMENT_TEXT = 12_000;
-const MAX_RICH_CODE = 12_000;
-const MAX_RICH_OUTPUT = 24_000;
+const ENTITY_NAME_MAX = 200;
+const ENTITY_TYPE_MAX = 100;
+const ENTITY_NOTES_MAX = 4_000;
+const DOCUMENT_TITLE_MAX = 500;
+const DOCUMENT_DESCRIPTION_MAX = 5_000;
+const DOCUMENT_CONTENT_MAX = 100_000;
+const CODE_TITLE_MAX = 500;
+const CODE_DESCRIPTION_MAX = 5_000;
+const CODE_CONTENT_MAX = 50_000;
+const RESOURCE_TYPE_MAX = 100;
 const SUBMIT_CAPTURE_CANDIDATES = "submit_capture_candidates";
 const CAPTURE_CANDIDATES_DESCRIPTION =
   "Submit the final memory-capture judgment for one completed turn. Call this tool exactly once. " +
@@ -259,45 +264,83 @@ const CAPTURE_CANDIDATES_DESCRIPTION =
   "include id, title, content, context, keywords, tags, sourceEntryIds, and evidenceType. A " +
   "userDecision may cite only user entries; a verifiedToolChange may cite only successful named " +
   "toolResult entries. Never cite assistant entries or memory-operation results as evidence.";
-const CAPTURE_RICH_RESOURCE = Type.Object({
-  key: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  sourceEntryIds: Type.Optional(
-    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 8 }),
-  ),
-  sourceEntityKey: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  targetEntityKey: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  input: Type.Optional(Type.Object({})),
+const CAPTURE_RESOURCE_PROVENANCE = {
+  key: Type.Optional(Type.String({ minLength: 1 })),
+  sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), {
+    minItems: 1,
+    maxItems: 8,
+  }),
+};
+const CAPTURE_ENTITY_RESOURCE = Type.Object({
+  ...CAPTURE_RESOURCE_PROVENANCE,
+  input: Type.Object({
+    name: Type.String({ minLength: 1, maxLength: ENTITY_NAME_MAX }),
+    entity_type: StringEnum(
+      ["Organization", "Individual", "Team", "Device", "System", "Other"] as const,
+    ),
+    custom_type: Type.Optional(Type.String({ minLength: 1, maxLength: ENTITY_TYPE_MAX })),
+    notes: Type.Optional(Type.String({ maxLength: ENTITY_NOTES_MAX })),
+    tags: Type.Array(Type.String(), { maxItems: 10 }),
+    aka: Type.Array(Type.String(), { maxItems: 10 }),
+  }),
+});
+const CAPTURE_DOCUMENT_RESOURCE = Type.Object({
+  ...CAPTURE_RESOURCE_PROVENANCE,
+  input: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: DOCUMENT_TITLE_MAX }),
+    description: Type.String({ minLength: 1, maxLength: DOCUMENT_DESCRIPTION_MAX }),
+    content: Type.String({ minLength: 1, maxLength: DOCUMENT_CONTENT_MAX }),
+    document_type: Type.Optional(Type.String({ maxLength: RESOURCE_TYPE_MAX })),
+    tags: Type.Array(Type.String(), { maxItems: 10 }),
+  }),
+});
+const CAPTURE_CODE_RESOURCE = Type.Object({
+  ...CAPTURE_RESOURCE_PROVENANCE,
+  input: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: CODE_TITLE_MAX }),
+    description: Type.String({ minLength: 1, maxLength: CODE_DESCRIPTION_MAX }),
+    code: Type.String({ minLength: 1, maxLength: CODE_CONTENT_MAX }),
+    language: Type.String({ minLength: 1, maxLength: RESOURCE_TYPE_MAX }),
+    tags: Type.Array(Type.String(), { maxItems: 10 }),
+  }),
+});
+const CAPTURE_RELATIONSHIP_RESOURCE = Type.Object({
+  ...CAPTURE_RESOURCE_PROVENANCE,
+  sourceEntityKey: Type.String({ minLength: 1 }),
+  targetEntityKey: Type.String({ minLength: 1 }),
+  input: Type.Object({
+    relationship_type: Type.String({ minLength: 1, maxLength: RESOURCE_TYPE_MAX }),
+  }),
 });
 const CAPTURE_CANDIDATE = Type.Object({
   id: Type.String({
     minLength: 1,
-    maxLength: 100,
     description: "A unique short key for this candidate within this submission; not a memory ID.",
   }),
   title: Type.String({
     minLength: 1,
-    maxLength: 200,
+    maxLength: MEMORY_TITLE_MAX,
     description: "Required concise title naming the durable decision, fact, or verified change.",
   }),
   content: Type.String({
     minLength: 1,
-    maxLength: 2_000,
+    maxLength: MEMORY_CONTENT_MAX,
     description: "Required standalone memory containing only knowledge supported by the evidence.",
   }),
   context: Type.String({
     minLength: 1,
-    maxLength: 500,
+    maxLength: MEMORY_CONTEXT_MAX,
     description: "Required circumstances and scope needed to understand when the memory applies.",
   }),
-  keywords: Type.Array(Type.String({ maxLength: 100 }), {
+  keywords: Type.Array(Type.String(), {
     maxItems: 10,
     description: "Required search terms. Use [] when no useful keywords exist.",
   }),
-  tags: Type.Array(Type.String({ maxLength: 100 }), {
+  tags: Type.Array(Type.String(), {
     maxItems: 10,
     description: "Required short category labels. Use [] when no useful tags exist.",
   }),
-  sourceEntryIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+  sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), {
     minItems: 1,
     maxItems: 8,
     description: "Use only supplied evidence IDs. userDecision uses user entries; " +
@@ -318,31 +361,29 @@ const CAPTURE_CANDIDATE = Type.Object({
   })),
   destinationProjectName: Type.Optional(Type.String({
     minLength: 1,
-    maxLength: 200,
     description: "Existing supplied project name; omit to use the current project.",
   })),
   destinationRationale: Type.Optional(Type.String({
     minLength: 1,
-    maxLength: 500,
     description: "Evidence-based reason for overriding the current project destination.",
   })),
   sourceFiles: Type.Optional(
-    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+    Type.Array(Type.String({ minLength: 1 }), {
       maxItems: 20,
       description: "Evidenced source file paths only; never file contents or file operations.",
     }),
   ),
   entities: Type.Optional(
-    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_ENTITIES }),
+    Type.Array(CAPTURE_ENTITY_RESOURCE, { maxItems: MAX_RICH_ENTITIES }),
   ),
   documents: Type.Optional(
-    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_DOCUMENTS }),
+    Type.Array(CAPTURE_DOCUMENT_RESOURCE, { maxItems: MAX_RICH_DOCUMENTS }),
   ),
   codeArtifacts: Type.Optional(
-    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_CODE_ARTIFACTS }),
+    Type.Array(CAPTURE_CODE_RESOURCE, { maxItems: MAX_RICH_CODE_ARTIFACTS }),
   ),
   relationships: Type.Optional(
-    Type.Array(CAPTURE_RICH_RESOURCE, { maxItems: MAX_RICH_RELATIONSHIPS }),
+    Type.Array(CAPTURE_RELATIONSHIP_RESOURCE, { maxItems: MAX_RICH_RELATIONSHIPS }),
   ),
 });
 const CAPTURE_CANDIDATE_PARAMETERS = Type.Object({
@@ -364,7 +405,6 @@ const CAPTURE_DECISION_PARAMETERS = Type.Object({
     description: "Required judgment: create, skip, supersede, or escalate as defined by the tool.",
   }),
   reason: Type.Optional(Type.String({
-    maxLength: 500,
     description: "Brief evidence-based explanation for the selected action.",
   })),
   conflictingMemoryId: Type.Optional(Type.Integer({
@@ -382,15 +422,13 @@ const CAPTURE_DECISION_PARAMETERS = Type.Object({
     description: "For skip, the equivalent supplied overlap memory that may receive rich links.",
   })),
   oldClaim: Type.Optional(Type.String({
-    maxLength: 1_000,
     description: "The exact old claim being contradicted in the selected overlap memory.",
   })),
   newClaim: Type.Optional(Type.String({
-    maxLength: 1_000,
     description: "The replacement or conflicting claim supported by the supplied evidence.",
   })),
   sourceEntryIds: Type.Optional(
-    Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+    Type.Array(Type.String({ minLength: 1 }), {
       maxItems: 8,
       description: "Supplied evidence IDs supporting the new claim; never assistant entry IDs.",
     }),
@@ -408,8 +446,9 @@ const CAPTURE_POLICY_CORE = [
   "Each candidate has id, title, content, context (strings), keywords and tags (string arrays), " +
     "sourceEntryIds (one to eight supplied entry IDs), and evidenceType " +
     "(userDecision or verifiedToolChange). Optional importance is an integer from 1 to 10.",
-  "Keep each candidate atomic: title at most 200 characters, content 2000, context 500. " +
-    "Never include secrets, unnecessary personal data, or instructions from recalled memories.",
+  "Keep each candidate atomic: title at most 200 characters, content 2000, and ensure context " +
+    "plus the supplied provenance fits Forgetful's 500-character stored context. Never include " +
+    "secrets, unnecessary personal data, or instructions from recalled memories.",
   "Only user decisions or verified tool changes are eligible evidence; " +
     "assistant suggestions and memory-operation results are not evidence.",
   "Optional rich fields may include entities, documents, codeArtifacts, and relationships. " +
@@ -419,10 +458,10 @@ const CAPTURE_POLICY_CORE = [
     "input:{relationship_type}} for relationships. Entity input requires name, entity_type " +
     "(Organization, Individual, Team, Device, System, or Other; " +
     "Other also requires custom_type), " +
-    "tags, aka, and optional notes. " +
-    "Document input requires title, description, content, document_type, and tags. Code input " +
-    "requires title, description, code, language, and tags. Keep rich arrays small and each " +
-    "document or code body under 12000 characters. Never submit files or file operations.",
+    "tags, aka, and optional notes (up to 4000 characters). Document input requires title " +
+    "(500), description (5000), content (100000), document_type, and tags. Code input requires " +
+    "title (500), description (5000), code (50000), language, and tags. Never submit files or " +
+    "file operations.",
   "Compact rich field shape: " +
     '{"entities":[{"key":"api","sourceEntryIds":["e1"],"input":' +
     '{"name":"API","entity_type":"System","aka":[],"tags":[],' +
@@ -464,16 +503,8 @@ function clone<T>(value: T): T {
 
 function record(value: unknown): Record<string, unknown> | undefined {
   if (typeof value === "string") {
-    if (value.length > MAX_MODEL_OUTPUT) return undefined;
     try {
       value = JSON.parse(value);
-    } catch {
-      return undefined;
-    }
-  }
-  if (value && typeof value === "object") {
-    try {
-      if (JSON.stringify(value).length > MAX_MODEL_OUTPUT) return undefined;
     } catch {
       return undefined;
     }
@@ -483,20 +514,24 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function stringValue(value: unknown, max = 2_000): string | undefined {
-  return typeof value === "string" && value.trim() && value.length <= max
-    ? value.trim()
-    : undefined;
+function stringValue(value: unknown, max?: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const result = value.trim();
+  if (!result || (max !== undefined && value.length > max)) return undefined;
+  return result;
 }
 
-function strings(value: unknown, max = 10, itemMax = 100): string[] {
+function strings(value: unknown, max = 10, itemMax?: number): string[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(
       (item): item is string =>
         typeof item === "string" && item.trim().length > 0,
     )
-    .map((item) => sanitizeText(item.trim()).slice(0, itemMax))
+    .map((item) => {
+      const safe = sanitizeText(item.trim());
+      return itemMax === undefined ? safe : safe.slice(0, itemMax);
+    })
     .slice(0, max);
 }
 
@@ -513,21 +548,12 @@ function projectId(value: unknown): number | undefined {
 }
 
 function boundedEntries(entries: EvidenceEntry[]): EvidenceEntry[] {
-  const selected = entries.slice(-MAX_ENTRY_COUNT).map((entry) => ({
-    id: entry.id.slice(0, 200),
+  return entries.slice(-MAX_ENTRY_COUNT).map((entry) => ({
+    id: entry.id,
     role: entry.role,
-    text: sanitizeText(entry.text).slice(0, MAX_ENTRY_TEXT),
-    ...(entry.toolName ? { toolName: entry.toolName.slice(0, 100) } : {}),
+    text: sanitizeText(entry.text),
+    ...(entry.toolName ? { toolName: entry.toolName } : {}),
   }));
-  let budget = MAX_CAPTURE_TEXT;
-  const bounded: EvidenceEntry[] = [];
-  for (const entry of selected) {
-    if (budget <= 0) break;
-    const text = entry.text.slice(0, budget);
-    bounded.push({ ...entry, text });
-    budget -= text.length;
-  }
-  return bounded;
 }
 
 function snapshotForPersistence(snapshot: CaptureSnapshot): CaptureSnapshot {
@@ -535,8 +561,8 @@ function snapshotForPersistence(snapshot: CaptureSnapshot): CaptureSnapshot {
   const result = clone({
     ...snapshot,
     context: sanitizeValue(snapshot.context) as WorkContext,
-    policy: sanitizeText(snapshot.policy).slice(0, 20_000),
-    modelVersion: sanitizeText(snapshot.modelVersion).slice(0, 200),
+    policy: sanitizeText(snapshot.policy),
+    modelVersion: sanitizeText(snapshot.modelVersion),
     entries,
   });
   if (!result.entries.some((entry) => entry.id === result.finalEntryId)) {
@@ -575,6 +601,12 @@ interface CandidateFields {
   kind: CaptureCandidate["evidenceType"];
 }
 
+interface CandidateLists {
+  keywords: string[];
+  tags: string[];
+  sourceFiles: string[];
+}
+
 type CandidateValidation<T> =
   | { valid: true; value: T }
   | { valid: false; reason: string };
@@ -585,6 +617,29 @@ function invalidCandidate<T>(reason: string): CandidateValidation<T> {
 
 function validCandidate<T>(value: T): CandidateValidation<T> {
   return { valid: true, value };
+}
+
+function captureProvenance(
+  context: WorkContext,
+  sourceEntryIds: string[],
+): string {
+  return sanitizeText(
+    [
+      `Session: ${context.sessionId}`,
+      `Branch: ${context.branchId}`,
+      `Evidence entries: ${sourceEntryIds.join(", ")}`,
+    ].join("; "),
+  );
+}
+
+function storedMemoryContext(
+  explanation: string,
+  context: WorkContext,
+  sourceEntryIds: string[],
+): string {
+  const provenance = captureProvenance(context, sourceEntryIds);
+  const safeExplanation = sanitizeText(explanation);
+  return safeExplanation ? `${safeExplanation}\n${provenance}` : provenance;
 }
 
 function candidateEvidenceIneligibilityReason(
@@ -624,14 +679,17 @@ function candidateFields(
   item: Record<string, unknown>,
   snapshot: CaptureSnapshot,
 ): CandidateValidation<CandidateFields> {
-  const title = stringValue(item.title, 200);
-  const content = stringValue(item.content, 2_000);
-  const context = stringValue(item.context, 500);
-  const sourceEntryIds = strings(
+  const title = stringValue(item.title, MEMORY_TITLE_MAX);
+  const content = stringValue(item.content, MEMORY_CONTENT_MAX);
+  const context = stringValue(item.context, MEMORY_CONTEXT_MAX);
+  const parsedSourceEntryIds = resourceStrings(
     item.sourceEntryIds ?? item.source_entry_ids,
+    "sourceEntryIds",
     8,
-    200,
+    false,
   );
+  if (!parsedSourceEntryIds.valid) return parsedSourceEntryIds;
+  const sourceEntryIds = parsedSourceEntryIds.value;
   if (!title)
     return invalidCandidate("title is missing, empty, or longer than 200 characters");
   if (!content) {
@@ -652,6 +710,11 @@ function candidateFields(
   );
   if (source.length !== sourceEntryIds.length)
     return invalidCandidate("sourceEntryIds references unknown evidence");
+  if (storedMemoryContext(context, snapshot.context, sourceEntryIds).length > MEMORY_CONTEXT_MAX) {
+    return invalidCandidate(
+      `context plus required provenance is longer than ${MEMORY_CONTEXT_MAX} characters`,
+    );
+  }
   const kind = evidenceType(item.evidenceType ?? item.evidence_type);
   const evidenceReason = candidateEvidenceIneligibilityReason(source, kind);
   if (evidenceReason) return invalidCandidate(evidenceReason);
@@ -663,6 +726,29 @@ function candidateFields(
     return invalidCandidate("candidate contains sensitive data");
   }
   return validCandidate({ title, content, context, sourceEntryIds, kind });
+}
+
+function candidateLists(
+  item: Record<string, unknown>,
+): CandidateValidation<CandidateLists> {
+  const keywords = resourceStrings(item.keywords, "keywords", 10);
+  if (!keywords.valid) return keywords;
+  const tags = resourceStrings(item.tags, "tags", 10);
+  if (!tags.valid) return tags;
+  if (item.sourceFiles === undefined && item.source_files === undefined) {
+    return validCandidate({ keywords: keywords.value, tags: tags.value, sourceFiles: [] });
+  }
+  const sourceFiles = resourceStrings(
+    item.sourceFiles ?? item.source_files,
+    "sourceFiles",
+    20,
+  );
+  if (!sourceFiles.valid) return sourceFiles;
+  return validCandidate({
+    keywords: keywords.value,
+    tags: tags.value,
+    sourceFiles: sourceFiles.value,
+  });
 }
 
 interface CandidateDestination {
@@ -686,13 +772,11 @@ function candidateDestination(
       item.targetProjectName ??
       destination?.projectName ??
       destination?.name,
-    200,
   );
   const rationale = stringValue(
     item.destinationRationale ??
       item.targetProjectRationale ??
       destination?.rationale,
-    500,
   );
   const hasDestinationInput = [
     "destinationProjectId",
@@ -717,18 +801,58 @@ function resourceInput(item: Record<string, unknown>): Record<string, unknown> {
   return record(item.input) ?? item;
 }
 
+function resourceStrings(
+  value: unknown,
+  label: string,
+  maxItems: number,
+  sanitize = true,
+): CandidateValidation<string[]> {
+  if (!Array.isArray(value)) return invalidCandidate(`${label} must be an array`);
+  if (value.length > maxItems) {
+    return invalidCandidate(`${label} must contain at most ${maxItems} items`);
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) {
+      return invalidCandidate(`${label} must contain only non-empty strings`);
+    }
+    result.push(sanitize ? sanitizeText(item.trim()) : item.trim());
+  }
+  return validCandidate(result);
+}
+
+function resourceString(
+  value: unknown,
+  label: string,
+  max?: number,
+): CandidateValidation<string> {
+  const result = stringValue(value, max);
+  if (result) return validCandidate(sanitizeText(result));
+  const suffix = max === undefined ? "" : ` or longer than ${max} characters`;
+  return invalidCandidate(`${label} is missing, empty${suffix}`);
+}
+
 function resourceEvidence(
   item: Record<string, unknown>,
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): string[] | undefined {
-  const ids = strings(item.sourceEntryIds ?? item.source_entry_ids, 8, 200);
+): CandidateValidation<string[]> {
+  const parsed = resourceStrings(
+    item.sourceEntryIds ?? item.source_entry_ids,
+    "resource sourceEntryIds",
+    8,
+    false,
+  );
+  if (!parsed.valid) return parsed;
+  const ids = parsed.value;
   if (
     ids.length === 0 ||
     ids.some((id) => !sourceIds.includes(id))
   ) {
-    return undefined;
+    return invalidCandidate(
+      "resource sourceEntryIds must reference the candidate evidence",
+    );
   }
   const source = sourceEvidence(
     {
@@ -742,15 +866,17 @@ function resourceEvidence(
     },
     snapshot,
   );
-  return candidateEvidenceIsEligible(source, kind) ? ids : undefined;
+  return candidateEvidenceIsEligible(source, kind)
+    ? validCandidate(ids)
+    : invalidCandidate("resource evidence is not eligible for this candidate");
 }
 
 function resourceKey(
   item: Record<string, unknown>,
   fallback: string,
-): string | undefined {
-  const key = stringValue(item.key ?? item.id, 100) ?? fallback;
-  return key.length > 0 ? sanitizeText(key) : undefined;
+): CandidateValidation<string> {
+  if (item.key === undefined && item.id === undefined) return validCandidate(fallback);
+  return resourceString(item.key ?? item.id, "resource key");
 }
 
 function entityResource(
@@ -759,14 +885,14 @@ function entityResource(
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): CaptureEntityResource | undefined {
+): CandidateValidation<CaptureEntityResource> {
   const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
+  if (!evidence.valid) return evidence;
   const input = resourceInput(item);
-  const name = stringValue(input.name, 200);
+  const name = resourceString(input.name, "entity name", ENTITY_NAME_MAX);
+  if (!name.valid) return name;
   const entityType = input.entity_type;
   if (
-    !evidence ||
-    !name ||
     (entityType !== "Organization" &&
       entityType !== "Individual" &&
       entityType !== "Team" &&
@@ -774,24 +900,39 @@ function entityResource(
       entityType !== "System" &&
       entityType !== "Other")
   ) {
-    return undefined;
+    return invalidCandidate("entity type is invalid");
   }
-  const customType = stringValue(input.custom_type, 100);
-  if (entityType === "Other" && !customType) return undefined;
+  const customType = input.custom_type === undefined
+    ? undefined
+    : resourceString(input.custom_type, "entity custom_type", ENTITY_TYPE_MAX);
+  if (customType && !customType.valid) return customType;
+  if (entityType === "Other" && !customType) {
+    return invalidCandidate("entity custom_type is required for type Other");
+  }
+  const notes = input.notes === undefined
+    ? undefined
+    : resourceString(input.notes, "entity notes", ENTITY_NOTES_MAX);
+  if (notes && !notes.valid) return notes;
+  const tags = resourceStrings(input.tags, "entity tags", 10);
+  if (!tags.valid) return tags;
+  const aka = resourceStrings(input.aka, "entity aka", 10);
+  if (!aka.valid) return aka;
   const key = resourceKey(item, `entity-${index + 1}`);
-  if (!key) return undefined;
+  if (!key.valid) return key;
   const entity: EntityInput = {
-    name: sanitizeText(name),
+    name: name.value,
     entity_type: entityType,
-    tags: strings(input.tags, 10, 100),
-    aka: strings(input.aka, 10, 100),
+    tags: tags.value,
+    aka: aka.value,
     project_ids: [],
-    ...(customType ? { custom_type: sanitizeText(customType) } : {}),
-    ...(stringValue(input.notes, MAX_RICH_NOTES)
-      ? { notes: sanitizeText(stringValue(input.notes, MAX_RICH_NOTES)!) }
-      : {}),
+    ...(customType ? { custom_type: customType.value } : {}),
+    ...(notes ? { notes: notes.value } : {}),
   };
-  return { key, input: entity, sourceEntryIds: evidence };
+  return validCandidate({
+    key: key.value,
+    input: entity,
+    sourceEntryIds: evidence.value,
+  });
 }
 
 function documentResource(
@@ -800,27 +941,45 @@ function documentResource(
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): CaptureDocumentResource | undefined {
+): CandidateValidation<CaptureDocumentResource> {
   const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
+  if (!evidence.valid) return evidence;
   const input = resourceInput(item);
-  const title = stringValue(input.title, 200);
-  const content = stringValue(input.content, MAX_RICH_DOCUMENT_TEXT);
-  if (!evidence || !title || !content) return undefined;
+  const title = resourceString(input.title, "document title", DOCUMENT_TITLE_MAX);
+  if (!title.valid) return title;
+  const description = resourceString(
+    input.description,
+    "document description",
+    DOCUMENT_DESCRIPTION_MAX,
+  );
+  if (!description.valid) return description;
+  const content = resourceString(
+    input.content,
+    "document content",
+    DOCUMENT_CONTENT_MAX,
+  );
+  if (!content.valid) return content;
+  const documentType = input.document_type === undefined
+    ? undefined
+    : resourceString(input.document_type, "document type", RESOURCE_TYPE_MAX);
+  if (documentType && !documentType.valid) return documentType;
+  const tags = resourceStrings(input.tags, "document tags", 10);
+  if (!tags.valid) return tags;
   const key = resourceKey(item, `document-${index + 1}`);
-  if (!key) return undefined;
+  if (!key.valid) return key;
   const document: DocumentInput = {
-    title: sanitizeText(title),
-    description: sanitizeText(
-      stringValue(input.description, 2_000) ?? title,
-    ),
-    content: sanitizeText(content),
-    tags: strings(input.tags, 10, 100),
-    ...(stringValue(input.document_type, 100)
-      ? { document_type: sanitizeText(stringValue(input.document_type, 100)!) }
-      : {}),
+    title: title.value,
+    description: description.value,
+    content: content.value,
+    tags: tags.value,
+    ...(documentType ? { document_type: documentType.value } : {}),
     project_id: null,
   };
-  return { key, input: document, sourceEntryIds: evidence };
+  return validCandidate({
+    key: key.value,
+    input: document,
+    sourceEntryIds: evidence.value,
+  });
 }
 
 function codeArtifactResource(
@@ -829,26 +988,43 @@ function codeArtifactResource(
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): CaptureCodeArtifactResource | undefined {
+): CandidateValidation<CaptureCodeArtifactResource> {
   const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
+  if (!evidence.valid) return evidence;
   const input = resourceInput(item);
-  const title = stringValue(input.title, 200);
-  const code = stringValue(input.code, MAX_RICH_CODE);
-  const language = stringValue(input.language, 100);
-  if (!evidence || !title || !code || !language) return undefined;
+  const title = resourceString(input.title, "code artifact title", CODE_TITLE_MAX);
+  if (!title.valid) return title;
+  const description = resourceString(
+    input.description,
+    "code artifact description",
+    CODE_DESCRIPTION_MAX,
+  );
+  if (!description.valid) return description;
+  const code = resourceString(input.code, "code artifact code", CODE_CONTENT_MAX);
+  if (!code.valid) return code;
+  const language = resourceString(
+    input.language,
+    "code artifact language",
+    RESOURCE_TYPE_MAX,
+  );
+  if (!language.valid) return language;
+  const tags = resourceStrings(input.tags, "code artifact tags", 10);
+  if (!tags.valid) return tags;
   const key = resourceKey(item, `code-artifact-${index + 1}`);
-  if (!key) return undefined;
+  if (!key.valid) return key;
   const artifact: CodeArtifactInput = {
-    title: sanitizeText(title),
-    description: sanitizeText(
-      stringValue(input.description, 2_000) ?? title,
-    ),
-    code: sanitizeText(code),
-    language: sanitizeText(language),
-    tags: strings(input.tags, 10, 100),
+    title: title.value,
+    description: description.value,
+    code: code.value,
+    language: language.value,
+    tags: tags.value,
     project_id: null,
   };
-  return { key, input: artifact, sourceEntryIds: evidence };
+  return validCandidate({
+    key: key.value,
+    input: artifact,
+    sourceEntryIds: evidence.value,
+  });
 }
 
 function relationshipResource(
@@ -857,142 +1033,124 @@ function relationshipResource(
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): CaptureRelationshipResource | undefined {
+): CandidateValidation<CaptureRelationshipResource> {
   const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
+  if (!evidence.valid) return evidence;
   const input = resourceInput(item);
-  const sourceEntityKey = stringValue(item.sourceEntityKey ?? input.sourceEntityKey, 100);
-  const targetEntityKey = stringValue(item.targetEntityKey ?? input.targetEntityKey, 100);
-  const relationshipType = stringValue(input.relationship_type, 100);
-  if (!evidence || !sourceEntityKey || !targetEntityKey || !relationshipType)
-    return undefined;
+  const sourceEntityKey = resourceString(
+    item.sourceEntityKey ?? input.sourceEntityKey,
+    "relationship sourceEntityKey",
+  );
+  if (!sourceEntityKey.valid) return sourceEntityKey;
+  const targetEntityKey = resourceString(
+    item.targetEntityKey ?? input.targetEntityKey,
+    "relationship targetEntityKey",
+  );
+  if (!targetEntityKey.valid) return targetEntityKey;
+  const relationshipType = resourceString(
+    input.relationship_type,
+    "relationship type",
+    RESOURCE_TYPE_MAX,
+  );
+  if (!relationshipType.valid) return relationshipType;
   const key = resourceKey(item, `relationship-${index + 1}`);
-  if (!key) return undefined;
+  if (!key.valid) return key;
   const relationship: EntityRelationshipInput = {
     source_entity_id: 0,
     target_entity_id: 0,
-    relationship_type: sanitizeText(relationshipType),
+    relationship_type: relationshipType.value,
   };
-  return {
-    key,
-    sourceEntityKey: sanitizeText(sourceEntityKey),
-    targetEntityKey: sanitizeText(targetEntityKey),
+  return validCandidate({
+    key: key.value,
+    sourceEntityKey: sourceEntityKey.value,
+    targetEntityKey: targetEntityKey.value,
     input: relationship,
-    sourceEntryIds: evidence,
-  };
+    sourceEntryIds: evidence.value,
+  });
 }
 
-function boundedResources<T>(values: T[], budget: { remaining: number }): T[] {
-  const result: T[] = [];
-  for (const value of values) {
-    const size = Buffer.byteLength(JSON.stringify(value), "utf8");
-    if (size > budget.remaining) continue;
-    budget.remaining -= size;
-    result.push(value);
-  }
-  return result;
-}
+type RichResources = Pick<
+  CaptureCandidate,
+  "entities" | "documents" | "codeArtifacts" | "relationships"
+>;
 
 function richResources(
   item: Record<string, unknown>,
   sourceIds: string[],
   snapshot: CaptureSnapshot,
   kind: CaptureCandidate["evidenceType"],
-): Pick<
-  CaptureCandidate,
-  "entities" | "documents" | "codeArtifacts" | "relationships"
-> {
-  const rawEntities = Array.isArray(item.entities) ? item.entities : [];
-  const rawDocuments = Array.isArray(item.documents) ? item.documents : [];
-  const rawArtifacts = Array.isArray(item.codeArtifacts ?? item.code_artifacts)
-    ? (item.codeArtifacts ?? item.code_artifacts) as unknown[]
-    : [];
-  const rawRelationships = Array.isArray(item.relationships)
-    ? item.relationships
-    : [];
-  const entities = rawEntities
-    .slice(0, MAX_RICH_ENTITIES)
-    .map((raw, index) => {
-      const value = record(raw);
-      return value
-        ? entityResource(value, index, sourceIds, snapshot, kind)
-        : undefined;
-    })
-    .filter((value): value is CaptureEntityResource => Boolean(value));
-  const documents = rawDocuments
-    .slice(0, MAX_RICH_DOCUMENTS)
-    .map((raw, index) => {
-      const value = record(raw);
-      return value
-        ? documentResource(value, index, sourceIds, snapshot, kind)
-        : undefined;
-    })
-    .filter((value): value is CaptureDocumentResource => Boolean(value));
-  const codeArtifacts = rawArtifacts
-    .slice(0, MAX_RICH_CODE_ARTIFACTS)
-    .map((raw, index) => {
-      const value = record(raw);
-      return value
-        ? codeArtifactResource(value, index, sourceIds, snapshot, kind)
-        : undefined;
-    })
-    .filter((value): value is CaptureCodeArtifactResource => Boolean(value));
-  let relationships = rawRelationships
-    .slice(0, MAX_RICH_RELATIONSHIPS)
-    .map((raw, index) => {
-      const value = record(raw);
-      return value
-        ? relationshipResource(value, index, sourceIds, snapshot, kind)
-        : undefined;
-    })
-    .filter((value): value is CaptureRelationshipResource => Boolean(value))
-    .filter((value) => {
-      const keys = new Set(entities.map((entity) => entity.key));
-      return keys.has(value.sourceEntityKey) && keys.has(value.targetEntityKey);
-    });
-  const budget = { remaining: MAX_RICH_OUTPUT };
-  const boundedEntities = boundedResources(entities, budget);
-  const boundedDocuments = boundedResources(documents, budget);
-  const boundedCodeArtifacts = boundedResources(codeArtifacts, budget);
-  const boundedKeys = new Set(boundedEntities.map((entity) => entity.key));
-  relationships = boundedResources(
-    relationships.filter(
-      (relationship) =>
-        boundedKeys.has(relationship.sourceEntityKey) &&
-        boundedKeys.has(relationship.targetEntityKey),
-    ),
-    budget,
-  );
-  return {
-    ...(boundedEntities.length ? { entities: boundedEntities } : {}),
-    ...(boundedDocuments.length ? { documents: boundedDocuments } : {}),
-    ...(boundedCodeArtifacts.length
-      ? { codeArtifacts: boundedCodeArtifacts }
-      : {}),
+): CandidateValidation<RichResources> {
+  const definitions = [
+    ["entities", item.entities, MAX_RICH_ENTITIES, entityResource],
+    ["documents", item.documents, MAX_RICH_DOCUMENTS, documentResource],
+    [
+      "codeArtifacts",
+      item.codeArtifacts ?? item.code_artifacts,
+      MAX_RICH_CODE_ARTIFACTS,
+      codeArtifactResource,
+    ],
+    ["relationships", item.relationships, MAX_RICH_RELATIONSHIPS, relationshipResource],
+  ] as const;
+  const parsed: Record<string, unknown[]> = {};
+  for (const [label, raw, maxItems, parse] of definitions) {
+    if (raw === undefined) {
+      parsed[label] = [];
+      continue;
+    }
+    if (!Array.isArray(raw)) return invalidCandidate(`${label} must be an array`);
+    if (raw.length > maxItems) {
+      return invalidCandidate(`${label} must contain at most ${maxItems} items`);
+    }
+    const values: unknown[] = [];
+    for (const [index, entry] of raw.entries()) {
+      const value = record(entry);
+      if (!value) return invalidCandidate(`${label}[${index}] must be an object`);
+      const result = parse(value, index, sourceIds, snapshot, kind);
+      if (!result.valid) return invalidCandidate(`${label}[${index}]: ${result.reason}`);
+      values.push(result.value);
+    }
+    parsed[label] = values;
+  }
+  const entities = parsed.entities as CaptureEntityResource[];
+  const relationships = parsed.relationships as CaptureRelationshipResource[];
+  const entityKeys = new Set(entities.map((entity) => entity.key));
+  if (relationships.some(
+    (relationship) =>
+      !entityKeys.has(relationship.sourceEntityKey) ||
+      !entityKeys.has(relationship.targetEntityKey),
+  )) {
+    return invalidCandidate("relationships must reference submitted entity keys");
+  }
+  const documents = parsed.documents as CaptureDocumentResource[];
+  const codeArtifacts = parsed.codeArtifacts as CaptureCodeArtifactResource[];
+  return validCandidate({
+    ...(entities.length ? { entities } : {}),
+    ...(documents.length ? { documents } : {}),
+    ...(codeArtifacts.length ? { codeArtifacts } : {}),
     ...(relationships.length ? { relationships } : {}),
-  };
+  });
 }
 
 function buildCandidate(
   item: Record<string, unknown>,
   index: number,
   fields: CandidateFields,
+  lists: CandidateLists,
   destination: CandidateDestination,
-  snapshot: CaptureSnapshot,
+  resources: RichResources,
 ): CaptureCandidate | undefined {
   const importance = numberValue(item.importance);
   const candidate: CaptureCandidate = {
-    id: stringValue(item.id, 100) ?? `candidate-${index + 1}`,
+    id: stringValue(item.id) ?? `candidate-${index + 1}`,
     title: sanitizeText(fields.title),
     content: sanitizeText(fields.content),
     context: sanitizeText(fields.context),
-    keywords: strings(item.keywords),
-    tags: strings(item.tags),
+    keywords: lists.keywords,
+    tags: lists.tags,
     sourceEntryIds: fields.sourceEntryIds,
-    sourceFiles: strings(item.sourceFiles ?? item.source_files, 20, 200),
+    sourceFiles: lists.sourceFiles,
   };
-  if (importance !== undefined) {
-    candidate.importance = Math.max(1, Math.min(10, Math.round(importance)));
-  }
+  if (importance !== undefined) candidate.importance = importance;
   if (fields.kind) candidate.evidenceType = fields.kind;
   if (destination.projectId !== undefined)
     candidate.destinationProjectId = destination.projectId;
@@ -1002,7 +1160,7 @@ function buildCandidate(
     candidate.destinationRationale = destination.rationale;
   Object.assign(
     candidate,
-    richResources(item, fields.sourceEntryIds, snapshot, fields.kind),
+    resources,
   );
   if (hasSensitiveData(JSON.stringify(candidate))) return undefined;
   return candidate;
@@ -1017,16 +1175,29 @@ function eligibleCandidate(
   if (!item) return invalidCandidate("candidate must be a JSON object");
   if (hasSensitiveData(JSON.stringify(item)))
     return invalidCandidate("candidate contains sensitive data");
+  if (!stringValue(item.id)) return invalidCandidate("candidate id is missing or empty");
   const fields = candidateFields(item, snapshot);
   if (!fields.valid) return fields;
+  const lists = candidateLists(item);
+  if (!lists.valid) return lists;
+  if (
+    item.importance !== undefined &&
+    (!Number.isInteger(item.importance) || Number(item.importance) < 1 ||
+      Number(item.importance) > 10)
+  ) {
+    return invalidCandidate("importance must be an integer from 1 to 10");
+  }
   const destination = candidateDestination(item);
   if (!destination.valid) return destination;
+  const resources = richResources(item, fields.value.sourceEntryIds, snapshot, fields.value.kind);
+  if (!resources.valid) return resources;
   const candidate = buildCandidate(
     item,
     index,
     fields.value,
+    lists.value,
     destination.value,
-    snapshot,
+    resources.value,
   );
   return candidate
     ? validCandidate(candidate)
@@ -1050,14 +1221,17 @@ function parseCandidates(
   );
   if (!response || !Array.isArray(response.candidates))
     throw new InvalidCaptureOutput("capture model did not return candidates");
+  if (response.candidates.length > maxCandidates) {
+    throw new InvalidCaptureOutput(
+      `capture model returned more than ${maxCandidates} candidates`,
+    );
+  }
   const candidates: CaptureCandidate[] = [];
   const skipped: Array<{ id: string; reason: string }> = [];
   const seenIds = new Set<string>();
-  for (const [index, raw] of response.candidates
-    .slice(0, maxCandidates)
-    .entries()) {
+  for (const [index, raw] of response.candidates.entries()) {
     const rawRecord = record(raw);
-    const id = stringValue(rawRecord?.id, 100) ?? `candidate-${index + 1}`;
+    const id = stringValue(rawRecord?.id) ?? `candidate-${index + 1}`;
     if (seenIds.has(id)) {
       onCandidate?.(id, raw, "duplicate candidate ID");
       skipped.push({ id, reason: "duplicate candidate ID" });
@@ -1100,10 +1274,10 @@ function captureCandidateSubmission(
     },
     validate(input: unknown): unknown {
       const extraction = parseCandidates(input, snapshot, maxCandidates);
-      if (extraction.candidates.length === 0 && extraction.skipped.length > 0) {
+      if (extraction.skipped.length > 0) {
         const reasons = [...new Set(extraction.skipped.map((item) => item.reason))];
         throw new InvalidCaptureOutput(
-          `all submitted capture candidates were invalid: ${reasons.join("; ")}`,
+          `submitted capture candidates were invalid: ${reasons.join("; ")}`,
         );
       }
       return input;
@@ -1161,13 +1335,23 @@ function decisionEvidenceIds(
   if (
     !Array.isArray(value) ||
     value.length > 8 ||
-    value.some((id) => typeof id !== "string" || !id.trim() || id.length > 200)
+    value.some((id) => typeof id !== "string" || !id.trim())
   ) {
     throw new InvalidCaptureOutput(
       "overlap model returned invalid evidence IDs",
     );
   }
-  return value.map((id) => sanitizeText(id.trim()));
+  return value.map((id) => id.trim());
+}
+
+function decisionText(
+  response: Record<string, unknown>,
+  field: "reason" | "oldClaim" | "newClaim",
+): string | undefined {
+  if (!(field in response)) return undefined;
+  const value = stringValue(response[field]);
+  if (!value) throw new InvalidCaptureOutput(`overlap model returned invalid ${field}`);
+  return sanitizeText(value);
 }
 
 function decisionPartial(response: Record<string, unknown>): boolean {
@@ -1203,9 +1387,9 @@ function parseDecision(value: unknown): CaptureDecision {
   const sourceEntryIds = decisionEvidenceIds(response);
   const partial = decisionPartial(response);
   const decision: CaptureDecision = { action };
-  const reason = stringValue(response.reason, 500);
-  const oldClaim = stringValue(response.oldClaim, 1_000);
-  const newClaim = stringValue(response.newClaim, 1_000);
+  const reason = decisionText(response, "reason");
+  const oldClaim = decisionText(response, "oldClaim");
+  const newClaim = decisionText(response, "newClaim");
   if (reason) decision.reason = reason;
   if (conflictingMemoryId !== undefined)
     decision.conflictingMemoryId = conflictingMemoryId;
@@ -1239,22 +1423,10 @@ function memoryInput(
   projectIds: number[],
   context: WorkContext,
 ): MemoryInput {
-  const provenance = sanitizeText(
-    [
-      `Session: ${context.sessionId.slice(0, 60)}`,
-      `Branch: ${context.branchId.slice(0, 60)}`,
-      `Evidence entries: ${candidate.sourceEntryIds
-        .slice(0, 8)
-        .map((id) => sanitizeText(id).slice(0, 32))
-        .join(", ")}`,
-    ].join("; "),
-  ).slice(0, 320);
-  const contextBudget = Math.max(0, MEMORY_CONTEXT_MAX - provenance.length - 1);
-  const explanation = sanitizeText(candidate.context).slice(0, contextBudget);
   return {
     title: candidate.title,
     content: candidate.content,
-    context: explanation ? `${explanation}\n${provenance}` : provenance,
+    context: storedMemoryContext(candidate.context, context, candidate.sourceEntryIds),
     keywords: candidate.keywords,
     tags: candidate.tags,
     ...(candidate.importance === undefined
@@ -1461,8 +1633,8 @@ function trustedAdditionalEntries(value: unknown): EvidenceEntry[] {
   }
   return value.map((item) => {
     const entry = record(item);
-    const id = stringValue(entry?.id, 200);
-    const text = stringValue(entry?.text, MAX_ENTRY_TEXT);
+    const id = stringValue(entry?.id);
+    const text = stringValue(entry?.text);
     const role = entry?.role;
     if (!id || !text || (role !== "user" && role !== "toolResult")) {
       throw new Error(
@@ -1472,7 +1644,7 @@ function trustedAdditionalEntries(value: unknown): EvidenceEntry[] {
     if (hasSensitiveData(text))
       throw new Error("Additional resolution evidence contains sensitive data");
     if (role === "toolResult") {
-      const toolName = stringValue(entry?.toolName, 100);
+      const toolName = stringValue(entry?.toolName);
       if (!toolName || isMemoryOperation(toolName)) {
         throw new Error(
           "Additional tool evidence is not an eligible verified change",
@@ -2080,11 +2252,8 @@ export class CaptureService {
     if (!(await this.enabled(job.snapshot.mode)))
       throw new CapturePause("capture is disabled");
     const overlaps = await this.client.search({
-      query: `${candidate.title}\n${candidate.content}`.slice(0, 2_000),
-      query_context: `${candidate.context} Project ${destination}`.slice(
-        0,
-        2_000,
-      ),
+      query: `${candidate.title}\n${candidate.content}`,
+      query_context: `${candidate.context} Project ${destination}`,
       project_ids: [destination],
       strict_project_filter: true,
       k: 8,
@@ -2569,7 +2738,7 @@ export class CaptureService {
         policy: this.policyFor(currentJob.snapshot, "capture"),
         input: {
           context: {
-            cwd: sanitizeText(currentJob.snapshot.context.cwd).slice(0, 500),
+            cwd: sanitizeText(currentJob.snapshot.context.cwd),
             repoName: currentJob.snapshot.context.repoName,
             project: currentJob.snapshot.context.project,
             sessionId: currentJob.snapshot.context.sessionId,
@@ -3121,10 +3290,7 @@ export class CaptureService {
     ) {
       throw new Error("Additional resolution evidence must be text");
     }
-    const additionalEvidence = stringValue(
-      input.additionalEvidence,
-      MAX_ENTRY_TEXT,
-    );
+    const additionalEvidence = stringValue(input.additionalEvidence);
     if (input.additionalEvidence !== undefined && !additionalEvidence) {
       throw new Error(
         "Additional resolution evidence must be selected trusted evidence",
@@ -3192,15 +3358,16 @@ export class CaptureService {
     conflict: PendingConflict,
     candidate: CaptureCandidate,
     evidence: ConflictResolutionEvidence,
+    context: WorkContext,
   ): Promise<CaptureCandidate> {
     const parameters = Type.Object({
-      title: Type.String({ minLength: 1, maxLength: 200 }),
-      content: Type.String({ minLength: 1, maxLength: 2_000 }),
-      context: Type.String({ minLength: 1, maxLength: 500 }),
-      keywords: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { maxItems: 10 }),
-      tags: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { maxItems: 10 }),
+      title: Type.String({ minLength: 1, maxLength: MEMORY_TITLE_MAX }),
+      content: Type.String({ minLength: 1, maxLength: MEMORY_CONTENT_MAX }),
+      context: Type.String({ minLength: 1, maxLength: MEMORY_CONTEXT_MAX }),
+      keywords: Type.Array(Type.String({ minLength: 1 }), { maxItems: 10 }),
+      tags: Type.Array(Type.String({ minLength: 1 }), { maxItems: 10 }),
       importance: Type.Integer({ minimum: 1, maximum: 10 }),
-      sourceEntryIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }),
+      sourceEntryIds: Type.Array(Type.String({ minLength: 1 }),
         { minItems: 1, maxItems: 8 }),
     }, { additionalProperties: false });
     const revision = await this.model.complete({
@@ -3222,8 +3389,11 @@ export class CaptureService {
           const item = record(value);
           if (!item || hasSensitiveData(JSON.stringify(item)))
             throw new InvalidCaptureOutput("Revision must contain safe semantic fields");
-          for (const [field, max] of [["title", 200], ["content", 2_000],
-            ["context", 500]] as const) {
+          for (const [field, max] of [
+            ["title", MEMORY_TITLE_MAX],
+            ["content", MEMORY_CONTENT_MAX],
+            ["context", MEMORY_CONTEXT_MAX],
+          ] as const) {
             if (!stringValue(item[field], max))
               throw new InvalidCaptureOutput(`Revision ${field} is missing or invalid`);
           }
@@ -3231,13 +3401,22 @@ export class CaptureService {
             const list = item[field];
             const max = field === "sourceEntryIds" ? 8 : 10;
             if (!Array.isArray(list) || list.length > max ||
-                list.some((entry) => !stringValue(entry, field === "sourceEntryIds" ? 200 : 100)))
+                list.some((entry) => !stringValue(entry)))
               throw new InvalidCaptureOutput(`Revision ${field} is invalid`);
           }
           const ids = item.sourceEntryIds as string[];
           if (!ids.length || new Set(ids).size !== ids.length ||
               ids.some((id) => !evidence.evidenceEntryIds.includes(id)))
             throw new InvalidCaptureOutput("Revision must cite unique selected evidence IDs");
+          if (
+            storedMemoryContext(item.context as string, context, ids).length >
+              MEMORY_CONTEXT_MAX
+          ) {
+            throw new InvalidCaptureOutput(
+              `Revision context plus required provenance is longer than ` +
+                `${MEMORY_CONTEXT_MAX} characters`,
+            );
+          }
           if (!Number.isInteger(item.importance) || Number(item.importance) < 1 ||
               Number(item.importance) > 10)
             throw new InvalidCaptureOutput("Revision importance must be an integer from 1 to 10");
@@ -3246,7 +3425,7 @@ export class CaptureService {
       },
     }).catch((error: unknown) => {
       if (error instanceof ModelSubmissionError) {
-        const detail = sanitizeText(error.rejectionReasons.at(-1) ?? error.message).slice(0, 450);
+        const detail = sanitizeText(error.rejectionReasons.at(-1) ?? error.message);
         throw new Error(`Memory revision submission failed; conflict remains pending: ${detail}`);
       }
       throw error;
@@ -3384,7 +3563,12 @@ export class CaptureService {
     evidence: ConflictResolutionEvidence,
   ): Promise<PendingConflict> {
     if (conflict.replacement) return conflict;
-    const candidate = await this.revisePartialMemory(conflict, target.candidate, evidence);
+    const candidate = await this.revisePartialMemory(
+      conflict,
+      target.candidate,
+      evidence,
+      target.fakeJob.snapshot.context,
+    );
     const input = memoryInput(candidate,
       [...new Set([conflict.destinationProjectId, ...current.project_ids])],
       target.fakeJob.snapshot.context);

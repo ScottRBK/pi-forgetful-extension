@@ -40,11 +40,12 @@ function ids(value: unknown): number[] {
   return value.map(id);
 }
 
-function strings(value: unknown, max = 10, width = 500): string[] {
-  if (!Array.isArray(value) || value.length > max) {
-    throw new ForgetfulSchemaError("Forgetful knowledge strings must be a bounded array");
+function strings(value: unknown, max = 10): string[] {
+  if (!Array.isArray(value) || value.length > max ||
+      value.some((item) => typeof item !== "string")) {
+    throw new ForgetfulSchemaError("Forgetful knowledge strings must be a bounded array of text");
   }
-  return value.map((item) => text(item, width, true));
+  return [...value];
 }
 
 function records(value: unknown, key: string): unknown[] {
@@ -60,7 +61,7 @@ function provenance(value: Record<string, unknown>): Provenance {
     ...(value.source_repo == null ? {} : {
       source_repo: text(value.source_repo, 200, false, "source_repo"),
     }),
-    ...(value.source_files == null ? {} : { source_files: strings(value.source_files, 100, 1000) }),
+    ...(value.source_files == null ? {} : { source_files: strings(value.source_files, 100) }),
     ...(value.source_url == null ? {} : {
       source_url: text(value.source_url, 2048, false, "source_url"),
     }),
@@ -198,8 +199,11 @@ export class ApiKnowledgeClient implements KnowledgeClient {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new TypeError("Entity search limit must be between 1 and 100");
     }
+    if (typeof query !== "string" || !query.trim()) {
+      throw new ForgetfulSchemaError("Forgetful query must be a non-empty string.");
+    }
     const result = await this.request("/entities/search", "POST", {
-      query: text(query, 240, false, "query"), limit,
+      query, limit,
     }, signal, [200]);
     return records(result, "entities").map(entity);
   }

@@ -16,6 +16,8 @@ import type { ModelSubmissionTool } from "../src/contracts.ts";
 const selectedModel = {
   provider: "fake",
   id: "memory-model",
+  contextWindow: 200_000,
+  maxTokens: 16_384,
 } as unknown as Model<any>;
 
 for (const level of ["debug", "info", "off"] as const) {
@@ -164,8 +166,8 @@ test("model file retains rejected submissions and provider failure by attempt", 
   assert.doesNotMatch(JSON.stringify(info), /Unsupported claim|Provider offline|requires a source/);
 });
 
-test("oversized SDK output leaves a bounded correlated preview before rejection", async (t) => {
-  // Arrange: the provider ignores its output limit.
+test("large SDK output is accepted while diagnostic previews stay bounded", async (t) => {
+  // Arrange: model capacity, not diagnostic size, governs usable responses.
   const directory = await mkdtemp(join(tmpdir(), "model-large-log-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const logger = new FileLogger({ directory, sessionId: "session", level: "debug" });
@@ -174,8 +176,9 @@ test("oversized SDK output leaves a bounded correlated preview before rejection"
   }, selectedModel, { logger });
 
   // Act.
-  await assert.rejects(model.complete({ purpose: "capture", policy: "policy", input: {},
-    diagnosticContext: { jobId: "large-job" } }), /Memory model request failed/);
+  const result = await model.complete({ purpose: "capture", policy: "policy", input: {},
+    diagnosticContext: { jobId: "large-job" } });
+  assert.equal(result, `oversized-raw-response ${"x".repeat(200_000)}`);
   await logger.flush();
 
   // Assert: logger truncation must not discard the job ID and all response detail.
@@ -640,29 +643,27 @@ test("memory model stops promptly when the caller aborts a non-cooperative provi
   assert.ok(Date.now() - started < 300);
 });
 
-test("memory model rejects oversized structured input before calling the provider", async () => {
-  let calls = 0;
-  const registry: ModelRegistryPort = {
-    find: () => selectedModel,
-    complete: async () => {
-      calls += 1;
-      return response("{}");
-    },
-  };
-  const model = new PiMemoryModel(registry, {
-    provider: "fake",
-    id: "memory-model",
+for (const structured of [false, true]) {
+  test(`memory model preserves long ${structured ? "structured" : "text"} input`, async () => {
+    // Arrange: content exceeds the previous adapter limit, with evidence at the end.
+    const text = `${"x".repeat(40_000)} important final decision`;
+    const input = structured ? { entries: [{ text }] } : text;
+    let seen: unknown;
+    const model = new PiMemoryModel({
+      find: () => selectedModel,
+      complete: async (_model, context) => {
+        seen = context.messages[0]?.content;
+        return response("{}");
+      },
+    }, selectedModel);
+
+    // Act.
+    await model.complete({ purpose: "capture", policy: "policy", input });
+
+    // Assert: no rejection or character truncation before Pi sees the context.
+    assert.equal(seen, structured ? JSON.stringify(input) : text);
   });
-  await assert.rejects(
-    model.complete({
-      purpose: "capture",
-      policy: "policy",
-      input: { entries: [{ text: "x".repeat(40_000) }] },
-    }),
-    /Memory model request failed/,
-  );
-  assert.equal(calls, 0);
-});
+}
 
 test("memory model gives capture requests a longer provider deadline", async () => {
   const registry: ModelRegistryPort = {
@@ -683,7 +684,7 @@ test("memory model gives capture requests a longer provider deadline", async () 
   );
 });
 
-test("memory model gives rich capture enough output without enlarging overlap output", async () => {
+test("capture and overlap inherit the same configured model allowance", async () => {
   const maxTokens: number[] = [];
   const registry: ModelRegistryPort = {
     find: () => selectedModel,
@@ -700,7 +701,7 @@ test("memory model gives rich capture enough output without enlarging overlap ou
   await model.complete({ purpose: "capture", policy: "policy", input: {} });
   await model.complete({ purpose: "overlap", policy: "policy", input: {} });
 
-  assert.deepEqual(maxTokens, [6_000, 1_200]);
+  assert.deepEqual(maxTokens, [16_384, 16_384]);
 });
 
 test("memory model keeps the capture deadline independent from classification", async () => {
@@ -766,7 +767,7 @@ test("memory model passes the real session and public header transform to Pi", a
   );
 });
 
-test("review correction retains bounded redacted arguments rather than an empty call", async () => {
+test("review correction retains redacted arguments rather than an empty call", async () => {
   // Arrange: a semantic rejection should preserve what failed, without leaking a credential.
   const histories: any[][] = [];
   const registry: ModelRegistryPort = {
@@ -801,9 +802,8 @@ test("review correction retains bounded redacted arguments rather than an empty 
   assert.match(JSON.stringify(histories[1]), /redacted/);
 });
 
-test("review rejects oversized provider responses before validation or retry history", async () => {
-  // Arrange: a provider can ignore maxTokens, including through unexpected fields.
-  let validations = 0;
+test("large review responses reach field validation and allow correction", async () => {
+  // Arrange: field limits must reject an invalid submission, not the entire model response.
   let calls = 0;
   const registry: ModelRegistryPort = {
     find: () => selectedModel,
@@ -811,17 +811,21 @@ test("review rejects oversized provider responses before validation or retry his
       calls++;
       return toolResponse([{
         id: "large-review", name: "submit_recall_review",
-        arguments: { summary: "x".repeat(33_000), memoryIds: [39], reason: "Evidence" },
+        arguments: { summary: calls === 1 ? "x".repeat(33_000) : "Useful fact",
+          memoryIds: [39], reason: "Evidence" },
       }]);
     },
   };
-  const model = new PiMemoryModel(registry, { provider: "fake", id: "memory-model" });
+  const model = new PiMemoryModel(registry, selectedModel);
+  const submission = reviewSubmission();
+  (submission.parameters as any).properties.summary.maxLength = 3_000;
 
-  // Act / Assert.
-  await assert.rejects(model.complete({
-    purpose: "recall-review", policy: "Use the tool", input: {},
-    submission: reviewSubmission((input) => { validations++; return input; }),
-  }));
-  assert.equal(validations, 0);
-  assert.equal(calls, 1);
+  // Act.
+  const result = await model.complete({
+    purpose: "recall-review", policy: "Use the tool", input: {}, submission,
+  });
+
+  // Assert: the corrected record is accepted, not truncated silently.
+  assert.deepEqual(result, { summary: "Useful fact", memoryIds: [39], reason: "Evidence" });
+  assert.equal(calls, 2);
 });

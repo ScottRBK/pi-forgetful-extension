@@ -8,7 +8,11 @@ import { CaptureService } from "../src/capture.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import type {
   CaptureSnapshot,
+  CodeArtifactInput,
+  DocumentInput,
+  EntityInput,
   ForgetfulClient,
+  KnowledgeClient,
   Memory,
   MemoryModelClient,
   MemoryInput,
@@ -34,6 +38,8 @@ for (const level of ["debug", "info", "off"] as const) {
     };
     const outputs = [
       { candidates: [candidate, { ...candidate, id: "valid", sourceEntryIds: ["tool-1"],
+        evidenceType: "verifiedToolChange" }] },
+      { candidates: [{ ...candidate, id: "valid", sourceEntryIds: ["tool-1"],
         evidenceType: "verifiedToolChange" }] },
       { action: "create", reason: "No overlap for SQLite" },
     ];
@@ -81,12 +87,10 @@ for (const level of ["debug", "info", "off"] as const) {
       assert.ok(events.every((event) => event.level === "info"));
       assert.doesNotMatch(text, /SQLite|Implemented the migration|No overlap/);
     } else {
-      const rejected = events.find((event) => event.event === "capture.candidate_rejected");
-      assert.equal(rejected.data.candidateId, "invalid");
-      assert.equal(rejected.data.reason, "assistant messages are not eligible evidence");
-      assert.deepEqual(rejected.data.candidate, candidate);
-      assert.deepEqual(rejected.data.entries.map((entry: any) => [entry.id, entry.role]),
-        [["user-1", "user"], ["assistant-1", "assistant"]]);
+      const rejected = events.find(
+        (event) => event.event === "capture.candidate_submission_rejected",
+      );
+      assert.match(rejected.data.reason, /assistant messages are not eligible evidence/);
       const accepted = events.find((event) => event.event === "capture.candidate_accepted");
       assert.equal(accepted.data.entries[0].toolName, "edit");
       const snapshotEvent = events.find((event) => event.event === "capture.snapshot");
@@ -240,6 +244,52 @@ test("capture snapshot log retains the full bounded evidence sent for extraction
   assert.deepEqual(event.data.entries, input.entries);
   assert.deepEqual(event.data.entries, (model.requests[0]?.input as any).entries);
   assert.equal(event.data.history, undefined);
+});
+
+test("CaptureService gives Pi the complete persisted evidence and capture context", async (t) => {
+  // Arrange: evidence, policy, and cwd all exceed the extension's former character budgets.
+  const directory = await mkdtemp(join(tmpdir(), "capture-complete-context-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const evidence = "e".repeat(60_000);
+  const policy = "p".repeat(25_000);
+  const cwd = `/${"directory/".repeat(100)}`;
+  const contexts: Context[] = [];
+  const registry: ModelRegistryPort = {
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      return providerTool("capture-complete", "submit_capture_candidates", {
+        candidates: [],
+      });
+    },
+  };
+  const service = new CaptureService({
+    queue,
+    client: new FakeClient(),
+    model: new PiMemoryModel(registry, { provider: "fake", id: "memory" }),
+    instanceId: "instance-a",
+  });
+  const input = snapshot();
+  input.entries[0]!.text = evidence;
+  input.policy = policy;
+  input.context.cwd = cwd;
+
+  // Act.
+  const queued = await service.enqueue(input);
+  const job = await queue.getJob(queued.jobId);
+  await service.checkpoint();
+  const modelInput = JSON.parse(String(contexts[0]?.messages[0]?.content)) as {
+    context: { cwd: string };
+    entries: Array<{ text: string }>;
+  };
+
+  // Assert.
+  assert.equal(job?.snapshot.entries[0]?.text.length, evidence.length);
+  assert.equal(job?.snapshot.policy.length, policy.length);
+  assert.equal(modelInput.entries[0]?.text.length, evidence.length);
+  assert.equal(modelInput.context.cwd.length, cwd.length);
+  assert.match(String(contexts[0]?.systemPrompt), new RegExp(`${policy.slice(-100)}$`));
 });
 
 test("capture file records disabled and unsuccessful settlements as skipped", async (t) => {
@@ -437,8 +487,13 @@ test("capture candidate submission retries through the durable checkpoint flow",
             candidates: "not-an-array",
           });
         }
+        if (captureAttempts === 2) {
+          return providerTool("capture-2", "submit_capture_candidates", {
+            candidates: [invalidCandidate, validCandidate],
+          });
+        }
         return providerTool("capture-2", "submit_capture_candidates", {
-          candidates: [invalidCandidate, validCandidate],
+          candidates: [validCandidate],
         });
       }
       const output = { action: "create", reason: "No overlap." };
@@ -465,7 +520,7 @@ test("capture candidate submission retries through the durable checkpoint flow",
 
   // Assert.
   assert.deepEqual(result.errors, []);
-  assert.equal(captureAttempts, 2);
+  assert.equal(captureAttempts, 3);
   const captureContexts = contexts.filter((context) => {
     const content = context.messages[0]?.content;
     return typeof content === "string" && content.includes('"entries"');
@@ -512,10 +567,7 @@ test("capture candidate submission retries through the durable checkpoint flow",
   assert.equal(client.created.length, 1);
   const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
   assert.equal(job?.status, "complete");
-  assert.equal(
-    (job?.candidateOutcomes[invalidCandidate.id] as { stage?: string })?.stage,
-    "skipped",
-  );
+  assert.equal(job?.candidateOutcomes[invalidCandidate.id], undefined);
   assert.equal(
     (job?.candidateOutcomes[validCandidate.id] as { stage?: string })?.stage,
     "created",
@@ -524,7 +576,7 @@ test("capture candidate submission retries through the durable checkpoint flow",
   const diagnosticJob = diagnostics.jobs[0] as typeof diagnostics.jobs[number] & {
     submissionRejections?: string[];
   };
-  assert.equal(diagnosticJob.submissionRejections?.length, 1);
+  assert.equal(diagnosticJob.submissionRejections?.length, 2);
   assert.match(diagnosticJob.submissionRejections?.[0] ?? "", /must be object/);
 });
 
@@ -537,7 +589,12 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
   const contexts: Context[] = [];
   let captureAttempts = 0;
   const registry: ModelRegistryPort = {
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({
+      provider: "fake",
+      id: "memory",
+      contextWindow: 500_000,
+      maxTokens: 200_000,
+    }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       const firstContent = context.messages[0]?.content;
@@ -621,8 +678,172 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
   assert.equal(diagnostics.jobs[0]?.candidates.length, 1);
   assert.equal(diagnostics.jobs[0]?.candidates[0]?.stage, "created");
   assert.ok(diagnostics.jobs[0]?.submissionRejections?.some(
-    (reason) => /all submitted capture candidates were invalid/i.test(reason),
+    (reason) => /submitted capture candidates were invalid/i.test(reason),
   ));
+});
+
+test("capture corrects overlong stored fields and preserves service-sized resources", async (t) => {
+  // Arrange: the first document exceeds Forgetful's limit; the correction stays within its schemas.
+  const directory = await mkdtemp(join(tmpdir(), "capture-resource-limits-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const entities: EntityInput[] = [];
+  const documents: DocumentInput[] = [];
+  const codeArtifacts: CodeArtifactInput[] = [];
+  class ResourceClient extends FakeClient {
+    override async create(input: MemoryInput): Promise<{ id: number }> {
+      const result = await super.create(input);
+      this.memories.set(result.id, memory(result.id, input));
+      return result;
+    }
+  }
+  const client = new ResourceClient();
+  const knowledge: Partial<KnowledgeClient> = {
+    searchEntities: async () => [],
+    createEntity: async (input) => {
+      entities.push(input);
+      return { ...input, id: 201 };
+    },
+    getEntity: async () => ({ ...entities[0]!, id: 201 }),
+    getEntityMemories: async () => [],
+    linkEntityMemory: async () => undefined,
+    listDocuments: async () => [],
+    createDocument: async (input) => {
+      documents.push(input);
+      return { ...input, id: 301 };
+    },
+    getDocument: async () => ({ ...documents[0]!, id: 301 }),
+    listCodeArtifacts: async () => [],
+    createCodeArtifact: async (input) => {
+      codeArtifacts.push(input);
+      return { ...input, id: 401 };
+    },
+    getCodeArtifact: async () => ({ ...codeArtifacts[0]!, id: 401 }),
+    updateMemory: async (id, patch) => {
+      const updated = { ...client.memories.get(id)!, ...patch };
+      client.memories.set(id, updated);
+      return updated;
+    },
+    linkMemories: async () => undefined,
+  };
+  client.knowledge = knowledge as KnowledgeClient;
+  const largeEntityNotes = "n".repeat(4_000);
+  const largeDocumentTitle = "d".repeat(500);
+  const largeDocumentDescription = "s".repeat(5_000);
+  const largeDocumentContent = "c".repeat(80_000);
+  const largeCodeTitle = "t".repeat(500);
+  const largeCodeDescription = "r".repeat(5_000);
+  const largeCode = "x".repeat(40_000);
+  const baseCandidate = {
+    id: "resource-limits",
+    title: "Large resource limits",
+    content: "Forgetful stores large documents and code artifacts.",
+    context: "The user requested a persisted resource.",
+    keywords: ["limits"],
+    tags: ["knowledge"],
+    sourceEntryIds: ["user-1"],
+    evidenceType: "userDecision",
+  };
+  const correctedCandidate = {
+    ...baseCandidate,
+    entities: [{
+      key: "system",
+      sourceEntryIds: ["user-1"],
+      input: {
+        name: "System",
+        entity_type: "System",
+        notes: largeEntityNotes,
+        tags: [],
+        aka: [],
+      },
+    }],
+    documents: [{
+      key: "document",
+      sourceEntryIds: ["user-1"],
+      input: {
+        title: largeDocumentTitle,
+        description: largeDocumentDescription,
+        content: largeDocumentContent,
+        document_type: "text",
+        tags: [],
+      },
+    }],
+    codeArtifacts: [{
+      key: "code",
+      sourceEntryIds: ["user-1"],
+      input: {
+        title: largeCodeTitle,
+        description: largeCodeDescription,
+        code: largeCode,
+        language: "typescript",
+        tags: [],
+      },
+    }],
+  };
+  const contexts: Context[] = [];
+  let captureAttempts = 0;
+  const registry: ModelRegistryPort = {
+    find: () => ({
+      provider: "fake",
+      id: "memory",
+      contextWindow: 500_000,
+      maxTokens: 200_000,
+    }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      const input = JSON.parse(String(context.messages[0]?.content)) as Record<string, unknown>;
+      if (Array.isArray(input.entries)) {
+        captureAttempts += 1;
+        const candidate = captureAttempts === 1
+          ? {
+              ...baseCandidate,
+              entities: [{
+                key: "system",
+                sourceEntryIds: ["user-1"],
+                input: {
+                  name: "System",
+                  entity_type: "System",
+                  notes: "z".repeat(4_001),
+                  tags: [],
+                  aka: [],
+                },
+              }],
+            }
+          : correctedCandidate;
+        return providerTool(`capture-resource-${captureAttempts}`, "submit_capture_candidates", {
+          candidates: [candidate],
+        });
+      }
+      return providerTool("overlap-resource", "submit_capture_decision", {
+        action: "create",
+        reason: "No overlap.",
+      });
+    },
+  };
+  const service = new CaptureService({
+    queue,
+    client,
+    model: new PiMemoryModel(registry, { provider: "fake", id: "memory" }),
+    instanceId: "instance-a",
+  });
+
+  // Act.
+  await service.enqueue(snapshot());
+  const result = await service.checkpoint();
+
+  // Assert.
+  assert.equal(captureAttempts, 2);
+  const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
+  assert.equal(feedback?.isError, true);
+  assert.match(feedback?.content?.[0]?.text ?? "", /entities.*notes.*4000/i);
+  assert.deepEqual(result.errors, []);
+  assert.equal(entities[0]?.notes, largeEntityNotes);
+  assert.equal(documents[0]?.title, largeDocumentTitle);
+  assert.equal(documents[0]?.description, largeDocumentDescription);
+  assert.equal(documents[0]?.content, largeDocumentContent);
+  assert.equal(codeArtifacts[0]?.title, largeCodeTitle);
+  assert.equal(codeArtifacts[0]?.description, largeCodeDescription);
+  assert.equal(codeArtifacts[0]?.code, largeCode);
 });
 
 test("capture overlap submission retries through the durable checkpoint flow", async (t) => {
@@ -932,7 +1153,7 @@ test("capture sanitizes policy and work context before queue persistence", async
   assert.equal(job.snapshot.context.repoName, "[redacted]");
 });
 
-test("capture bounds provenance-aware memory context for the REST adapter", async () => {
+test("capture corrects stored context instead of truncating it for provenance", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-context-limit-"),
   );
@@ -960,22 +1181,40 @@ test("capture bounds provenance-aware memory context for the REST adapter", asyn
       });
     },
   });
-  const model = new FakeModel(
-    {
-      candidates: [
-        {
-          id: "candidate-long-context",
-          title: "Use SQLite",
-          content: "Local development uses SQLite.",
-          context: "x".repeat(500),
-          keywords: ["sqlite"],
-          tags: ["decision"],
-          sourceEntryIds: ["user-1"],
-        },
-      ],
+  const contexts: Context[] = [];
+  let captureAttempts = 0;
+  const registry: ModelRegistryPort = {
+    find: () => ({
+      provider: "fake",
+      id: "memory",
+      contextWindow: 200_000,
+      maxTokens: 16_384,
+    }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      const input = JSON.parse(String(context.messages[0]?.content)) as Record<string, unknown>;
+      if (Array.isArray(input.entries)) {
+        captureAttempts += 1;
+        return providerTool(`capture-context-${captureAttempts}`, "submit_capture_candidates", {
+          candidates: [{
+            id: "candidate-long-context",
+            title: "Use SQLite",
+            content: "Local development uses SQLite.",
+            context: "x".repeat(captureAttempts === 1 ? 500 : 350),
+            keywords: ["sqlite"],
+            tags: ["decision"],
+            sourceEntryIds: ["user-1"],
+            evidenceType: "userDecision",
+          }],
+        });
+      }
+      return providerTool("overlap-context", "submit_capture_decision", {
+        action: "create",
+        reason: "No overlap.",
+      });
     },
-    { action: "create", reason: "No overlap." },
-  );
+  };
+  const model = new PiMemoryModel(registry, { provider: "fake", id: "memory" });
   const service = new CaptureService({
     queue,
     client,
@@ -986,8 +1225,13 @@ test("capture bounds provenance-aware memory context for the REST adapter", asyn
   await service.enqueue(snapshot());
   await service.checkpoint();
 
+  assert.equal(captureAttempts, 2);
+  const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
+  assert.equal(feedback?.isError, true);
+  assert.match(feedback?.content?.[0]?.text ?? "", /context plus required provenance/i);
   assert.equal(createdBodies.length, 1);
   assert.equal(typeof createdBodies[0]?.context, "string");
+  assert.match(createdBodies[0]?.context as string, /^x{350}\nSession:/);
   assert.ok((createdBodies[0]?.context as string).length <= 500);
   assert.match(createdBodies[0]?.context as string, /Evidence entries: user-1/);
   assert.equal(

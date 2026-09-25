@@ -178,11 +178,6 @@ async function readPromptDirectory(
   for (const name of PROMPT_NAMES) {
     try {
       const promptPath = join(path, `${name}.md`);
-      const details = await stat(promptPath);
-      if (details.size > MAX_CONFIG_FILE_BYTES) {
-        warnings.push(`${name} prompt overlay is too large and was ignored.`);
-        continue;
-      }
       const text = await readFile(promptPath, "utf8");
       if (text.trim() !== "") prompts[name] = text.trim();
     } catch (error) {

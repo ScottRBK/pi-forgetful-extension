@@ -43,14 +43,8 @@ export interface ModelPickerContext {
   scopedModels?: readonly { model: Model<any> }[];
 }
 
-const MODEL_OUTPUT_LIMIT = 1_200;
-const CAPTURE_OUTPUT_LIMIT = 6_000;
-const INPUT_LIMIT = 32_000;
-const RESPONSE_LIMIT = 32_000;
 const CAPTURE_TIMEOUT_MS = 15_000;
 const MAX_SUBMISSION_ATTEMPTS = 3;
-const MAX_REJECTION_CHARS = 800;
-const MAX_HISTORY_TEXT_CHARS = 2_000;
 
 export interface PiMemoryModelOptions {
   logger?: DiagnosticLogger;
@@ -72,7 +66,7 @@ function textContent(message: AssistantMessage): string {
     .trim();
 }
 
-function trimInput(input: unknown): string {
+function serializeInput(input: unknown): string {
   let text: string;
   if (typeof input === "string") text = input;
   else {
@@ -82,14 +76,7 @@ function trimInput(input: unknown): string {
       text = String(input);
     }
   }
-  if (typeof input === "string") text = sanitizeText(text);
-  if (text.length <= INPUT_LIMIT) return text;
-  if (typeof input !== "string")
-    throw new Error("Memory model input too large");
-  return JSON.stringify({
-    truncated: true,
-    content: text.slice(0, INPUT_LIMIT - 48),
-  });
+  return typeof input === "string" ? sanitizeText(text) : text;
 }
 
 function fencedJson(text: string): string {
@@ -128,9 +115,6 @@ function parseCompletionResponse(
 ): unknown {
   ensureCompletionFinished(response, request, timedOut, false);
   const text = sanitizeText(textContent(response));
-  if (Buffer.byteLength(text, "utf8") > RESPONSE_LIMIT) {
-    throw new Error("Memory model response too large");
-  }
   if (request.signal?.aborted) throw new Error("Memory model request aborted");
   return parseModelResponse(text);
 }
@@ -212,17 +196,10 @@ function requestTimeout(
     : CAPTURE_TIMEOUT_MS;
 }
 
-function requestOutputLimit(request: ModelRequest): number {
-  return request.purpose === "capture"
-    ? CAPTURE_OUTPUT_LIMIT
-    : MODEL_OUTPUT_LIMIT;
-}
-
 function requestOptions(
   model: Model<any>,
   sessionId: string | undefined,
   transformHeaders: MemoryModelHeaderTransform | undefined,
-  outputLimit: number,
   signal: AbortSignal,
 ): ModelsSimpleStreamOptions {
   const sessionHeaders = openCodeSessionHeaders(model, sessionId);
@@ -236,7 +213,8 @@ function requestOptions(
     : undefined;
   return {
     signal,
-    maxTokens: outputLimit,
+    // Registry.complete uses the raw provider path, which needs Pi's configured allowance.
+    maxTokens: model.maxTokens,
     cacheRetention: "none",
     ...(sessionId ? { sessionId } : {}),
     ...(headerTransform ? { transformHeaders: headerTransform } : {}),
@@ -261,7 +239,7 @@ function toolCalls(message: AssistantMessage): ToolCall[] {
 
 function rejectionText(error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
-  return sanitizeText(detail).slice(0, MAX_REJECTION_CHARS);
+  return sanitizeText(detail);
 }
 
 function sanitizedAssistantForHistory(message: AssistantMessage): AssistantMessage {
@@ -269,7 +247,7 @@ function sanitizedAssistantForHistory(message: AssistantMessage): AssistantMessa
     ...message,
     content: message.content.map((part) => {
       if (part.type === "text") {
-        return textBlock(sanitizeText(part.text).slice(0, MAX_HISTORY_TEXT_CHARS));
+        return textBlock(sanitizeText(part.text));
       }
       if (part.type === "toolCall") {
         return {
@@ -478,11 +456,11 @@ export class PiMemoryModel implements MemoryModelClient {
     );
     try {
       const context: Context = {
-        systemPrompt: sanitizeText(request.policy).slice(0, INPUT_LIMIT),
+        systemPrompt: sanitizeText(request.policy),
         messages: [
           {
             role: "user",
-            content: trimInput(request.input),
+            content: serializeInput(request.input),
             timestamp: Date.now(),
           },
         ],
@@ -494,7 +472,6 @@ export class PiMemoryModel implements MemoryModelClient {
         model,
         this.sessionId,
         this.transformHeaders,
-        requestOutputLimit(request),
         deadline.controller.signal,
       );
       if (request.submission) {
@@ -562,24 +539,19 @@ export class PiMemoryModel implements MemoryModelClient {
     const tool = submissionTool(submission);
     const rejections: string[] = [];
     const recordRejection = (attempt: number, reason: string, input?: unknown): void => {
-      const bounded = rejectionText(reason);
+      const safeReason = rejectionText(reason);
       this.emit("info", "model.submission_rejected", request, { attempt });
       this.emit("debug", "model.submission_rejection", request, {
-        attempt, reason: bounded, input,
+        attempt, reason: safeReason, input,
       });
-      rejections.push(bounded);
-      submission.onRejection?.(bounded, input);
+      rejections.push(safeReason);
+      submission.onRejection?.(safeReason, input);
     };
     for (let attempt = 1; attempt <= MAX_SUBMISSION_ATTEMPTS; attempt++) {
       const response = await this.completeAttempt(
         model, context, options, request, deadline, attempt,
       );
       ensureCompletionFinished(response, request, deadline.timedOut, true);
-      // Bound the whole response before validating or retaining any provider-generated history.
-      if (Buffer.byteLength(JSON.stringify(response.content), "utf8") > RESPONSE_LIMIT) {
-        throw new Error("Memory model response too large");
-      }
-
       const calls = toolCalls(response);
       if (calls.length !== 1) {
         const base = `Call ${submission.name} exactly one time; received ` +

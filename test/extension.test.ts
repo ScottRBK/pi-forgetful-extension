@@ -3766,6 +3766,42 @@ test("resolver checkpoint waiting is bounded and cannot enter stale capture", as
   }
 });
 
+test("conflict handoff preserves full selected evidence and still redacts secrets", async () => {
+  // Arrange: each selected conflict exceeds the old line and combined evidence budgets.
+  const reason = `${"Reason details. ".repeat(60)} REASON_TAIL`;
+  const oldClaim = `${"Previous fact. ".repeat(100)} OLD_TAIL`;
+  const newClaim = `${"Changed fact. ".repeat(100)} NEW_TAIL`;
+  const evidence = `${"Evidence details. ".repeat(300)} EVIDENCE_TAIL\nBearer conflict-secret`;
+  const conflicts = Array.from({ length: 4 }, (_, index) => ({
+    id: `full-conflict-${index}`, sessionId: "session-1", branchId: "session-1:root",
+    sourceEntryIds: [], reason, evidence: [evidence],
+    ...(index === 0 ? { oldClaim, newClaim } : {
+      oldMemory: { content: oldClaim }, candidate: { title: "Updated fact", content: newClaim },
+    }),
+  }));
+  const fixture = await harness({ conflicts });
+  try {
+    // Act: the extension supplies pending conflicts to Pi's next model turn.
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
+
+    // Assert: all three selected conflicts retain their tails, but the fourth is not selected.
+    const handoff = fixture.sentMessages.find((item) =>
+      (item.message as { customType?: string }).customType === "forgetful_conflict");
+    assert.ok(handoff);
+    const content = (handoff.message as { content: string }).content;
+    for (const tail of ["REASON_TAIL", "OLD_TAIL", "NEW_TAIL", "EVIDENCE_TAIL"]) {
+      assert.equal(content.split(tail).length - 1, 3, `${tail} must survive in each conflict`);
+    }
+    assert.doesNotMatch(content, /full-conflict-3|conflict-secret/);
+    assert.match(content, /\[redacted\]/);
+    assert.match(content, /untrusted evidence/);
+    assert.deepEqual(handoff.options, { deliverAs: "nextTurn" });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("conflict handoff renders malformed claims as unknown", async () => {
   const fixture = await harness({
     conflicts: [{
@@ -3931,16 +3967,17 @@ test("an in-flight runtime cannot install after session tree navigation", async 
   }
 });
 
-test("conflict resolution passes at most eight recent trusted evidence entries", async () => {
+test("conflict resolution preserves full text in eight trusted evidence entries", async () => {
   const fixture = await harness();
   try {
     await fixture.emit("session_start", {
       type: "session_start",
       reason: "new",
     });
+    const clarification = "Detailed clarification. ".repeat(1_000);
     for (let index = 0; index < 10; index += 1) {
       fixture.entries.push(
-        entry(`evidence-${index}`, "root", "user", `clarification ${index}`),
+        entry(`evidence-${index}`, "root", "user", `${clarification} ${index}`),
       );
     }
     fixture.capture.conflicts = [
@@ -3966,12 +4003,14 @@ test("conflict resolution passes at most eight recent trusted evidence entries",
     const additionalEntries =
       (
         fixture.capture.resolutions[0]?.value as {
-          additionalEntries?: Array<{ id: string }>;
+          additionalEntries?: Array<{ id: string; text: string }>;
         }
       ).additionalEntries ?? [];
     assert.ok(additionalEntries.length <= 8);
-    assert.ok(additionalEntries.some((item) => item.id === "evidence-0"));
-    assert.ok(additionalEntries.some((item) => item.id === "evidence-9"));
+    assert.equal(additionalEntries.find((item) => item.id === "evidence-0")?.text,
+      `${clarification} 0`);
+    assert.equal(additionalEntries.find((item) => item.id === "evidence-9")?.text,
+      `${clarification} 9`);
   } finally {
     await fixture.cleanup();
   }

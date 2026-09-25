@@ -15,9 +15,6 @@ const MAX_EXPANSION_RELATIONSHIPS = 12;
 const MAX_ENTITY_MEMORIES_PER_ENTITY = 4;
 const MAX_EXPANSION_MEMORY_LINKS = 12;
 const MAX_EXPANSION_ATTACHMENTS = 3;
-const MAX_EXPANSION_CHARS = 3_500;
-const MAX_ATTACHMENT_CHARS = 1_200;
-const DEFAULT_CHUNK_CHARS = 1_200;
 
 export interface KnowledgeExpansionRequest {
   memories: Memory[];
@@ -59,7 +56,6 @@ export type MemoryReader = (
 
 export interface KnowledgeReadServiceOptions {
   readMemory?: MemoryReader;
-  maxExpansionChars?: number;
 }
 
 function validId(value: unknown): value is number {
@@ -117,42 +113,8 @@ function inProjectScope(
     (validId(projectId) && resourceProjectId === projectId);
 }
 
-function clean(value: string, max: number): string {
-  const safe = sanitizeText(value.trim());
-  return safe.length <= max ? safe : `${safe.slice(0, max - 1)}…`;
-}
-
-function appendLine(lines: string[], line: string, maxChars: number): boolean {
-  const currentLength = lines.join("\n").length;
-  if (currentLength >= maxChars) return false;
-  const remaining = maxChars - currentLength - (lines.length > 0 ? 1 : 0);
-  if (remaining <= 0) return false;
-  lines.push(line.length <= remaining ? line : `${line.slice(0, Math.max(0, remaining - 1))}…`);
-  return true;
-}
-
-/** Split text at readable boundaries while keeping every chunk bounded. */
-export function chunkText(text: string, maxChars = DEFAULT_CHUNK_CHARS): string[] {
-  if (!Number.isSafeInteger(maxChars) || maxChars < 1) {
-    throw new TypeError("Text chunk size must be a positive integer");
-  }
-  if (text.length === 0) return [];
-  const chunks: string[] = [];
-  let offset = 0;
-  while (offset < text.length) {
-    const end = Math.min(offset + maxChars, text.length);
-    if (end === text.length) {
-      chunks.push(text.slice(offset));
-      break;
-    }
-    const candidate = text.slice(offset, end);
-    const newline = candidate.lastIndexOf("\n");
-    const split = newline >= Math.floor(maxChars / 2) ? newline + 1 : maxChars;
-    chunks.push(text.slice(offset, offset + split).trimEnd());
-    offset += split;
-    while (text[offset] === "\n" || text[offset] === " ") offset += 1;
-  }
-  return chunks;
+function clean(value: string): string {
+  return sanitizeText(value);
 }
 
 async function safeCall<T>(
@@ -180,7 +142,6 @@ async function safeCall<T>(
 /** Read rich Forgetful records without making them a required recall dependency. */
 export class KnowledgeReadService {
   private readonly readMemory?: MemoryReader;
-  private readonly maxExpansionChars: number;
 
   constructor(
     private readonly client: KnowledgeClient,
@@ -188,13 +149,6 @@ export class KnowledgeReadService {
   ) {
     if (typeof options === "function") this.readMemory = options;
     else this.readMemory = options.readMemory;
-    const maxChars = typeof options === "function"
-      ? MAX_EXPANSION_CHARS
-      : options.maxExpansionChars ?? MAX_EXPANSION_CHARS;
-    if (!Number.isSafeInteger(maxChars) || maxChars < 100) {
-      throw new TypeError("Knowledge expansion size must be at least 100 characters");
-    }
-    this.maxExpansionChars = maxChars;
   }
 
   async expand(request: KnowledgeExpansionRequest): Promise<KnowledgeExpansionResult> {
@@ -431,24 +385,12 @@ export class KnowledgeReadService {
   }
 
   private appendEntityLines(lines: string[], entities: Entity[]): void {
-    if (entities.length > 0) appendLine(lines, "Entities:", this.maxExpansionChars);
+    if (entities.length > 0) lines.push("Entities:");
     for (const entity of entities) {
-      if (!appendLine(
-        lines,
-        `- Entity #${entity.id}: ${clean(entity.name, 200)}`,
-        this.maxExpansionChars,
-      )) break;
-      appendLine(
-        lines,
-        `  Type: ${clean(entity.entity_type, 80)}`,
-        this.maxExpansionChars,
-      );
+      lines.push(`- Entity #${entity.id}: ${clean(entity.name)}`);
+      lines.push(`  Type: ${clean(entity.entity_type)}`);
       if (entity.notes) {
-        appendLine(
-          lines,
-          `  Notes: ${clean(entity.notes, 400)}`,
-          this.maxExpansionChars,
-        );
+        lines.push(`  Notes: ${clean(entity.notes)}`);
       }
     }
   }
@@ -458,13 +400,10 @@ export class KnowledgeReadService {
     relationships: RelationshipExpansion[],
   ): void {
     for (const { relationship, source, target } of relationships) {
-      if (!appendLine(
-        lines,
-        `- Relationship #${relationship.id}: ${clean(source.name, 120)} ` +
-          `-[${clean(relationship.relationship_type, 120)}]-> ` +
-          clean(target.name, 120),
-        this.maxExpansionChars,
-      )) break;
+      lines.push(
+        `- Relationship #${relationship.id}: ${clean(source.name)} ` +
+          `-[${clean(relationship.relationship_type)}]-> ${clean(target.name)}`,
+      );
     }
   }
 
@@ -473,61 +412,33 @@ export class KnowledgeReadService {
     linkedMemories: LinkedMemoryExpansion[],
   ): void {
     for (const linked of linkedMemories) {
-      if (!appendLine(
-        lines,
-        `- Entity memory #${linked.id} (${clean(linked.entity.name, 120)}): ` +
-          clean(linked.title, 240),
-        this.maxExpansionChars,
-      )) break;
+      lines.push(
+        `- Entity memory #${linked.id} (${clean(linked.entity.name)}): ` +
+          clean(linked.title),
+      );
     }
   }
 
   private appendDocumentLines(lines: string[], documents: Document[]): void {
     for (const document of documents) {
-      if (!appendLine(
-        lines,
-        `- Document #${document.id}: ${clean(document.title, 200)}`,
-        this.maxExpansionChars,
-      )) break;
+      lines.push(`- Document #${document.id}: ${clean(document.title)}`);
       if (document.description) {
-        appendLine(
-          lines,
-          `  ${clean(document.description, 300)}`,
-          this.maxExpansionChars,
-        );
+        lines.push(`  ${clean(document.description)}`);
       }
-      for (const chunk of chunkText(document.content, MAX_ATTACHMENT_CHARS).slice(0, 2)) {
-        if (!appendLine(
-          lines,
-          `  ${clean(chunk, MAX_ATTACHMENT_CHARS)}`,
-          this.maxExpansionChars,
-        )) break;
-      }
+      lines.push(`  ${clean(document.content)}`);
     }
   }
 
   private appendArtifactLines(lines: string[], artifacts: CodeArtifact[]): void {
     for (const artifact of artifacts) {
-      if (!appendLine(
-        lines,
-        `- Code artifact #${artifact.id}: ${clean(artifact.title, 200)} ` +
-          `[${clean(artifact.language, 80)}]`,
-        this.maxExpansionChars,
-      )) break;
+      lines.push(
+        `- Code artifact #${artifact.id}: ${clean(artifact.title)} ` +
+          `[${clean(artifact.language)}]`,
+      );
       if (artifact.description) {
-        appendLine(
-          lines,
-          `  ${clean(artifact.description, 300)}`,
-          this.maxExpansionChars,
-        );
+        lines.push(`  ${clean(artifact.description)}`);
       }
-      for (const chunk of chunkText(artifact.code, MAX_ATTACHMENT_CHARS).slice(0, 2)) {
-        if (!appendLine(
-          lines,
-          `  ${clean(chunk, MAX_ATTACHMENT_CHARS)}`,
-          this.maxExpansionChars,
-        )) break;
-      }
+      lines.push(`  ${clean(artifact.code)}`);
     }
   }
 
@@ -537,28 +448,18 @@ export class KnowledgeReadService {
     fileIds: number[],
   ): void {
     for (const file of files) {
-      if (!appendLine(
-        lines,
-        `- File #${file.id}: ${clean(file.filename, 200)} ` +
-          `(${clean(file.mime_type, 100)}, ${file.size_bytes} bytes; explicit read required)`,
-        this.maxExpansionChars,
-      )) break;
+      lines.push(
+        `- File #${file.id}: ${clean(file.filename)} ` +
+          `(${clean(file.mime_type)}, ${file.size_bytes} bytes; explicit read required)`,
+      );
       if (file.description) {
-        appendLine(
-          lines,
-          `  ${clean(file.description, 300)}`,
-          this.maxExpansionChars,
-        );
+        lines.push(`  ${clean(file.description)}`);
       }
     }
     const summarizedFileIds = new Set(files.map((file) => file.id));
     for (const fileId of fileIds) {
       if (summarizedFileIds.has(fileId)) continue;
-      appendLine(
-        lines,
-        `- File #${fileId}: explicit read required`,
-        this.maxExpansionChars,
-      );
+      lines.push(`- File #${fileId}: explicit read required`);
     }
   }
 

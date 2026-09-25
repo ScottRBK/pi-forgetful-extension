@@ -106,7 +106,11 @@ test(
     const root = await mkdtemp(join(tmpdir(), "pi-forgetful-async-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const agentDir = join(root, "agent");
-    await mkdir(join(agentDir, "forgetful"), { recursive: true });
+    await mkdir(join(agentDir, "forgetful", "prompts"), { recursive: true });
+    const policyOverlay = `${"Use the provided evidence. ".repeat(3_000)} POLICY_END`;
+    await writeFile(join(agentDir, "forgetful", "prompts", "classification.md"), policyOverlay);
+    const recallOverlay = `${"Use relevant history carefully. ".repeat(220)} RECALL_POLICY_END`;
+    await writeFile(join(agentDir, "forgetful", "prompts", "recall.md"), recallOverlay);
     await promisify(execFile)("git", ["init", "--quiet", root]);
     await promisify(execFile)("git", [
       "-C",
@@ -425,6 +429,10 @@ test(
     });
     t.after(() => session.dispose());
     await session.bindExtensions({});
+    const priorDecision = `Important first decision. ${"Details. ".repeat(600)} Final detail.`;
+    sessionManager.appendMessage({
+      role: "user", content: priorDecision, timestamp: Date.now(),
+    });
 
     // Act/Assert: the first model call is not held behind the memory planner.
     const waitingPrompt = session.prompt("Which database did we choose?");
@@ -447,11 +455,18 @@ test(
     await waitingPrompt;
     assert.equal(mainContexts.length, 3);
     assert.equal(memoryContexts.length, 2);
+    assert.ok(memoryContexts[0]?.systemPrompt?.includes(policyOverlay),
+      "full configured policy reaches Pi instead of being ignored as an oversized file");
+    const plannerInput = JSON.parse(messageText(memoryContexts[0]!));
+    assert.ok(plannerInput.sessionContext.some((item: { text: string }) =>
+      item.text === priorDecision), "full prior evidence reaches the memory provider");
     assert.match(
       JSON.stringify(mainContexts[1]),
       /SQLite was chosen for durable state/,
       "the next real model request must contain the current terminal fact",
     );
+    assert.match(JSON.stringify(mainContexts[1]), /RECALL_POLICY_END/,
+      "the configured recall policy is not silently clipped at the Pi lifecycle boundary");
     assert.doesNotMatch(
       JSON.stringify(mainContexts[1]?.messages),
       /memory-decision-pending/,

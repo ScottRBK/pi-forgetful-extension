@@ -250,3 +250,52 @@ test("failed edit evidence is excluded even when the tool name is allowlisted", 
     false,
   );
 });
+
+test("capture snapshot preserves complete evidence beyond the old character budgets", () => {
+  // Arrange: both one entry and the whole turn exceed the former evidence limits.
+  const userText = "u".repeat(20_000);
+  const assistantText = "a".repeat(20_000);
+  const entries = [
+    {
+      id: "user-long",
+      parentId: null,
+      type: "message" as const,
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: userText, timestamp: 1 },
+    },
+    {
+      id: "assistant-long",
+      parentId: "user-long",
+      type: "message" as const,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: assistantText }],
+        stopReason: "stop",
+        timestamp: 2,
+      },
+    },
+  ];
+
+  // Act.
+  const result = buildCaptureSnapshot({
+    session: {
+      getSessionId: () => "session-long",
+      getLeafId: () => "assistant-long",
+      getBranch: () => entries as SessionEntry[],
+    },
+    context: { cwd: "/repo", sessionId: "session-long", branchId: "branch-long" },
+    instanceId: "forgetful-local",
+    mode: "auto",
+    scope: "global",
+    policy: "capture-v1",
+    modelVersion: "fake/memory",
+  });
+
+  // Assert.
+  assert.equal(result.status, "ready");
+  assert.deepEqual(result.snapshot.entries.map((entry) => entry.text), [
+    userText,
+    assistantText,
+  ]);
+});

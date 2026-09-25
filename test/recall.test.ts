@@ -138,7 +138,30 @@ class SubmissionReviewModel implements MemoryModelClient {
 }
 
 describe("RecallService", () => {
-  it("plans once, performs global search, and returns bounded untrusted context", async () => {
+  it("preserves planner query, intent and entity text without extra character caps", async () => {
+    // Arrange: Forgetful does not impose the former 240/400/100 search-text limits.
+    const query = "Explain the prior architecture decision. ".repeat(30).trim();
+    const intent = "We need the full decision context. ".repeat(40).trim();
+    const entity = "A detailed entity search description. ".repeat(12).trim();
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({ search: true, queries: [query], queryIntent: intent,
+      entities: [entity], repositorySpecific: true });
+    const service = new RecallService(client, model);
+
+    // Act.
+    const result = await service.recall({ prompt: "Explain our repository architecture",
+      context, scope: "global", classificationPolicy: "Plan", recallPolicy: "Review" });
+
+    // Assert: neither validation nor repository qualification removes the selected search text.
+    assert.equal(result.reason, undefined);
+    assert.equal(client.searches[0]?.query, `${query} [repository: owner/forgetful]`);
+    assert.ok(client.searches[0]?.query_context.includes(intent));
+    assert.ok(client.searches[0]?.query_context.includes(entity));
+    const review = model.calls.find((call) => call.purpose === "recall-review");
+    assert.equal((review?.input as { queryIntent: string }).queryIntent, intent);
+  });
+
+  it("plans once, performs global search, and returns reviewed untrusted context", async () => {
     const client = new FakeForgetfulClient();
     const model = new FakeModel();
     const service = new RecallService(client, model);
@@ -159,7 +182,84 @@ describe("RecallService", () => {
     assert.equal(result.scope, "global");
     assert.match(result.text, /untrusted/i);
     assert.match(result.text, /transport port/);
-    assert.ok(result.text.length <= 6_000);
+  });
+
+  it("passes complete work context and policy to the recall planner", async () => {
+    // Arrange: each marker is beyond a former planner character budget.
+    const prompt = `${"prompt ".repeat(700)}PROMPT_END`;
+    const classificationPolicy = `${"policy ".repeat(1_200)}POLICY_END`;
+    const sessionText = `${"session ".repeat(150)}SESSION_END`;
+    const sessionContext = Array.from({ length: 8 }, (_, index) => ({
+      id: `entry-${index}`,
+      role: "user" as const,
+      text: sessionText,
+    }));
+    const model = new FakeModel({
+      search: false,
+      queries: [],
+      queryIntent: "",
+      entities: [],
+    });
+    const service = new RecallService(new FakeForgetfulClient(), model);
+
+    // Act.
+    await service.recall({
+      prompt,
+      context,
+      scope: "global",
+      classificationPolicy,
+      recallPolicy: "policy",
+      sessionContext,
+    });
+
+    // Assert: the public model request contains the complete sanitized values.
+    const request = model.calls[0];
+    const input = request.input as {
+      prompt: string;
+      sessionContext: Array<{ text: string }>;
+    };
+    assert.equal(input.prompt, prompt);
+    assert.deepEqual(input.sessionContext.map(({ text }) => text),
+      sessionContext.map(({ text }) => text));
+    assert.equal(request.policy, classificationPolicy);
+  });
+
+  it("shares complete retrieved evidence between automatic and foreground recall", async () => {
+    // Arrange: the marker falls beyond the former per-memory and total evidence caps.
+    const fullContent = `${"memory evidence ".repeat(110)}MEMORY_END`;
+    const recallPolicy = `${"review policy ".repeat(700)}REVIEW_POLICY_END`;
+    const longMemory = { ...memory, content: fullContent };
+    class LongMemoryClient extends FakeForgetfulClient {
+      override async search(request: SearchRequest): Promise<Memory[]> {
+        this.searches.push(request);
+        return [longMemory];
+      }
+    }
+    const client = new LongMemoryClient();
+    const model = new FakeModel();
+    const service = new RecallService(client, model);
+
+    // Act.
+    const automatic = await service.recall({
+      prompt: "How should I retrieve memory?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy,
+    });
+    const foreground = await service.deeper({
+      query: "recall transport",
+      context,
+      scope: "global",
+    });
+
+    // Assert: reviewer evidence, final context, and foreground output retain their tails.
+    const review = model.calls.find((request) => request.purpose === "recall-review");
+    const reviewInput = review?.input as { retrievedContext: string };
+    assert.match(reviewInput.retrievedContext, /MEMORY_END/);
+    assert.match(review?.policy ?? "", /REVIEW_POLICY_END/);
+    assert.match(automatic.text, /REVIEW_POLICY_END/);
+    assert.match(foreground.text, /MEMORY_END/);
   });
 
   it("review submission accepts an empty no-useful-context result", async () => {
@@ -220,6 +320,41 @@ describe("RecallService", () => {
     ]);
     assert.match(result.debugTrace ?? "", /Review attempts: 2/);
     assert.match(result.debugTrace ?? "", /Rejected attempt 1:/);
+  });
+
+  it("rejects a reviewed summary over 3000 characters then accepts correction", async () => {
+    // Arrange: evidence input is unbounded, but the reviewed output contract remains bounded.
+    const correctedSummary = "s".repeat(3_000);
+    const model = new SubmissionReviewModel([
+      {
+        summary: "s".repeat(3_001),
+        memoryIds: [11],
+        reason: "The memory is relevant.",
+      },
+      {
+        summary: correctedSummary,
+        memoryIds: [11],
+        reason: "The memory is relevant.",
+      },
+    ]);
+    const service = new RecallService(new FakeForgetfulClient(), model);
+
+    // Act.
+    const result = await service.recall({
+      prompt: "How should I retrieve memory?",
+      context,
+      scope: "global",
+      classificationPolicy: "policy",
+      recallPolicy: "policy",
+    });
+
+    // Assert: the same submission call can correct the output without losing its source.
+    assert.match(result.text, new RegExp(correctedSummary));
+    assert.deepEqual(result.memoryIds, [11]);
+    assert.deepEqual(model.rejectionReasons, [
+      "Recall review summary must be a string of at most 3000 characters",
+    ]);
+    assert.match(result.debugTrace ?? "", /Review attempts: 2/);
   });
 
   it("returns debug evidence for an empty summary with selected sources", async () => {

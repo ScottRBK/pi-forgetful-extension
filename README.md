@@ -295,8 +295,8 @@ Foreground `search_memories` follows Forgetful MCP search defaults: `k=3` primar
 linked memories enabled, and up to five links per primary memory. Results retain full memory
 content, primary and linked groups, and the server's count, token and truncation metadata.
 Use `k` (1–20) for search breadth; `offset` and `limit` belong to list and content operations.
-Pi shows a compact result summary that expands to the full response. Automatic recall retains
-its separate, bounded context budget.
+Pi shows a compact result summary that expands to the full response. Automatic recall selects a
+limited number of records, but does not shorten their text before model review.
 
 ### Recall
 
@@ -306,15 +306,15 @@ hook starts with pending state and a stable protocol; if the planner has already
 advanced, the latest boundary renders retrieval-underway state instead. It then renders either
 bounded untrusted context or an explicit no-context or failure terminal state. The extension
 resolves global or strict project scope, searches Forgetful, then asks the same memory model to
-review bounded results against the current question and session context. The model rejects
+review the selected results against the current question and session context. The model rejects
 unrelated matches and submits a concise summary with source IDs through a private
 `submit_recall_review` tool. Only that summary and validated references reach the main agent, not
 raw results or attachments. The configured recall scope is authoritative; the planner cannot
 change it for an individual operation.
 
 Recall can follow entities, relationships and supporting documents or code artifacts within its
-time and output limits. The active agent can explicitly open supporting records for more detail,
-including stored files. Strict project scope also applies to linked records and relationship
+time and record-count limits. The active agent can explicitly open supporting records for more
+detail, including stored files. Strict project scope also applies to linked records and relationship
 endpoints. Files require the server's optional file feature; an unavailable feature does not
 prevent ordinary memory recall.
 
@@ -341,12 +341,16 @@ recovery, and outputs against an isolated Forgetful server.
 ### Capture
 
 After a successful settled run, the extension snapshots stable session and branch entry IDs and
-enqueues the bounded evidence. A live worker extracts zero to three candidates through the private
-`submit_capture_candidates` tool, validates evidence and destinations, and checks overlap in the
-destination project. The overlap model submits `create`, `skip`, `supersede`, or `escalate` through
-the private `submit_capture_decision` tool. The worker then creates novel knowledge, supersedes a
-clearly outdated memory, or preserves an uncertain conflict for the originating session. Queue
-records include per-candidate outcomes so partial writes can be retried safely.
+enqueues eligible evidence without shortening its text. A live worker extracts zero to three
+candidates through the private `submit_capture_candidates` tool. It validates evidence and
+destinations, then checks overlap in the destination project. The overlap model submits `create`,
+`skip`, `supersede`, or `escalate` through the private `submit_capture_decision` tool. The worker
+then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
+conflict for the originating session. Queue records include per-candidate outcomes so partial
+writes can be retried safely.
+
+Conflict notices include the full sanitized reasons, claims and evidence for up to three selected
+conflicts. They do not shorten evidence before the main model decides how to resolve it.
 
 When a pending conflict changes only part of one memory, `forgetful_resolve` can ask the configured
 memory model for a complete revised replacement that retains the unaffected claims. The old memory
@@ -368,10 +372,10 @@ bounded reason when resolution cannot finish. Model judgment quality and concurr
 remain limits.
 
 Each private capture tool allows at most three attempts within its existing model request and
-15-second deadline. Invalid calls receive bounded error feedback so the model can correct them;
-text-only replies are not parsed as fallback JSON. A non-empty candidate call with no valid
-candidate is rejected for correction. Mixed calls still keep valid candidates and skip invalid
-siblings. Rejection details remain bounded and redacted.
+15-second deadline. Invalid calls receive validation feedback so the model can correct them;
+text-only replies are not parsed as fallback JSON. If any submitted candidate or attached resource
+is invalid, reject the submission for correction before writing its valid siblings. Nothing is
+silently discarded. Diagnostic rejection previews remain bounded and redacted.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
 a memory. It reuses existing records and checkpoints partial work for retry. Automatic capture
@@ -390,6 +394,18 @@ warning. Scope preference is independent of capture destination.
 overall deadline still applies when the model deadline is longer. Capture and overlap retain
 their separate 15-second model budget. Select a memory model that fits these limits; changing
 them is optional. Restart or reload the extension after editing settings directly.
+
+The selected model in Pi supplies the output allowance, including `maxTokens` overrides in Pi's
+`models.json`. The extension passes that allowance to Pi's model registry on initial requests and
+correction attempts. It does not impose separate token or character caps on model input, policies,
+evidence, correction history, or complete responses. Selected record and entry counts, timeouts,
+transport safety, durable queue capacity, and diagnostic-log bounds still apply. Context exhaustion
+remains a Pi/provider error: the extension does not estimate, truncate, or automatically compact
+background context to fit a model's context window.
+
+The reviewed recall summary still has a 3,000-character limit. Stored records retain Forgetful's
+field limits. Oversized submitted fields are validation errors returned to the model for correction,
+not silently shortened. Increasing a model's allowance does not extend its request deadline.
 
 Background requests use Pi's model registry for authentication and carry the current session ID,
 including the OpenCode session headers. Pi 0.85.1 does not expose the active session's provider

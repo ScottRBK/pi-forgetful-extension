@@ -166,8 +166,9 @@ smaller failure surface.
 4. Search a warm Forgetful HTTP service. When the plan selects retrieval, the next model boundary
    renders retrieval-underway state if the result is not ready; this passive update does not steer
    or trigger a model turn.
-5. Ask the same memory model to review bounded memory and optional rich results against the question
-   and session context. It submits a summary, selected source IDs and a brief
+5. Ask the same memory model to review selected memory and rich results against the question and
+   session context. Do not shorten the selected records, session entries, or policy by character
+   count before sending them to the model. It submits a summary, selected source IDs and a brief
    selection/rejection reason through a private `submit_recall_review` tool. Validate IDs against
    sources actually shown to the reviewer. Invalid, unknown, duplicate, or semantically rejected
    calls get an error tool result; text-only replies get a correction message. Both may retry,
@@ -187,9 +188,10 @@ smaller failure surface.
 
 Retrieved memory is untrusted historical context, never executable instruction. Pending and
 progress text is trusted lifecycle protocol; recalled terminal text is untrusted data. The review
-summary remains bounded by the existing review contract (3,000 characters); the rendered context
-uses the existing 6,000-character recall-context bound. Only the rendered latest state is visible
-at a model-call boundary; persisted markers and tool results follow the persistence rules above.
+summary remains bounded by the existing review contract (3,000 characters). This is a validated
+submission-field limit, not a limit on the evidence or reasoning available to the reviewer. Only the
+rendered latest state is visible at a model-call boundary; persisted markers and tool results follow
+the persistence rules above.
 Review summaries are also untrusted. One planning call and one bounded review path share the
 overall recall budget with search and optional enrichment. The review path stops after the first
 valid private submission and never parses text-only review output as JSON. Explicit main-agent read
@@ -342,9 +344,9 @@ is then processed by the durable worker described above.
    a target project and rationale. Accept exactly one private `submit_capture_candidates` tool call;
    do not parse text output as fallback JSON.
 3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
-   Reject a non-empty submission for correction when every candidate is invalid. When valid and
-   invalid candidates are mixed, keep the valid siblings and record the invalid candidates as
-   skipped. Then resolve each accepted destination.
+   Reject the submission for correction if any candidate or attached resource is invalid. Do not
+   silently discard an invalid record or write valid siblings before the submission is corrected.
+   Then resolve each accepted destination.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
 5. Give the candidate, its evidence, and overlapping memories to the memory model. Accept exactly
    one private `submit_capture_decision` tool call containing `create`, `skip`, `supersede`, or
@@ -354,7 +356,7 @@ is then processed by the durable worker described above.
 6. Validate the original decision arguments. A contradiction must identify conflicting memories
    from that query, the incompatible claims, source entries in the eligible snapshot, and why they
    concern the same fact. Each private capture submission has at most three attempts within its
-   existing model request and deadline; rejected calls receive bounded error tool results.
+   existing model request and deadline; rejected calls receive validation error tool results.
 7. Execute `create` or automatic `supersede` through the existing Forgetful API using the shared
    resolution path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
    neither an ordinary duplicate nor permission to create a competing fact.
@@ -429,8 +431,9 @@ The existing non-atomic read/write race limitation still applies.
 
 1. Persist a pending conflict with its originating session/branch, destination project, old
    claim, proposed replacement, memory IDs, and source evidence in the existing queue store.
-2. Deliver a bounded custom message to that same live session using `pi.sendMessage()` with
-   `deliverAs: "nextTurn"`. The main model sees it with the next user prompt; this handoff
+2. Deliver up to three selected conflicts to that same live session using `pi.sendMessage()` with
+   `deliverAs: "nextTurn"`. Preserve their full sanitized reasons, claims and evidence; do not
+   character-clip the handoff. The main model sees it with the next user prompt; this handoff
    does not interrupt current work or start an extra model turn. A compact status can show
    that a conflict is pending. The durable record, not Pi's in-memory delivery queue, owns it.
 3. The main model uses the session context to resolve the conflict. If the missing information
@@ -552,6 +555,25 @@ implementation bounds recall to one planner call and one review path per prompt,
 private review-submission attempts. Capture extraction and each overlap decision use one model call
 from the per-run budget, with at most three private submission attempts inside that call and its
 15-second deadline. Debug shows aggregate usage and bounded rejection details.
+
+### Model capacity and record validation
+
+Use the selected Pi model's configured output allowance for every background purpose, including
+correction attempts. The registry's raw completion path receives `model.maxTokens` explicitly;
+there is no separate extension-owned output-token budget. The extension does not estimate or
+truncate context to fit a model's context window, or add automatic background compaction.
+Pi/provider capacity failures remain failure-open.
+
+Selected evidence, policies, rich records and private correction history are not character-clipped.
+The model adapter does not reject complete responses merely for exceeding an extension byte cap.
+Character limits belong to the final recall summary and Forgetful's stored fields. Their submission
+schemas return validation failures to the model for correction rather than silently shortening
+content. Corrections remain subject to the existing attempt count and request deadline.
+
+Record/entry selection counts, trust and scope checks, secret redaction, transport safety, durable
+queue capacity, and diagnostic preview limits remain separate safeguards. Large evidence can still
+exceed the queue's storage capacity or the provider's context capacity; it must not be silently
+shortened to disguise either failure.
 
 ## Transport
 

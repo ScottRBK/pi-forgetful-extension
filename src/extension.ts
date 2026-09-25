@@ -80,7 +80,7 @@ const POLICY_CONTRACTS = {
     "Return exactly one JSON object with fields:",
     "search (boolean), queries (zero to two short strings), queryIntent (short string),",
     "optional repositorySpecific (boolean), and entities (zero to ten short strings).",
-    "When search is true, queryIntent must explain what to find in 1–400 characters.",
+    "When search is true, queryIntent must explain what to find.",
     'When search is false, return {"search":false,"queries":[],"queryIntent":"","entities":[]}.',
     "For repository-specific questions, include the full repository identity from context.repoName",
     "in each query; leave an explicitly cross-project query broad for global recall.",
@@ -545,7 +545,7 @@ function automaticRecallTerminalText(
   kind: "automatic" | "queued" = "automatic",
 ): string {
   const label = kind === "queued" ? "queued" : "automatic";
-  const recalled = sanitizeText(result.text).trim().slice(0, 6_000);
+  const recalled = sanitizeText(result.text).trim();
   if (recalled) {
     return [
       `[Forgetful ${label} recall terminal state: context available]`,
@@ -645,7 +645,7 @@ function recallContextEntries(ctx: ExtensionContext): EvidenceEntry[] {
       entries.push({
         id: entry.id,
         role: message.role,
-        text: content.slice(-2_000),
+        text: content,
       });
   }
   return entries.slice(-8);
@@ -681,22 +681,18 @@ function resolutionEvidence(
   preferredIds: readonly string[] = [],
 ): EvidenceEntry[] {
   const entries: EvidenceEntry[] = [];
-  let budget = 12_000;
   for (const entry of ctx.sessionManager.getBranch().slice(-40).reverse()) {
-    if (budget <= 0 || entry.type !== "message") continue;
+    if (entry.type !== "message") continue;
     const message = entry.message as unknown as {
       role?: string;
       content?: unknown;
       toolName?: string;
       isError?: unknown;
     };
-    const text = sanitizeText(messageContentText(message.content))
-      .trim()
-      .slice(0, 2_000);
+    const text = sanitizeText(messageContentText(message.content)).trim();
     if (!text) continue;
     if (message.role === "user") {
       entries.push({ id: entry.id, role: "user", text });
-      budget -= text.length;
       continue;
     }
     if (
@@ -712,7 +708,6 @@ function resolutionEvidence(
         toolName: message.toolName,
         text,
       });
-      budget -= text.length;
     }
   }
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -1508,10 +1503,10 @@ export function createForgetfulExtension(
         );
       if (pending.length === 0 || typeof pi.sendMessage !== "function") return;
       const selected = pending.slice(0, 3);
-      const ids = selected.map((conflict) => String(conflict.id).slice(0, 100));
+      const ids = selected.map((conflict) => String(conflict.id));
       const reasons = selected.map((conflict) =>
         typeof conflict.reason === "string"
-          ? sanitizeText(conflict.reason).slice(0, 240)
+          ? sanitizeText(conflict.reason)
           : "evidence needs review",
       );
       const evidence = selected.map((conflict) => {
@@ -1550,12 +1545,7 @@ export function createForgetfulExtension(
               ? conflict.evidence.join(" | ")
               : "unknown"),
         ];
-        return lines
-          .join("\n")
-          .split("\n")
-          .map((line) => sanitizeText(line).slice(0, 600))
-          .join("\n")
-          .slice(0, 2_800);
+        return sanitizeText(lines.join("\n"));
       });
       try {
         pi.sendMessage(
@@ -2902,14 +2892,12 @@ export function createForgetfulExtension(
       name: "forgetful_recall",
       label: "Forgetful recall",
       description:
-        "Search the user's Forgetful memories for bounded additional context. " +
-        "Keep the query focused and within 240 characters.",
+        "Search the user's Forgetful memories for additional context. Keep the query focused.",
       promptSnippet: "Search Forgetful memory for relevant historical context",
       parameters: Type.Object({
         query: Type.String({
           minLength: 1,
-          maxLength: 240,
-          description: "A focused recall query, 1–240 characters.",
+          description: "A focused, non-empty recall query.",
         }),
       }),
       renderCall(args, theme) {
@@ -2942,8 +2930,8 @@ export function createForgetfulExtension(
         );
       },
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        if (typeof params.query !== "string" || !params.query.trim() || params.query.length > 240)
-          throw new Error("query must contain 1–240 characters and cannot be whitespace only.");
+        if (typeof params.query !== "string" || !params.query.trim())
+          throw new Error("query must be non-empty text and cannot be whitespace only.");
         try {
           const runtime = await loadRuntime(ctx);
           if (!runtime.recall || !runtime.config.enabled) {

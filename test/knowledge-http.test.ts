@@ -164,3 +164,33 @@ test("real REST reads and refreshes documents and code linked from memories",
     [artifact.id]);
   assert.equal((await client.knowledge.getDocument(document.id)).source_repo, "test/sources");
 });
+
+test("entity search passes complete query text to Forgetful without an extra character cap",
+  realOptions, async (t) => {
+    // Arrange: the service requires a non-empty query, not the extension's old 240-char cap.
+    const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t), timeoutMs: 4_000 });
+    const query = "Detailed entity search context. ".repeat(30).trim();
+
+    // Act / Assert: a long search is valid and has no results in the isolated empty database.
+    assert.deepEqual(await client.knowledge.searchEntities(query), []);
+    await assert.rejects(client.knowledge.searchEntities("   "), /non-empty|whitespace/);
+  });
+
+test("stored list text follows Forgetful's contract without extra item-width caps",
+  realOptions, async (t) => {
+    // Arrange: Forgetful limits list counts, not tag/alias/path character widths.
+    const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t), timeoutMs: 4_000 });
+    const tag = "topic-" + "x".repeat(600);
+    const alias = "alias-" + "y".repeat(600);
+    const path = "nested/".repeat(160) + "decision.md";
+
+    // Act.
+    const created = await client.knowledge.createEntity({ name: "Long metadata",
+      entity_type: "System", tags: [tag], aka: [alias], source_files: [path], project_ids: [] });
+    const read = await client.knowledge.getEntity(created.id);
+
+    // Assert: metadata can be written and read without truncation or invented validation errors.
+    assert.deepEqual(read.tags, [tag]);
+    assert.deepEqual(read.aka, [alias]);
+    assert.deepEqual(read.source_files, [path]);
+  });

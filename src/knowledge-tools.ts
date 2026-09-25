@@ -68,7 +68,7 @@ const writeOperation = Type.Union([
   Type.Literal("create_code_artifact"),
   Type.Literal("update_code_artifact"),
 ]);
-const strings = Type.Array(Type.String({ maxLength: 500 }), { maxItems: 10 });
+const strings = Type.Array(Type.String(), { maxItems: 10 });
 const ids = Type.Array(positiveId, { maxItems: 100 });
 function leftoverSearchField(description: string) {
   return Type.Optional(Type.Unknown({ description }));
@@ -87,11 +87,10 @@ export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
       "the current repository.",
   })),
   query: Type.Optional(Type.String({
-    minLength: 1, maxLength: 240,
+    minLength: 1,
     description: "Required for search_memories and search_entities.",
   })),
   query_context: Type.Optional(Type.String({
-    maxLength: 500,
     description: "Required for search_memories; explain why this foreground query is being made.",
   })),
   project_id: Type.Optional(Type.Integer({
@@ -165,7 +164,7 @@ export const KNOWLEDGE_WRITE_PARAMETERS = Type.Object({
   keywords: Type.Optional(strings),
   tags: Type.Optional(strings),
   aka: Type.Optional(strings),
-  source_files: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), {
+  source_files: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
     maxItems: 100,
   })),
   encoding_version: Type.Optional(
@@ -202,9 +201,12 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function requiredText(value: unknown, field: string, max: number): string {
-  if (typeof value !== "string" || !value.trim() || value.length > max)
-    throw new Error(`${field} is required and must contain 1–${max} characters (not whitespace).`);
+function requiredText(value: unknown, field: string, max?: number): string {
+  if (typeof value !== "string" || !value.trim() ||
+      (max !== undefined && value.length > max)) {
+    const constraint = max === undefined ? "non-empty text" : `1–${max} characters`;
+    throw new Error(`${field} is required and must contain ${constraint} (not whitespace).`);
+  }
   return value;
 }
 
@@ -256,21 +258,18 @@ function requiredStrings(
   value: unknown,
   field: string,
   maxItems = 100,
-  maxLength = 500,
 ): string[] {
   if (!Array.isArray(value) || value.length > maxItems)
-    throw new Error(`${field} must be an array with at most ${maxItems} strings, ` +
-      `each containing 1–${maxLength} characters.`);
-  return value.map((item) => requiredText(item, field, maxLength));
+    throw new Error(`${field} must be an array with at most ${maxItems} non-empty strings.`);
+  return value.map((item) => requiredText(item, field));
 }
 
 function optionalStrings(
   value: unknown,
   field: string,
   maxItems = 100,
-  maxLength = 500,
 ): string[] | undefined {
-  return value === undefined ? undefined : requiredStrings(value, field, maxItems, maxLength);
+  return value === undefined ? undefined : requiredStrings(value, field, maxItems);
 }
 
 function optionalImportance(value: unknown): number | undefined {
@@ -312,13 +311,13 @@ function need(input: Record<string, unknown>, fields: Array<[string, number]>): 
 
 function validateReadSearch(input: Record<string, unknown>, op: string): void {
   if (op !== "search_memories" && op !== "search_entities") return;
-  requiredText(input.query, "query", 240);
+  requiredText(input.query, "query");
   optionalId(input.project_id, "project_id");
   if (op === "search_entities") {
     boundedId(input.limit, "limit", 100);
     return;
   }
-  requiredText(input.query_context, "query_context", 500);
+  requiredText(input.query_context, "query_context");
   boundedId(input.k, "k", 20);
   boundedNonNegativeInteger(input.max_links_per_primary, "max_links_per_primary", 10);
   if (input.include_links !== undefined && typeof input.include_links !== "boolean")
@@ -401,7 +400,7 @@ export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteReq
       optionalText(input.content, "content", 2_000);
       optionalText(input.context, "context", 500);
       optionalImportance(input.importance);
-      if (requiredStrings(input.source_files, "source_files", 100, 1_000).length === 0)
+      if (requiredStrings(input.source_files, "source_files", 100).length === 0)
         throw new Error("source_files is required for supersession.");
       break;
     case "link_memories":
@@ -455,7 +454,7 @@ export function validateKnowledgeWriteRequest(value: unknown): KnowledgeWriteReq
       optionalText(input.language, "language", 100);
       break;
   }
-  optionalStrings(input.source_files, "source_files", 100, 1_000);
+  optionalStrings(input.source_files, "source_files", 100);
   optionalStrings(input.keywords, "keywords", 10);
   optionalStrings(input.tags, "tags", 10);
   optionalStrings(input.aka, "aka", 10);

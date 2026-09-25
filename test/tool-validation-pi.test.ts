@@ -118,7 +118,7 @@ test("explicit recall returns validation failures to Pi without changing automat
     // Assert: failures aren't confused with a successful search that has no matches.
     const results = modelResults.at(-1)!;
     assert.equal(results[0]!.isError, true);
-    assert.match(resultText(results[0]!), /query.*240/);
+    assert.match(resultText(results[0]!), /query.*non-empty/);
     assert.equal(results[1]!.isError, true);
     assert.match(resultText(results[1]!), /HTTP 400/);
     assert.match(resultText(results[1]!), /Use a more specific query/);
@@ -224,7 +224,7 @@ test("operation-specific validation tells the Pi model the missing field or exac
     });
     const cases: Array<{ arguments: Record<string, unknown>; error: RegExp; write?: boolean }> = [
       { arguments: { operation: "search_memories", query: "fact" }, error: /query_context/ },
-      { arguments: { operation: "search_entities", query: " " }, error: /query.*240/ },
+      { arguments: { operation: "search_entities", query: " " }, error: /query.*non-empty/ },
       ...[
         ["get_memory", "memory_id"], ["get_entity", "entity_id"],
         ["get_entity_memories", "entity_id"], ["get_relationships", "entity_id"],
@@ -267,4 +267,59 @@ test("operation-specific validation tells the Pi model the missing field or exac
       assert.equal(result.isError, true, JSON.stringify(item.arguments));
       assert.match(resultText(result), item.error, JSON.stringify(item.arguments));
     }
+  });
+
+test("Pi foreground search accepts full query and intent text without extension character caps",
+  realOptions, async (t) => {
+    // Arrange: all three tools use the isolated REST service through real Pi argument validation.
+    const baseUrl = await startForgetful(t);
+    const query = "Detailed search context. ".repeat(30).trim();
+    const intent = "Find the complete background decision. ".repeat(30).trim();
+    const client = new ApiForgetfulClient({ baseUrl });
+    const recall = new RecallService(client, { complete: async () => ({
+      search: false, queries: [], queryIntent: "", entities: [],
+    }) });
+    const { session, modelResults } = await createToolSession(t, baseUrl, [
+      { name: "forgetful_recall", arguments: { query } },
+      { name: "forgetful_knowledge_read", arguments: {
+        operation: "search_memories", query, query_context: intent,
+      } },
+      { name: "forgetful_knowledge_read", arguments: { operation: "search_entities", query } },
+    ], undefined, { client, recall });
+
+    // Act.
+    await session.prompt("Search with the full supplied context.");
+
+    // Assert: long valid text is not rejected by either the Pi schema or execution validation.
+    const results = modelResults.at(-1)!;
+    assert.equal(results.length, 3);
+    for (const result of results) assert.equal(result.isError, false, resultText(result));
+  });
+
+test("Pi accepts stored tag and alias widths that Forgetful accepts",
+  realOptions, async (t) => {
+    // Arrange: list counts are constrained, but the service has no per-item character maximum.
+    const baseUrl = await startForgetful(t);
+    const client = new ApiForgetfulClient({ baseUrl });
+    const project = await client.createProject({ name: "Metadata", description: "Tag contracts",
+      repo_name: "test/validation" });
+    const tag = "category-" + "x".repeat(600);
+    const alias = "alias-" + "y".repeat(600);
+    const { session, modelResults } = await createToolSession(t, baseUrl, [
+      { name: "forgetful_knowledge_write", arguments: { operation: "create_entity",
+        name: "Metadata system", entity_type: "System", tags: [tag], aka: [alias] } },
+    ]);
+
+    // Act.
+    await session.prompt("Record this repository's metadata system and its supplied aliases.");
+
+    // Assert: Pi's argument and domain validation permit the same data as the service.
+    const result = modelResults.at(-1)![0]!;
+    assert.equal(result.isError, false, resultText(result));
+    const entities = await client.knowledge.searchEntities("Metadata system");
+    assert.equal(entities.length, 1);
+    const entity = await client.knowledge.getEntity(entities[0]!.id);
+    assert.deepEqual(entity.project_ids, [project.id]);
+    assert.deepEqual(entity.tags, [tag]);
+    assert.deepEqual(entity.aka, [alias]);
   });

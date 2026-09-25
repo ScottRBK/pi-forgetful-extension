@@ -10,8 +10,6 @@ import type {
 import { isMemoryOperation, sanitizeText } from "./privacy.ts";
 
 export const MAX_SNAPSHOT_ENTRIES = 100;
-export const MAX_SNAPSHOT_ENTRY_CHARS = 4_000;
-export const MAX_SNAPSHOT_CHARS = 32_000;
 
 export interface SnapshotSessionReader {
   getSessionId(): string;
@@ -71,11 +69,8 @@ function contentText(content: unknown): string {
     .join("\n");
 }
 
-function boundedText(text: string): string {
-  const safe = sanitizeText(text).trim();
-  return safe.length > MAX_SNAPSHOT_ENTRY_CHARS
-    ? `${safe.slice(0, MAX_SNAPSHOT_ENTRY_CHARS)}\n[truncated]`
-    : safe;
+function safeText(text: string): string {
+  return sanitizeText(text).trim();
 }
 
 function rootId(branch: SessionEntry[], fallback: string): string {
@@ -119,17 +114,17 @@ function evidenceForEntry(
   const message = asMessage(entry);
   if (!message) return undefined;
   if (message.role === "user") {
-    const text = boundedText(contentText(message.content));
+    const text = safeText(contentText(message.content));
     return text ? { id: entry.id, role: "user", text } : undefined;
   }
   if (message.role === "assistant") {
-    const text = boundedText(contentText(message.content));
+    const text = safeText(contentText(message.content));
     return text ? { id: entry.id, role: "assistant", text } : undefined;
   }
   if (message.role === "toolResult" && typeof message.toolName === "string") {
     if (isMemoryOperation(message.toolName)) return undefined;
     if (message.isError === true) return undefined;
-    const text = boundedText(contentText(message.content));
+    const text = safeText(contentText(message.content));
     if (!text || !includeToolEvidence?.(message.toolName, text))
       return undefined;
     return {
@@ -158,21 +153,11 @@ function collectEvidence(
   includeToolEvidence: SnapshotOptions["includeToolEvidence"],
 ): EvidenceEntry[] {
   const evidenceEntries: EvidenceEntry[] = [];
-  let totalChars = 0;
   for (const entry of entries) {
-    if (
-      evidenceEntries.length >= MAX_SNAPSHOT_ENTRIES ||
-      totalChars >= MAX_SNAPSHOT_CHARS
-    )
-      break;
+    if (evidenceEntries.length >= MAX_SNAPSHOT_ENTRIES) break;
     const evidence = evidenceForEntry(entry, includeToolEvidence);
     if (!evidence) continue;
-    const remaining = MAX_SNAPSHOT_CHARS - totalChars;
-    if (evidence.text.length > remaining)
-      evidence.text = evidence.text.slice(0, remaining);
-    if (!evidence.text) continue;
     evidenceEntries.push(evidence);
-    totalChars += evidence.text.length;
   }
   return evidenceEntries;
 }
