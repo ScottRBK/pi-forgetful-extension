@@ -380,7 +380,7 @@ async function runEvaluation(t: TestContext): Promise<{
     dry ? join(root, "capture-agent") : undefined, { projectTrusted: true })
     .getCompactionSettings();
   report.compactionSettings = compactionSettings;
-  report.budgets = { captureTaskMs: 15_000, captureModelTasks: 4, recallTimeoutMs,
+  report.budgets = { captureTaskMs: 180_000, captureModelTasks: 4, recallTimeoutMs,
     classificationTimeoutMs, sdkRetries: 0 };
   let current = { scenario: "setup", phase: "setup" };
   const monitor = monitorRuntime(runtime, calls, blocked, () => current, selection);
@@ -435,7 +435,7 @@ async function runEvaluation(t: TestContext): Promise<{
           model: new PiMemoryModel(registry, selection, {
             sessionId: original.manager.getSessionId(), classificationTimeoutMs,
             compactionSettings,
-          }) }); // Keep production 15-second task and four-task budgets unchanged.
+          }) }); // Keep production three-minute task and four-task budgets unchanged.
         current.phase = "capture";
         const captureStart = performance.now();
         const queued = await capture.enqueue(snapshot);

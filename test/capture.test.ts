@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -897,7 +898,8 @@ test("capture overlap submission retries through the durable checkpoint flow", a
     id: "candidate-overlap-retry",
     title: "Use SQLite",
     content: "The project uses SQLite.",
-    context: "The user changed the database decision.",
+    context: "The user changed the database decision.\n" +
+      "Session: old-session; Branch: old-branch; Evidence entries: user-1",
     keywords: ["database"],
     tags: ["decision"],
     sourceEntryIds: ["user-1"],
@@ -1000,6 +1002,7 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   assert.equal(feedback?.isError, true);
   assert.match(feedback?.content?.[0]?.text ?? "", /outside the overlap search/);
   assert.equal(client.created.length, 1);
+  assert.equal(client.created[0]!.context, "The user changed the database decision.");
   assert.deepEqual(client.superseded, [{ oldId: old.id, replacementId: 100 }]);
   const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
   assert.equal(job?.status, "complete");
@@ -1106,7 +1109,8 @@ test("CaptureService creates a novel user-evidenced candidate in the current pro
           id: "candidate-1",
           title: "Use SQLite locally",
           content: "Local development uses SQLite.",
-          context: "The database decision was made during the completed turn.",
+          context: "The database decision was made during the completed turn.\n" +
+            "Session: source; Branch: main; Evidence entries: user-1",
           keywords: ["sqlite", "database"],
           tags: ["decision"],
           sourceEntryIds: ["user-1"],
@@ -1129,8 +1133,11 @@ test("CaptureService creates a novel user-evidenced candidate in the current pro
   assert.equal(result.processed, 1);
   assert.equal(client.created.length, 1);
   assert.equal(client.created[0]?.project_ids[0], 7);
-  assert.match(client.created[0]?.context ?? "", /user-1/);
-  assert.match(client.created[0]?.context ?? "", /session-1/);
+  assert.equal(
+    client.created[0]?.context,
+    "The database decision was made during the completed turn.\n" +
+      "Session: source; Branch: main; Evidence entries: user-1",
+  );
   assert.equal(client.searches[0]?.projectId, 7);
   assert.deepEqual(
     model.requests.map((request) => request.purpose),
@@ -1175,7 +1182,7 @@ test("capture sanitizes policy and work context before queue persistence", async
   assert.equal(job.snapshot.context.repoName, "[redacted]");
 });
 
-test("capture corrects stored context instead of truncating it for provenance", async () => {
+test("capture stores the complete semantic context without appended provenance", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-context-limit-"),
   );
@@ -1225,7 +1232,7 @@ test("capture corrects stored context instead of truncating it for provenance", 
             id: "candidate-long-context",
             title: "Use SQLite",
             content: "Local development uses SQLite.",
-            context: "x".repeat(captureAttempts === 1 ? 500 : 350),
+            context: "x".repeat(captureAttempts === 1 ? 501 : 500),
             keywords: ["sqlite"],
             tags: ["decision"],
             sourceEntryIds: ["user-1"],
@@ -1257,12 +1264,9 @@ test("capture corrects stored context instead of truncating it for provenance", 
   assert.equal(captureAttempts, 2);
   const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
   assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /context plus required provenance/i);
+  assert.match(feedback?.content?.[0]?.text ?? "", /context.*500 characters/i);
   assert.equal(createdBodies.length, 1);
-  assert.equal(typeof createdBodies[0]?.context, "string");
-  assert.match(createdBodies[0]?.context as string, /^x{350}\nSession:/);
-  assert.ok((createdBodies[0]?.context as string).length <= 500);
-  assert.match(createdBodies[0]?.context as string, /Evidence entries: user-1/);
+  assert.equal(createdBodies[0]?.context, "x".repeat(500));
   assert.equal(
     (await queue.listJobs({ instanceId: "instance-a" }))[0]?.status,
     "complete",
@@ -2760,9 +2764,105 @@ test("partial memory 87 resolution submits a complete revision retaining unaffec
     assert.equal(f.client.created.length, 1);
     assert.equal(f.client.created[0]!.content, f.revision.content);
     assert.equal(f.client.created[0]!.importance, 9);
-    assert.match(f.client.created[0]!.context, /Session: session-1.*Evidence entries: user-1/);
+    assert.equal(f.client.created[0]!.context, f.revision.context);
     assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
   });
+
+test("partial revision removes trailing legacy context provenance", async (t) => {
+  // Arrange: the model copied provenance previously appended to the predecessor's context.
+  const f = await partialConflictFixture(t);
+  f.revision.context = "Only the local database decision changed\n" +
+    "Session: old-session; Branch: old-branch; Evidence entries: user-1";
+
+  // Act through the public conflict resolver.
+  await f.service.resolveConflict(f.conflict.id, f.input);
+
+  // Assert: the replacement stores only the semantic context.
+  assert.equal(f.client.created[0]!.context, "Only the local database decision changed");
+});
+
+test("partial revision preserves context that merely discusses provenance", async (t) => {
+  // Arrange: semantic prose mentions provenance but is not the legacy metadata suffix.
+  const f = await partialConflictFixture(t);
+  f.revision.context = "Session history explains why this branch-specific decision applies.";
+
+  // Act through the public conflict resolver.
+  await f.service.resolveConflict(f.conflict.id, f.input);
+
+  // Assert: legitimate context remains unchanged.
+  assert.equal(f.client.created[0]!.context, f.revision.context);
+});
+
+for (const operation of ["create", "update"] as const) {
+  test(`resumed ${operation} replacement cleans a pre-change durable plan`, async (t) => {
+    // Arrange: simulate a version-one plan persisted before legacy cleanup was introduced.
+    const f = await partialConflictFixture(t);
+    const semanticContext = "Only the local database decision changed";
+    const input: MemoryInput = {
+      title: f.revision.title,
+      content: f.revision.content,
+      context: `${semanticContext}\n` +
+        "Session: old-session; Branch: old-branch; Evidence entries: user-1",
+      keywords: f.revision.keywords,
+      tags: f.revision.tags,
+      importance: f.revision.importance,
+      project_ids: [7],
+      document_ids: [],
+      code_artifact_ids: [],
+      file_ids: [],
+      source_files: [],
+    };
+    const requestPayload = JSON.stringify({
+      evidenceEntryIds: ["user-1"],
+      reason: "Only local development changed.",
+    });
+    const replacementId = operation === "update" ? 100 : undefined;
+    if (replacementId) {
+      f.client.memories.set(replacementId, memory(replacementId, {
+        ...input,
+        context: "Earlier replacement context",
+      }));
+      f.client.knowledge = {
+        updateMemory: async (id, update) => {
+          const saved = memory(id, { ...f.client.memories.get(id)!, ...update });
+          f.client.memories.set(id, saved);
+          return saved;
+        },
+      } as KnowledgeClient;
+    }
+    await f.queue.updateConflict(f.conflict.id, {
+      ...(replacementId ? { replacementId } : {}),
+      replacement: {
+        planVersion: 1,
+        requestKey: createHash("sha256").update(requestPayload).digest("hex"),
+        requestPayload,
+        request: {
+          evidenceEntryIds: ["user-1"],
+          selectedAdditionalEntries: [],
+          reason: "Only local development changed.",
+        },
+        ...(replacementId ? { replacementMemoryId: replacementId,
+          memoryId: replacementId } : {}),
+        input,
+        candidate: f.revision,
+        entityIds: [],
+        memoryIds: [],
+        completedEntityIds: [],
+        completedMemoryIds: [],
+      },
+    });
+    const restarted = new CaptureService({ queue: f.queue, client: f.client,
+      model: f.model, instanceId: "instance-a" });
+
+    // Act: resume the accepted plan without asking the model to plan it again.
+    const result = await restarted.resolveConflict(f.conflict.id, f.input);
+
+    // Assert: the actual write and durable receipt both contain semantic context only.
+    assert.equal(f.contexts.length, 0);
+    assert.equal((await f.client.get(result.conflict.replacementId!)).context, semanticContext);
+    assert.equal(result.conflict.replacement!.input.context, semanticContext);
+  });
+}
 
 test("partial revision retries invalid fields and evidence, then leaves exhaustion pending",
   async (t) => {

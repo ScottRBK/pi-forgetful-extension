@@ -762,7 +762,7 @@ test(
         const decision = captureInput.eligibleEvidence.find(entry =>
           entry.text === "We decided that the test project uses local storage.");
         assert.ok(decision);
-        assert.ok(String(saved.context).includes(`Evidence entries: ${decision.id}`));
+        assert.equal(saved.context, "Explicit user decision.");
         const savedFeedback = notifications.find(({ message }) =>
           /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
         );

@@ -48,12 +48,12 @@ export interface ModelPickerContext {
   scopedModels?: readonly { model: Model<any> }[];
 }
 
-const CAPTURE_TIMEOUT_MS = 15_000;
+const CAPTURE_TIMEOUT_MS = 180_000;
 const MAX_SUBMISSION_ATTEMPTS = 3;
 
 export interface PiMemoryModelOptions {
   logger?: DiagnosticLogger;
-  /** Per-call classification/review deadline; capture and overlap retain 15 seconds. */
+  /** Per-call classification/review deadline; capture and overlap retain three minutes. */
   classificationTimeoutMs?: number;
   /** Compatibility alias for classificationTimeoutMs. */
   timeoutMs?: number;

@@ -665,23 +665,78 @@ for (const structured of [false, true]) {
   });
 }
 
-test("memory model gives capture requests a longer provider deadline", async () => {
+for (const purpose of ["capture", "overlap"] as const) {
+  test(`memory model gives each ${purpose} task one three-minute deadline`, async (t) => {
+    // Arrange: the provider never completes, so only the task deadline can settle the request.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const registry: ModelRegistryPort = {
+      find: () => selectedModel,
+      complete: async () => new Promise<AssistantMessage>(() => undefined),
+    };
+    const model = new PiMemoryModel(registry, {
+      provider: "fake",
+      id: "memory-model",
+    });
+
+    // Act: move to one millisecond before the required deadline.
+    const pending = model.complete({ purpose, policy: "policy", input: {} });
+    let settled = false;
+    void pending.finally(() => { settled = true; }).catch(() => undefined);
+    const rejected = assert.rejects(pending, /Memory model request failed/);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(179_999);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Assert: it survives until exactly three minutes, then times out.
+    assert.equal(settled, false);
+    t.mock.timers.tick(1);
+    await rejected;
+  });
+}
+
+test("capture correction retries share the original three-minute deadline", async (t) => {
+  // Arrange: the first rejected submission consumes two minutes; its retry never completes.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
   const registry: ModelRegistryPort = {
     find: () => selectedModel,
     complete: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      return response("{}");
+      calls += 1;
+      if (calls > 1) return new Promise<AssistantMessage>(() => undefined);
+      return new Promise<AssistantMessage>((resolve) => {
+        setTimeout(() => resolve(toolResponse([{
+          id: "capture-1",
+          name: "submit_recall_review",
+          arguments: { summary: "Unsupported", memoryIds: [], reason: "No source." },
+        }])), 120_000);
+      });
     },
   };
-  const model = new PiMemoryModel(
-    registry,
-    { provider: "fake", id: "memory-model" },
-    { timeoutMs: 10 },
-  );
+  const model = new PiMemoryModel(registry, selectedModel);
 
-  await assert.doesNotReject(
-    model.complete({ purpose: "capture", policy: "policy", input: {} }),
-  );
+  // Act: reject the first submission, then advance to one millisecond before the shared deadline.
+  const pending = model.complete({
+    purpose: "capture",
+    policy: "Use the tool.",
+    input: {},
+    submission: reviewSubmission(() => { throw new Error("summary requires a source"); }),
+  });
+  let settled = false;
+  void pending.finally(() => { settled = true; }).catch(() => undefined);
+  const rejected = assert.rejects(pending, /Memory model request failed/);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(120_000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  t.mock.timers.tick(59_999);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  // Assert: the correction gets only the remaining minute; its timer was not reset.
+  assert.equal(settled, false);
+  t.mock.timers.tick(1);
+  await rejected;
+  assert.equal(calls, 2);
 });
 
 test("capture and overlap inherit the same configured model allowance", async () => {

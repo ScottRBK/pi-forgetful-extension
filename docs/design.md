@@ -515,8 +515,11 @@ must not depend only on the capture model understanding natural language.
 
 Automatic capture also applies deterministic secret and unnecessary-PII filters before any
 model decision or network write. Raw transcripts, routine tool output, credentials, payroll
-data, and unverified guesses are never automatic capture candidates. Stored candidates should
-carry provenance such as the run and source-entry identity without copying the full transcript.
+data, and unverified guesses are never automatic capture candidates. Memory context stores only
+semantic applicability. Session, branch and evidence entry IDs remain internal for validation;
+Forgetful's native source fields carry selected repository, file, URL and encoding provenance.
+Recognised legacy context suffixes are removed on outgoing replacement writes, without a bulk
+migration of existing records.
 
 ## Output verbosity
 
@@ -570,8 +573,7 @@ implementation bounds recall to one planner call and one review path per prompt,
 private review-submission attempts. The reviewer may explore only stored Forgetful records through
 read-only tools in that same path. Capture extraction, overlap and connection review each consume
 a task from the four-task durable budget. Read turns, compaction and at most three submission
-attempts share each task's existing 15-second deadline. Debug counts provider invocations
-separately.
+attempts share each task's three-minute deadline. Debug counts provider invocations separately.
 
 ### Model capacity and record validation
 

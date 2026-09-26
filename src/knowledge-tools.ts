@@ -17,6 +17,7 @@ import type {
   Scope,
   StoredFile,
 } from "./contracts.ts";
+import { replacementMemoryContext } from "./memory-context.ts";
 import { hasSensitiveData } from "./privacy.ts";
 
 export interface KnowledgeToolContext {
@@ -1293,7 +1294,9 @@ async function replacementMemory(
   const input: MemoryInput = {
     title: request.title as string,
     content: request.content as string,
-    context: request.context as string,
+    context: typeof request.context === "string"
+      ? replacementMemoryContext(request.context)
+      : request.context as string,
     keywords: (request.keywords as string[] | undefined) ?? [],
     tags: (request.tags as string[] | undefined) ?? [],
     project_ids: [projectId],

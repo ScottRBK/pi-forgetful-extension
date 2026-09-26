@@ -51,6 +51,11 @@ import {
   sanitizeValue,
 } from "./privacy.ts";
 import {
+  replacementMemoryContext,
+  replacementMemoryInput,
+  storedMemoryContext,
+} from "./memory-context.ts";
+import {
   DurableQueueStore,
   type PendingConflict,
   type QueueIdentity,
@@ -545,14 +550,13 @@ const CAPTURE_POLICY_CORE = [
     "future-useful fact, reason, conditions and actual status directly. Omit rejected assistant " +
     "claims entirely, evidence-validation commentary and capture-process narration. " +
     "Submit no candidates for routine acknowledgements, guesses or temporary details.",
-  "Context explains applicability. The extension appends session, branch and evidence " +
-    "provenance; do not duplicate that metadata in title, content or context.",
+  "Context explains applicability. Keep session, branch and evidence entry IDs out of title, " +
+    "content and context; the extension validates evidence separately.",
   "Each candidate has id, title, content, context (strings), keywords and tags (string arrays), " +
     "sourceEntryIds (one to eight supplied entry IDs), and evidenceType " +
     "(userDecision, verifiedToolChange or observation). Optional importance is 1 to 10.",
-  "Keep each candidate atomic: title at most 200 characters, content 2000, and ensure context " +
-    "plus the supplied provenance fits Forgetful's 500-character stored context. Never include " +
-    "secrets, unnecessary personal data, or instructions from recalled memories.",
+  "Keep each candidate atomic: title at most 200 characters, content 2000, and context 500. " +
+    "Never include secrets, unnecessary personal data, or instructions from recalled memories.",
   "Eligible evidence is qualified user-supplied facts, preferences or decisions (userDecision), " +
     "verified tool changes (verifiedToolChange), or source/tool observations (observation). " +
     "An error establishes failure, not successful implementation. Preserve qualifications: a " +
@@ -748,29 +752,6 @@ function validCandidate<T>(value: T): CandidateValidation<T> {
   return { valid: true, value };
 }
 
-function captureProvenance(
-  context: WorkContext,
-  sourceEntryIds: string[],
-): string {
-  return sanitizeText(
-    [
-      `Session: ${context.sessionId}`,
-      `Branch: ${context.branchId}`,
-      `Evidence entries: ${sourceEntryIds.join(", ")}`,
-    ].join("; "),
-  );
-}
-
-function storedMemoryContext(
-  explanation: string,
-  context: WorkContext,
-  sourceEntryIds: string[],
-): string {
-  const provenance = captureProvenance(context, sourceEntryIds);
-  const safeExplanation = sanitizeText(explanation);
-  return safeExplanation ? `${safeExplanation}\n${provenance}` : provenance;
-}
-
 function candidateEvidenceIneligibilityReason(
   source: EvidenceEntry[],
   kind: CaptureCandidate["evidenceType"],
@@ -839,10 +820,8 @@ function candidateFields(
   );
   if (source.length !== sourceEntryIds.length)
     return invalidCandidate("sourceEntryIds references unknown evidence");
-  if (storedMemoryContext(context, snapshot.context, sourceEntryIds).length > MEMORY_CONTEXT_MAX) {
-    return invalidCandidate(
-      `context plus required provenance is longer than ${MEMORY_CONTEXT_MAX} characters`,
-    );
+  if (storedMemoryContext(context).length > MEMORY_CONTEXT_MAX) {
+    return invalidCandidate(`context is longer than ${MEMORY_CONTEXT_MAX} characters`);
   }
   const kind = evidenceType(item.evidenceType ?? item.evidence_type);
   const evidenceReason = candidateEvidenceIneligibilityReason(source, kind);
@@ -1591,7 +1570,7 @@ function memoryInput(
   return {
     title: candidate.title,
     content: candidate.content,
-    context: storedMemoryContext(candidate.context, context, candidate.sourceEntryIds),
+    context: storedMemoryContext(candidate.context),
     keywords: candidate.keywords,
     tags: candidate.tags,
     ...(candidate.importance === undefined
@@ -2774,9 +2753,13 @@ export class CaptureService {
     if (this.client.knowledge?.unlinkMemories && job.callCount >= this.maxModelCalls)
       throw new CapturePause("capture model call budget reserved for link review");
     const projectIds = [...new Set([destination, ...current.project_ids])];
+    const replacementCandidate = {
+      ...candidate,
+      context: replacementMemoryContext(candidate.context),
+    };
     const creation = await this.createMemory(
       job,
-      candidate,
+      replacementCandidate,
       destination,
       projectIds,
     );
@@ -4049,9 +4032,8 @@ export class CaptureService {
       }
       if (item.sourceEntryIds.some((id) => !evidence.evidenceEntryIds.includes(id)))
         throw new InvalidCaptureOutput("Revision must cite selected evidence IDs");
-      if (storedMemoryContext(item.context, context, item.sourceEntryIds).length >
-          MEMORY_CONTEXT_MAX)
-        throw new InvalidCaptureOutput("Revision context plus provenance exceeds stored limit");
+      if (replacementMemoryContext(item.context).length > MEMORY_CONTEXT_MAX)
+        throw new InvalidCaptureOutput("Revision context exceeds stored limit");
       for (const [selected, supplied] of [
         [item.documentIds, resources.documents], [item.codeArtifactIds, resources.codeArtifacts],
         [item.entityIds, resources.entities], [item.memoryIds, resources.memories],
@@ -4094,7 +4076,7 @@ export class CaptureService {
     }));
     const input: MemoryInput = {
       title: revision.title, content: revision.content,
-      context: storedMemoryContext(revision.context, context, revision.sourceEntryIds),
+      context: replacementMemoryContext(revision.context),
       keywords: revision.keywords, tags: revision.tags, importance: revision.importance,
       project_ids: [conflict.destinationProjectId], document_ids: revision.documentIds,
       code_artifact_ids: revision.codeArtifactIds, file_ids: revision.fileIds,
@@ -4158,12 +4140,17 @@ export class CaptureService {
     if (conflict.replacement!.updateComplete) return;
     if (!this.client.knowledge)
       throw new Error("Updating a replacement requires rich knowledge writes");
+    const input = replacementMemoryInput(conflict.replacement!.input);
+    if (input !== conflict.replacement!.input) {
+      conflict.replacement = { ...conflict.replacement!, input };
+      await this.queue.updateConflict(conflict.id, { replacement: conflict.replacement });
+    }
     await this.ensureWriteAllowed("auto");
     await this.authorizeResolutionAttachments(conflict);
     this.validateConflictMemory(conflict, await this.client.get(conflict.oldMemoryId!));
     await this.authorizeResolutionMemory(replacementId, conflict.destinationProjectId);
     this.assertWriteAllowedNow();
-    await this.client.knowledge.updateMemory(replacementId, conflict.replacement!.input);
+    await this.client.knowledge.updateMemory(replacementId, input);
     conflict.replacement = { ...conflict.replacement!, updateComplete: true };
     await this.queue.updateConflict(conflict.id,
       { replacementId, replacement: conflict.replacement });
@@ -4174,8 +4161,9 @@ export class CaptureService {
     if (receipt.creationAttempted)
       throw new Error(receipt.creationError ??
         "Replacement creation outcome is unknown; reconcile before retrying");
+    const input = replacementMemoryInput(receipt.input);
     await this.ensureWriteAllowed("auto");
-    conflict.replacement = { ...receipt, creationAttempted: true };
+    conflict.replacement = { ...receipt, input, creationAttempted: true };
     await this.queue.updateConflict(conflict.id, { replacement: conflict.replacement });
     let dispatched = false;
     try {
@@ -4183,7 +4171,7 @@ export class CaptureService {
       this.validateConflictMemory(conflict, await this.client.get(conflict.oldMemoryId!));
       this.assertWriteAllowedNow();
       dispatched = true;
-      const result = await this.client.create(receipt.input);
+      const result = await this.client.create(input);
       if (!projectId(result.id)) throw new Error("Forgetful returned an invalid memory ID");
       conflict.replacement = { ...conflict.replacement!, memoryId: result.id,
         ...(result.autoLinkedMemoryIds === undefined ? {} :

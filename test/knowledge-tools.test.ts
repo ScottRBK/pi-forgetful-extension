@@ -857,6 +857,70 @@ test(
   },
 );
 
+test("foreground replacement cleans legacy context without changing novel creates", async () => {
+  // Arrange: both writes receive text matching the exact historical capture suffix.
+  const semanticContext = "The database decision changed.";
+  const submittedContext = `${semanticContext}\n` +
+    "Session: old-session; Branch: old-branch; Evidence entries: user-1";
+  const old = raceMemory(1, { title: "Old claim", content: "Old content" });
+  const memories = new Map([[old.id, old]]);
+  const { client } = raceKnowledgeClient({ memories });
+
+  // Act through the public foreground write boundary.
+  const novel = value(await executeKnowledgeWrite(client, {
+    operation: "create_memory",
+    title: "Novel claim",
+    content: "Novel content",
+    context: submittedContext,
+    keywords: [],
+    tags: [],
+  }, raceContext));
+  const superseded = value(await executeKnowledgeWrite(client, {
+    operation: "supersede_memory",
+    memory_id: old.id,
+    title: "Current claim",
+    content: "Current content",
+    context: submittedContext,
+    keywords: [],
+    tags: [],
+    reason: "The source corrected the claim.",
+    source_files: ["README.md"],
+  }, raceContext));
+
+  // Assert: only the replacement path performs the narrow legacy cleanup.
+  const novelId = (novel.memory as { id: number }).id;
+  assert.equal((await client.get(novelId)).context, submittedContext);
+  assert.equal(
+    (await client.get(superseded.replacement_memory_id as number)).context,
+    semanticContext,
+  );
+});
+
+test("foreground replacement preserves missing-field service validation", async () => {
+  // Arrange: emulate Forgetful's normal required-field validation at the external write boundary.
+  const old = raceMemory(1, { title: "Old claim", content: "Old content" });
+  const memories = new Map([[old.id, old]]);
+  const { client } = raceKnowledgeClient({ memories });
+  const create = client.create.bind(client);
+  client.create = async (input, signal) => {
+    if (!input.title) throw new Error("Memory title is required.");
+    if (!input.context) throw new Error("Memory context is required.");
+    return create(input, signal);
+  };
+  const request = {
+    operation: "supersede_memory" as const,
+    memory_id: old.id,
+    content: "Current content",
+    reason: "The source corrected the claim.",
+    source_files: ["README.md"],
+  };
+
+  // Act / Assert: cleanup must not mask Forgetful's actionable field errors.
+  await assert.rejects(executeKnowledgeWrite(client, request, raceContext), /title is required/i);
+  await assert.rejects(executeKnowledgeWrite(client, { ...request, title: "Current claim" },
+    raceContext), /context is required/i);
+});
+
 test(
   "knowledge tools create explicitly requested entities without name-based deduplication",
   realOptions,

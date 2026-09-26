@@ -385,6 +385,10 @@ partial conflicts use the same path. Shared, global, cross-project and multi-mem
 borrow write authority from the current destination.
 
 Revision fields include the complete memory, evidence IDs, reference lists and source provenance.
+Memory context stores only semantic applicability. Session, branch and evidence entry IDs remain
+internal for evidence validation instead of being appended to context. Forgetful's native source
+fields retain selected repository, file, URL and encoding provenance. A recognised legacy context
+suffix is removed when a replacement is written; existing records are not bulk migrated.
 Empty selections do not copy old associations. Invalid submissions receive the existing bounded
 correction attempts. Tools execute the accepted instructions; they do not choose different
 references or reinterpret the claims. Completed operations are checkpointed, not replayed to restore
@@ -395,7 +399,7 @@ Forgetful itself may create similarity links; explicit additions do not promise 
 graph.
 
 Each private capture tool allows at most three attempts within its existing model request and
-15-second deadline. Invalid calls receive validation feedback so the model can correct them;
+three-minute deadline. Invalid calls receive validation feedback so the model can correct them;
 text-only replies are not parsed as fallback JSON. If any submitted candidate or attached resource
 is invalid, reject the submission for correction before writing its valid siblings. Nothing is
 silently discarded. Diagnostic rejection previews remain bounded and redacted.
@@ -417,9 +421,9 @@ warning. Scope preference is independent of capture destination.
 `recall_model_timeout_ms` limits each classification and review request (default 5,000 ms).
 `timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
 10,000 ms). Both settings are positive integer milliseconds in the user settings file. The
-overall deadline still applies when the model deadline is longer. Capture and overlap retain
-their separate 15-second model budget. Select a memory model that fits these limits; changing
-them is optional. Restart or reload the extension after editing settings directly.
+overall deadline still applies when the model deadline is longer. Each capture and overlap task
+has a separate fixed three-minute model budget. Select a memory model that fits these limits.
+Restart or reload the extension after editing settings directly.
 
 The selected model in Pi supplies the output allowance, including `maxTokens` overrides in Pi's
 `models.json`. The extension passes that allowance to Pi's model registry on initial requests and
