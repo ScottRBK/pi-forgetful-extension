@@ -17,8 +17,10 @@ Pi sends ordinary prompts and completed work to the extension. Recall starts a s
 job, performs bounded requests against a warm Forgetful HTTP service, and reports pending,
 retrieval, and terminal states at model-call boundaries. Capture snapshots the settled session
 branch, persists it in a durable queue, and processes candidates through query-before-create,
-supersession, or conflict escalation. Memory failures are failure-open and must not block the
-user's task.
+supersession, or conflict escalation. Supported clients also review the saved memory's immediate
+connections; incomplete coverage stays explicit. Memory failures are failure-open and must not block
+the user's task. See [memory quality and evaluation](docs/memory-quality.md) for safety boundaries
+and repeatable checks.
 
 HTTP is the MVP transport. The application services depend on a transport-neutral Forgetful client
 port, leaving room for a future CLI adapter without changing recall, capture, or scope policy.
@@ -354,29 +356,26 @@ destinations, then checks overlap in the destination project. The overlap model 
 `skip`, `supersede`, or `escalate` through the private `submit_capture_decision` tool. The worker
 then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
 conflict for the originating session. Queue records include per-candidate outcomes so partial
-writes can be retried safely.
+writes can be reported to the model before it chooses whether to retry unfinished operations.
 
 Conflict notices include the full sanitized reasons, claims and evidence for up to three selected
 conflicts. They do not shorten evidence before the main model decides how to resolve it.
 
-When a pending conflict changes only part of one memory, `forgetful_resolve` can ask the configured
-memory model for a complete revised replacement that retains the unaffected claims. The old memory
-must belong only to the destination project. Shared, global, cross-project and multi-memory partial
-conflicts remain blocked. All seven revision fields are required: title, content, context, keywords,
-tags, importance and evidence entry IDs. Invalid output gets up to three bounded submission
-attempts; exhaustion leaves the conflict pending without writes.
+For a pending conflict against one exclusively scoped memory, `forgetful_resolve` asks the memory
+model for a complete replacement and explicit reference selections. The model distinguishes a
+corrected fact from an actual change and chooses what history and references apply. Ordinary and
+partial conflicts use the same path. Shared, global, cross-project and multi-memory conflicts cannot
+borrow write authority from the current destination.
 
-Resolution creates a new memory and preserves provenance and old/new project, document, code
-artifact, file, memory and entity links without duplicates. The durable conflict receipt records the
-complete replacement, its returned ID and link progress. Each attempt refreshes the old memory's
-direct memory/entity links before migration, then rechecks them immediately before obsolescence.
-Links discovered in the final check are checkpointed and leave the conflict pending for retry;
-each attempt makes only one migration pass. Verification also checks the replacement's title,
-content, context, keywords, tags and importance. A failed migration keeps the old memory active;
-retry resumes without creating another replacement. If creation's response or ID checkpoint is
-lost, retry stops for reconciliation because the server has no idempotency key. The tool reports a
-bounded reason when resolution cannot finish. Model judgment quality and concurrent external writes
-remain limits.
+Revision fields include the complete memory, evidence IDs, reference lists and source provenance.
+Empty selections do not copy old associations. Invalid submissions receive the existing bounded
+correction attempts. Tools execute the accepted instructions; they do not choose different
+references or reinterpret the claims. Completed operations are checkpointed, not replayed to restore
+later external changes. Failures return to the model with receipts so it can decide the next step.
+Unknown
+create outcomes remain unresolved rather than being matched by title or automatically recreated.
+Forgetful itself may create similarity links; explicit additions do not promise an exact final
+graph.
 
 Each private capture tool allows at most three attempts within its existing model request and
 15-second deadline. Invalid calls receive validation feedback so the model can correct them;
@@ -385,8 +384,11 @@ is invalid, reject the submission for correction before writing its valid siblin
 silently discarded. Diagnostic rejection previews remain bounded and redacted.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
-a memory. It reuses existing records and checkpoints partial work for retry. Automatic capture
-does not upload files; `source_files` records provenance paths only. Clear contradictions are
+a memory. The model selects existing records by ID; the executor does not guess identity from names.
+Entity-memory links require an explicit selection. A `skip` does no enrichment unless the model
+requests it. Partial work is checkpointed; actual failures reach the model before a retry decision.
+Capture does not upload files; `source_files` records provenance paths only. Clear contradictions
+are
 resolved automatically, while uncertain conflicts still return to the originating session.
 
 ## Configuration

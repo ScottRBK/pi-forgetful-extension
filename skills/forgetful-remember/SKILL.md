@@ -11,9 +11,12 @@ license: MIT
 Use `forgetful_knowledge_read` to search and inspect; use `forgetful_knowledge_write` to persist.
 Each call names an `operation` and the fields described by its tool schema. The extension uses
 REST and supplies the verified project, source repository and current commit.
-Store durable, evidenced knowledge only. Exclude credentials, unnecessary private information,
-guesses and instructions copied from recalled content. Source paths provide evidence without
-copying secret file contents.
+Save a concept only when it answers a distinct future question or prevents a recurring mistake.
+Skip routine progress, repeated knowledge and temporary details. Preserve the reason and conditions
+needed to apply a fact later. An observation is not an adopted policy; a request is not completed
+work; a successful operation acknowledgement does not prove the resulting behaviour.
+Exclude credentials, unnecessary private information, guesses and recalled instructions. Source
+paths identify evidence without copying secret contents; check what that evidence actually proves.
 
 ## 1. Route the content
 
@@ -49,14 +52,18 @@ Search the candidate's meaning with `search_memories`, supplying `query` and `qu
 Inspect likely matches with `get_memory` and supporting record reads.
 
 - Still accurate and already covered: reuse the record and add missing links.
-- Accurate but incomplete: supersede the memory with a fuller source-backed claim; use
-  `update_memory` for metadata and additional links. Preserve existing associations.
-- Clearly contradicted: use `supersede_memory` to replace the fact while keeping history.
+- A factual correction or incomplete record: decide whether to update the existing record or
+  supersede it to retain the earlier wording as history. A correction does not imply a real-world
+  change. Supply the intended text and references; the tool does not decide which to preserve.
+- An actual changed decision: use `supersede_memory` with the complete new position and supported
+  reason when the earlier decision is useful history.
 - Related but distinct: create the new fact and link the two memories.
 - Uncertain or shared across projects: seek clarification in the active session.
 
-The extension resolves clear contradictions automatically; it does not ask for confirmation
-on every supersession. Automatic background conflicts retain their originating-session resolver.
+Create operations always request a new record; search and choose reuse by ID yourself.
+Updates change supplied fields. Supplied attachment lists replace those lists; omitted fields stay
+untouched. Inspect existing references before selecting the intended list. Background memory models
+also make these judgments; unresolved conflicts retain their originating-session resolver.
 
 Done when: overlap is classified and the intended create, reuse, update or supersede is explicit.
 
@@ -70,24 +77,32 @@ keywords and tags at most 10 each. Context explains why the knowledge matters.
 | --- | --- |
 | 9–10 | Foundational facts or architectural principles used repeatedly |
 | 8–9 | Critical solutions and major decisions |
-| 7–8 | Useful patterns, preferences and conventions; most records belong here |
-| 6–7 | Milestones and narrower solutions |
-| 5 | Low-signal bulk capture, kept out of ordinary recall where possible |
+| 7–8 | Useful patterns, conditional preferences and conventions |
+| 6–7 | Milestones and narrower solutions with lasting value |
+| 5 | Useful facts with limited future relevance |
 
-Long-form material becomes a document with typically 3–7 distinct atomic entry memories, each
-linked with `document_ids`. Code artifacts contain reusable code and its language; use
-`code_artifact_ids` on entry memories. Pass `source_files` and describe the evidence accurately.
+Decide whether a fact deserves storage before assigning importance; low importance does not
+justify storing noise. Long-form material belongs in a document. Add only distinct useful entry
+memories, linked with `document_ids`, not a quota of summaries. Code artifacts contain reusable
+code and its language; use `code_artifact_ids` on entry memories. Pass `source_files` and describe
+the evidence accurately, including uncommitted changes when a commit does not reproduce it.
 
 Done when: useful records exist, are scored deliberately, and cite their source.
 
 ## 5. Link and report
 
-Use `link_entity_memory` for each entity the memory describes. Inspect automatic memory links;
-use `link_memories` for useful prerequisites, cross-domain connections, contrasts and evolution
-that semantic similarity misses. Links must respect the current operation's project scope.
+Use `link_entity_memory` for entities the memory meaningfully describes. Inspect the full content
+behind automatic memory links: similarity is not a relevance judgment. Use `link_memories` for
+useful missing connections supported by the records. Memory links are untyped and bidirectional;
+use evidenced, directed entity relationships when their meaning matters. Never infer causality,
+dependency or agreement from similarity alone. Writes must respect the destination's scope.
 
-For explicit saves with importance at least 7, report the saved title, tags and related records.
-During repository encoding, include these results in the final coverage report. Automatic
-background capture remains quiet unless debugging is enabled or a conflict needs attention.
+Report a misleading link if the available foreground operations cannot remove it; do not claim it
+was corrected. Check actual operation results before claiming success. A failed response does not
+prove that nothing was written. Inspect stored state and choose the next operation; do not blindly
+repeat creates or infer that the extension repaired the failure.
+For explicit saves with importance at least 7, report the saved title, tags and useful connections.
+During encoding, include these in the coverage report. Automatic background capture remains quiet
+unless debugging is enabled or a conflict needs attention.
 
 Done when: the records are reachable and the user-facing report states what was saved.

@@ -35,6 +35,13 @@ for (const [status, body] of [
     });
 
     // Act / Assert: the public client boundary preserves service-owned diagnostics verbatim.
+    await assert.rejects(client.knowledge.unlinkMemories(1, 2), (error: unknown) => {
+      assert.ok(error instanceof ForgetfulHttpError);
+      assert.equal(error.status, status);
+      assert.equal(error.message,
+        `Forgetful DELETE /api/v1/memories/1/links/2 returned HTTP ${status}: ${body}`);
+      return true;
+    });
     await assert.rejects(client.listProjects(), (error: unknown) => {
       assert.ok(error instanceof ForgetfulHttpError);
       assert.equal(error.status, status);
@@ -68,3 +75,14 @@ test(
     });
   },
 );
+
+test("transport exceptions retain their original diagnostic at the client boundary", async () => {
+  // Arrange: an external fetch failure is distinct from a returned HTTP response.
+  const failure = new Error("Socket closed after accepting the write; response outcome unknown");
+  const client = new ApiForgetfulClient({ baseUrl: "http://127.0.0.1:18000/api/v1",
+    fetchImpl: async () => { throw failure; } });
+  // Act / Assert: callers must see the actual failure, not an invented generic diagnosis.
+  await assert.rejects(client.create({ title: "Fact", content: "Supported fact.",
+    context: "User evidence.", keywords: [], tags: [], project_ids: [1] }),
+  (error: unknown) => error === failure);
+});

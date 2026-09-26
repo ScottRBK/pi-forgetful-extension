@@ -1,26 +1,25 @@
 ---
 name: forgetful-explore
-description: Explore entities and relationships when flat memory search leaves gaps.
+description: Follow entities and relationships to fill a specific gap left by memory search.
 license: MIT
 ---
 
-# Exploring the knowledge graph
+# Exploring connected knowledge
 
-Choose a depth: shallow for one fact, medium for a topic and its immediate neighbours, deep for
-an investigation spanning connected systems. Track visited memory and entity IDs to stop cycles.
-All steps use `forgetful_knowledge_read`; strict project scope applies to every expansion.
+Start with the unanswered question, not a traversal depth. All reads use
+`forgetful_knowledge_read` and respect the selected recall scope. Project scope confines knowledge
+reads to the verified current project. Track visited memory/entity IDs to avoid cycles.
 
-1. Search memories with query_context stating the investigation. Use broader k when finding
-   entry points, up to 20. Done when: several relevant entry points are identified.
-2. Get the strongest memories and follow useful linked IDs. Read supporting documents, code or
-   files where they explain the facts. Done when: local clusters are understood.
-3. Search obvious actors and entities named by the memories. Done when: relevant systems,
-   components, people or organisations have been identified.
-4. Get relationships for relevant entities. Follow types that answer the question, such as
-   depends_on for impact or part_of for structure. Done when: relevant connections are mapped.
-5. Get memories attached to central entities, then get selected memories for their full text.
-   Done when: entity-linked knowledge missed by the initial topic search has been considered.
+1. Search memories for the missing fact, with `query_context` explaining the gap. Start with the
+   strongest result, not every match. Increase `k` (up to 20) only if necessary.
+2. Read full memories and relevant supporting documents, code or files. Follow a linked memory
+   only when it could clarify the fact, its reason, current state or a real dependency.
+3. Search entities named by the evidence. Verify identity and project, then inspect direct
+   relationships that bear on the question. Check direction: A depends_on B is not B depends_on A.
+4. Use `get_entity_memories` to find knowledge missed by topic search. Read selected memories in
+   full: their titles and graph position alone cannot establish their claims.
 
-Synthesize a connected answer with memory/entity IDs and any supporting document or artifact
-IDs. Describe the traversal path in one line and identify thin coverage. Report the picture and
-its gaps, rather than dumping every visited record.
+Follow returned cursors when coverage is incomplete. Stop when the gap is answered or further
+expansion is not justified. A link is a route to inspect, not proof of agreement or causality.
+State the useful connected facts with source IDs, their scope and any material uncertainty.
+Do not narrate every search or dump the visited graph.

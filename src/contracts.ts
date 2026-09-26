@@ -139,6 +139,7 @@ export interface KnowledgeClient {
   getFile(id: number, signal?: AbortSignal): Promise<StoredFile>;
   updateMemory(id: number, input: Partial<MemoryInput>, signal?: AbortSignal): Promise<Memory>;
   linkMemories(id: number, relatedIds: number[], signal?: AbortSignal): Promise<void>;
+  unlinkMemories?(id: number, targetId: number, signal?: AbortSignal): Promise<void>;
 }
 
 export interface Memory extends MemoryInput {
@@ -177,6 +178,12 @@ export interface SearchRequest {
   max_links_per_primary?: number;
 }
 
+export interface MemoryCreateResult {
+  id: number;
+  /** IDs returned by creation, not historical links inferred by a later read. */
+  autoLinkedMemoryIds?: number[];
+}
+
 export interface ForgetfulClient {
   knowledge?: KnowledgeClient;
   getMemoryEntityIds?(id: number, signal?: AbortSignal): Promise<number[]>;
@@ -190,7 +197,7 @@ export interface ForgetfulClient {
     repoName: string,
     signal?: AbortSignal,
   ): Promise<Project>;
-  create(input: MemoryInput, signal?: AbortSignal): Promise<{ id: number }>;
+  create(input: MemoryInput, signal?: AbortSignal): Promise<MemoryCreateResult>;
   get(id: number, signal?: AbortSignal): Promise<Memory>;
   supersede(
     id: number,

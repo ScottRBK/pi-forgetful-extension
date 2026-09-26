@@ -4,6 +4,7 @@ import type {
   Memory,
   MemorySearchResult,
   MemoryInput,
+  MemoryCreateResult,
   Project,
   ProjectInput,
   SearchRequest,
@@ -588,7 +589,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
   async create(
     input: MemoryInput,
     signal?: AbortSignal,
-  ): Promise<{ id: number }> {
+  ): Promise<MemoryCreateResult> {
     const payload = await this.request(
       "/memories",
       "POST",
@@ -601,7 +602,11 @@ export class ApiForgetfulClient implements ForgetfulClient {
         "Forgetful create response must be an object",
       );
     }
-    return { id: requiredInteger(payload.id, "create.id") };
+    return { id: requiredInteger(payload.id, "create.id"),
+      ...(payload.linked_memory_ids === undefined ? {} : {
+        autoLinkedMemoryIds: integerArray(payload.linked_memory_ids, "create.linked_memory_ids"),
+      }),
+    };
   }
 
   async get(id: number, signal?: AbortSignal): Promise<Memory> {
@@ -787,15 +792,8 @@ export class ApiForgetfulClient implements ForgetfulClient {
     } catch (error) {
       if (timedOut) throw new ForgetfulTimeoutError();
       if (callerAborted || callerSignal?.aborted) throw makeAbortError();
-      if (
-        error instanceof ForgetfulHttpError ||
-        error instanceof ForgetfulSchemaError ||
-        error instanceof ForgetfulTimeoutError ||
-        error instanceof ForgetfulAbortError
-      ) {
-        throw error;
-      }
-      throw new ForgetfulHttpError(`Forgetful ${method} request failed`);
+      // Preserve transport exceptions as well as returned service errors for the caller.
+      throw error;
     } finally {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", onAbort);

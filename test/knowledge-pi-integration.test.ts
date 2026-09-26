@@ -133,7 +133,7 @@ test("real Pi rejects an unassigned explicit write destination", realOptions, as
   assert.equal((await search(destination.id)).length, 0);
 });
 
-test("real Pi encodes linked repository knowledge through real REST without a background model",
+test("real Pi encodes knowledge and the model explicitly reuses IDs on an unchanged refresh",
   { ...realOptions, timeout: 40_000 }, async (t) => {
     // Arrange: real Pi, a trusted temporary repo and isolated Forgetful; only the LLM is scripted.
     const baseUrl = await startForgetful(t);
@@ -177,20 +177,44 @@ test("real Pi encodes linked repository knowledge through real REST without a ba
       () => ({ name: "forgetful_project_init", arguments: {
         name: "API", description: "Stores validated requests",
       } }),
-      () => ({ name: "forgetful_knowledge_write", arguments: {
-        operation: "create_document", title: "API architecture", description: "Request flow",
-        content: "The API validates requests before storing them.", document_type: "markdown",
-        tags: ["architecture"], source_files: ["README.md"],
-      } }),
-      () => ({ name: "forgetful_knowledge_write", arguments: {
-        operation: "create_entity", name: "API", entity_type: "System", tags: [], aka: [],
-        source_files: ["README.md"],
-      } }),
+      async () => {
+        if (finished) {
+          const project = (await client.listProjects("test/encode"))[0]!;
+          const document = (await client.knowledge.listDocuments(project.id))[0]!;
+          return { name: "forgetful_knowledge_read", arguments: {
+            operation: "get_document", document_id: document.id,
+          } };
+        }
+        return { name: "forgetful_knowledge_write", arguments: {
+          operation: "create_document", title: "API architecture", description: "Request flow",
+          content: "The API validates requests before storing them.", document_type: "markdown",
+          tags: ["architecture"], source_files: ["README.md"],
+        } };
+      },
+      async () => {
+        if (finished) {
+          const entity = (await client.knowledge.searchEntities("API"))[0]!;
+          return { name: "forgetful_knowledge_read", arguments: {
+            operation: "get_entity", entity_id: entity.id,
+          } };
+        }
+        return { name: "forgetful_knowledge_write", arguments: {
+          operation: "create_entity", name: "API", entity_type: "System", tags: [], aka: [],
+          source_files: ["README.md"],
+        } };
+      },
       async () => {
         const project = (await client.listProjects("test/encode"))[0]!;
         assert.ok(project, JSON.stringify(results));
         const document = (await client.knowledge.listDocuments(project.id))[0]!;
         assert.ok(document, JSON.stringify(results));
+        if (finished) {
+          const memory = (await client.search({ query: "API", query_context: "Refresh existing ID",
+            project_ids: [project.id], strict_project_filter: true }))[0]!;
+          return { name: "forgetful_knowledge_read", arguments: {
+            operation: "get_memory", memory_id: memory.id,
+          } };
+        }
         return { name: "forgetful_knowledge_write", arguments: {
           operation: "create_memory", title: "API request validation",
           content: "The API validates requests before storing them.", context: "Repository survey",

@@ -202,7 +202,7 @@ test(
 );
 
 test("knowledge writes use the default or explicit project consistently", async () => {
-  // Arrange: record project scopes used for overlap checks and mutations.
+  // Arrange: explicit creates use the chosen project, without an inferred overlap decision.
   const searched: number[][] = [];
   const created: number[][] = [];
   const projects: Project[] = [{ id: 9, name: "Target", repo_name: "test/target" }];
@@ -229,7 +229,7 @@ test("knowledge writes use the default or explicit project consistently", async 
   await executeKnowledgeWrite(client, { ...request, project_id: 9 }, context(7));
 
   // Assert.
-  assert.deepEqual(searched, [[7], [9]]);
+  assert.deepEqual(searched, [], "Creates must not infer reuse from search results");
   assert.deepEqual(created, [[7], [9]]);
 });
 
@@ -756,30 +756,10 @@ test(
 );
 
 test(
-  "create_memory dedup, replacement creation, and attachment checks reject records and " +
-  "attachments moved during the destination revalidation gap",
+  "replacement creation and attachment checks reject records moved during revalidation",
   async () => {
-    // Arrange: these cases exercise the paths that decide *whether and how* to mutate
-    // (exact-match dedup, replacement-memory creation, attachment ownership) using state
-    // read before the destination-revalidation round trip. Each race moves the record or
-    // attachment that decision depended on, so the fix must re-check it afterward.
+    // Arrange: scope is checked again after destination validation; semantic matching is absent.
     const cases: RaceCase[] = [
-      {
-        name: "create_memory (exact match moved)",
-        build() {
-          const exact = raceMemory(1, { title: "Dup title", content: "Dup content" });
-          const memories = new Map([[1, exact]]);
-          const { client, mutations } = raceKnowledgeClient({ memories, searchResults: [exact] });
-          return {
-            client, mutations,
-            request: {
-              operation: "create_memory", title: "Dup title", content: "Dup content",
-              context: "race", keywords: [], tags: ["new-tag"],
-            },
-            race: () => memories.set(1, { ...memories.get(1)!, project_ids: [raceElsewhere] }),
-          };
-        },
-      },
       {
         name: "create_memory (attachment moved)",
         build() {
@@ -835,9 +815,7 @@ test(
         },
       },
       {
-        // The old memory's own membership is rechecked with a fresh fetch (memoryInProject)
-        // right before supersede; a replacement is created before that recheck runs, which
-        // is pre-existing, accepted behavior (not part of this fix) so it is allowed here.
+        // The selected predecessor must still be authorized before creating its replacement.
         name: "supersede_memory (old memory moved)",
         build() {
           const old = raceMemory(1, { title: "Old claim", content: "Old content" });
@@ -851,7 +829,6 @@ test(
               reason: "test", source_files: ["README.md"],
             },
             race: () => memories.set(1, { ...memories.get(1)!, project_ids: [raceElsewhere] }),
-            allowedMutations: ["create"],
           };
         },
       },
@@ -881,7 +858,7 @@ test(
 );
 
 test(
-  "knowledge tools hydrate entity search results before scoped dedupe",
+  "knowledge tools create explicitly requested entities without name-based deduplication",
   realOptions,
   async (t) => {
   const baseUrl = await startForgetful(t);
@@ -898,7 +875,7 @@ test(
     source_files: ["README.md"],
   }, context(project.id));
 
-  assert.equal(value(result).status, "existing");
+  assert.equal(value(result).status, "created");
   const typed = await client.knowledge.createEntity({
     name: "Typed", entity_type: "Individual", tags: [], aka: [], project_ids: [project.id],
   });
@@ -909,12 +886,12 @@ test(
   assert.equal((typedResult.entity as { id: number }).id !== typed.id, true);
   const entities = await client.knowledge.searchEntities("API", 10);
   const hydrated = await Promise.all(entities.map((item) => client.knowledge.getEntity(item.id)));
-  assert.equal(hydrated.filter((item) => item.project_ids.includes(project.id)).length, 1);
+  assert.equal(hydrated.filter((item) => item.project_ids.includes(project.id)).length, 2);
   const search = value(await executeKnowledgeRead(client, {
     operation: "search_entities", query: "API", limit: 10,
   }, context(project.id)));
-  assert.equal((search.items as Array<{ id: number }>).length, 1);
-  assert.equal(search.next_offset, 1);
+  assert.equal((search.items as Array<{ id: number }>).length, 2);
+  assert.equal(search.next_offset, 2);
   },
 );
 
@@ -1014,7 +991,7 @@ test(
 );
 
 test(
-  "knowledge tools page readable content, stamp the current commit, and reject stale supersession",
+  "knowledge tools page content, stamp provenance, and execute an explicit supersession",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -1107,12 +1084,12 @@ test(
       operation: "create_memory", title: "Shared claim", content: "Shared content",
       context: "test", keywords: [], tags: ["original"], source_files: ["original.md"],
     }, current));
-    assert.equal(sharedResult.status, "existing");
+    assert.equal(sharedResult.status, "created");
     const sharedChange = value(await executeKnowledgeWrite(client, {
       operation: "create_memory", title: "Shared claim", content: "Shared content",
       context: "test", keywords: [], tags: ["replacement"], source_files: ["new.md"],
     }, current));
-    assert.equal(sharedChange.status, "needs_review");
+    assert.equal(sharedChange.status, "created");
     const sharedAfter = await client.get(shared.id);
     assert.deepEqual(sharedAfter.tags, ["original"]);
     assert.deepEqual(sharedAfter.source_files, ["original.md"]);
@@ -1125,7 +1102,7 @@ test(
       operation: "create_memory", title: "Case-sensitive claim",
       content: "use sqlite for durable state.", context: "test", keywords: [], tags: [],
     }, current));
-    assert.equal(caseChanged.status, "needs_review");
+    assert.equal(caseChanged.status, "created");
 
     const fileResponse = await fetch(`${baseUrl}/files`, {
       method: "POST",
@@ -1147,26 +1124,17 @@ test(
       project_ids: [project.id], source_files: ["README.md"], encoding_version: current.commit,
     });
     let mutationApplied = false;
-    await assert.rejects(
-      executeKnowledgeWrite(client, {
-        operation: "supersede_memory", memory_id: old.id, title: "New claim",
-        content: "The new claim", context: "test", keywords: [], tags: [],
-        reason: "Verified source changed the claim", source_files: ["README.md"],
-      }, current, undefined, async () => {
-        if (!mutationApplied) {
-          mutationApplied = true;
-          await client.knowledge.updateMemory(old.id, { tags: ["changed"] });
-        }
-      }),
-      /old memory changed/,
-    );
-    assert.equal((await client.get(old.id)).is_obsolete, false);
-
     const superseded = value(await executeKnowledgeWrite(client, {
       operation: "supersede_memory", memory_id: old.id, title: "New claim",
       content: "The new claim", context: "test", keywords: [], tags: [],
       reason: "Verified source changed the claim", source_files: ["README.md"],
-    }, current));
+    }, current, undefined, async () => {
+      if (!mutationApplied) {
+        mutationApplied = true;
+        await client.knowledge.updateMemory(old.id, { tags: ["changed"] });
+      }
+    }));
+    assert.equal((await client.get(old.id)).is_obsolete, true);
     const replacementId = superseded.replacement_memory_id as number;
     assert.equal(superseded.status, "superseded");
     const retry = value(await executeKnowledgeWrite(client, {

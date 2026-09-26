@@ -568,7 +568,10 @@ export class PiMemoryModel implements MemoryModelClient {
         return submission.validate(call.arguments);
       } catch (error) {
         const reason = rejectionText(error);
-        recordRejection(attempt, reason, call.arguments);
+        // Recovery may retain independently valid batch items. Wrong-tool arguments must never
+        // reach that path; the original provider response remains available in private diagnostics.
+        recordRejection(attempt, reason,
+          call.name === submission.name ? call.arguments : undefined);
         context.messages.push(
           sanitizedAssistantForHistory(response),
           errorToolResult(call, reason),

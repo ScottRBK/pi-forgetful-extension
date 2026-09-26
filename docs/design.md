@@ -247,8 +247,9 @@ project-free capture; personal facts that do not belong to a project need a sepa
 
 Explicit foreground writes follow the same destination boundary. They default to the verified
 current project, but may supply a numeric `project_id` for another existing repository-assigned
-project. Resolve that destination before overlap checks, revalidate it before mutation, and never
-fall back to the current project. Recall scope remains unchanged. New records and superseding
+project. Resolve that destination before executing the requested write, revalidate it before
+mutation, and never fall back to the current project. Recall scope remains unchanged. New records
+and superseding
 replacements identify the active source repository separately from the selected destination;
 updates preserve the existing record's provenance.
 
@@ -355,11 +356,11 @@ is then processed by the durable worker described above.
    silently discard an invalid record or write valid siblings before the submission is corrected.
    Then resolve each accepted destination.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
-5. Give the candidate, its evidence, and overlapping memories to the memory model. Accept exactly
-   one private `submit_capture_decision` tool call containing `create`, `skip`, `supersede`, or
-   `escalate`. This extends the existing overlap judgment; it does not require a separate
-   contradiction service or an extra model call per candidate. Use `supersede` for a clearly
-   evidenced change and `escalate` for unresolved conflict.
+5. Give candidates, their evidence and full destination-scoped records to the memory model.
+   Accept a private `submit_capture_decision` or batched `submit_capture_decisions` call with
+   `create`, `skip`, `supersede` or `escalate`. Resource reuse requires explicit existing IDs;
+   entity-memory links require selected keys. `skip` writes nothing unless `enrich: true`
+   explicitly requests resource additions and connection review for the selected memory.
 6. Validate the original decision arguments. A contradiction must identify conflicting memories
    from that query, the incompatible claims, source entries in the eligible snapshot, and why they
    concern the same fact. Each private capture submission has at most three attempts within its
@@ -381,13 +382,14 @@ consider SQLite cannot. Retain the superseded memory as history, linked to its r
 
 The capture service applies supersession in this order:
 
-1. Re-read the selected old memory and validate the recorded content and project associations.
-   If it changed or was already superseded, refresh the decision instead of applying a stale one.
-2. Create the validated replacement and durably record its returned ID before obsoleting the
-   old memory. Preserve applicable project associations and provenance. If the proposed change
-   invalidates only part of a shared memory, escalate rather than discard still-valid claims.
-3. Mark the old memory obsolete with the reason and replacement ID, then record completion.
-   Retry a failed obsolescence step using the recorded replacement, not another create.
+1. Check the selected endpoints' project access and write enablement. Content changes do not
+   authorize the executor to replace the model's instruction with escalation.
+2. Record the create attempt, create the complete model-supplied replacement and durably record
+   its returned ID. Ask the model which supplied connections and references to keep or change;
+   execute the selected operations, not an automatic union of old and new associations.
+3. Mark the old memory obsolete with the requested reason and replacement ID, then record
+   completion. If an operation fails, return the actual outcome and completed receipts to the
+   next funded model task. Only a new instruction authorizes retry of unfinished work.
 
 If creation fails or its outcome is unknown, do not obsolete the old memory. If obsolescence
 fails, the replacement may already exist alongside it; preserve that partial outcome for retry.
@@ -404,37 +406,37 @@ replacement. A partial contradiction involving exactly one old memory can be res
 memory belongs only to the destination project. Shared, global, cross-project and multi-memory
 partial conflicts remain deferred or can be skipped.
 
-For an eligible partial conflict, the configured memory model receives the complete old memory,
-old/new claims, candidate, trusted evidence and resolution reason. Its dedicated temporary
-`submit_memory_revision` tool requires a complete `title`, `content`, `context`, `keywords`, `tags`,
-`importance` and `sourceEntryIds`. The revision must retain unaffected claims. There is no text
-patch, in-place semantic update or cannot-revise result. Invalid submissions receive the existing
-three bounded adapter attempts; exhaustion leaves the conflict pending without memory writes.
+For an eligible single-memory conflict, ordinary and partial resolution both request a complete
+replacement from the configured model. `submit_memory_revision` includes the complete semantic
+fields, evidence IDs, explicit attachment/entity/memory reference selections, and source provenance.
+The model decides which old claims and references apply, including whether the conversation corrects
+an error or describes an actual change. Code validates arguments and scope, not that interpretation.
+Invalid submissions receive the existing three bounded adapter attempts.
 
-The durable partial-resolution order is:
+The durable execution order is:
 
-1. Recheck the old memory and project scope; checkpoint the complete revised replacement and its
-   link plan in the conflict receipt. Provenance remains extension-controlled. Preserve and
-   deduplicate old/new project, document, code artifact, file, memory and entity associations.
-   Discover direct old entity links through `GET /graph/memory/{id}?depth=1`; reject malformed,
-   incomplete or oversized graphs instead of silently losing links.
-2. Recheck the old memory and write enablement, record the create attempt, create a new memory,
-   then checkpoint its returned ID before further writes.
-3. Add candidate resources, refresh the old memory and its direct entity links, and checkpoint any
-   newly discovered memory/entity links. Migrate once, preserving links already on the replacement.
-   Store rich-write receipts in the conflict itself so recovery does not need the original job.
-   Verify the replacement's title, content, context, keywords, tags, importance and associations,
-   then checkpoint link completion.
-4. Immediately before supersession, recheck the old memory and its direct entity links. Checkpoint
-   any further links with incomplete migration and leave the conflict pending for retry. Otherwise,
-   mark the old memory obsolete with `superseded_by`, then resolve the conflict.
+1. Supply the current predecessor, candidate, trusted evidence and bounded available resources to
+   the model. Checkpoint its explicit replacement and selected references. Do not union old/new
+   references or append associations that arrive after that decision.
+2. Check permission and destination access, record the create attempt, create the replacement and
+   checkpoint its returned ID. A lost create response is an unknown outcome, not a reason to create
+   again or find a same-title substitute.
+3. Execute the selected association operations, checkpointing completed operations. A receipt skips
+   that operation on resume; it does not authorize restoring an association changed by another
+   writer.
+4. Recheck endpoint access and write enablement, then execute the requested supersession and record
+   completion. An operation failure is reported to the model with the completed receipts. Code does
+   not change the plan or reinterpret the failure as a different semantic action.
 
-A failed migration leaves the old memory active and the conflict pending. Retry reads the saved
-replacement and finishes missing links without repeating creation. If a create response or its
-ID checkpoint is lost, the durable attempt marker blocks another create: the outcome needs
-reconciliation. The REST API has no idempotency key, so automatic recovery from that ambiguous
-outcome cannot be guaranteed. Useful, sanitized, bounded errors reach `forgetful_resolve`.
-The existing non-atomic read/write race limitation still applies.
+Repeating an unchanged resolution request resumes its unfinished operations. Changed evidence or
+reason requests a new model decision, with the earlier accepted request, replacement and receipts
+visible. The model explicitly chooses whether to update that replacement or create another.
+
+These execution rules supersede the earlier deterministic preservation/union workflow. Existing
+implicit replacement receipts require explicit review rather than being silently reinterpreted as
+new model instructions. The REST API has no create idempotency key or atomic multi-record writes.
+Actual service diagnostics remain visible through the tool. Service-created similarity links are
+separate from the model's requested additions; pruning unseen links is not implied.
 
 1. Persist a pending conflict with its originating session/branch, destination project, old
    claim, proposed replacement, memory IDs, and source evidence in the existing queue store.
@@ -608,15 +610,14 @@ application services, scope policy, prompt policy, or capture queue.
 - real Pi abort, session replacement, branch change, or memory-off: cancel the matching recall job;
 - normal assistant stop: retain a live recall job so a late terminal result can be delivered;
 - repeated failures: open a short-lived circuit breaker;
-- capture failure: record per-candidate outcomes and retry only on a later safe checkpoint; an
-  earlier candidate may already have been written and query-before-create does not eliminate
-  race or retry duplicates;
+- capture failure: record actual outcomes and ask the model at a later checkpoint whether to retry
+  unfinished operations or stop; completed operations are not automatically repaired or repeated;
 - project cannot be resolved in project mode: skip rather than search globally.
 - capture destination cannot be resolved: skip that candidate with setup guidance; global recall
   remains usable, and a failed override never falls back to another write destination;
 - clear contradiction: automatically supersede with a recorded replacement and reason;
-- uncertain contradiction or changed source memory: retain for escalation or renewed judgment;
-- partial supersession: preserve the replacement ID and retry only the unfinished step;
+- uncertain contradiction: execute the model's escalation or other valid decision;
+- interrupted supersession: retain the replacement ID and receipts for the next explicit decision;
 - Pi exits with capture pending: preserve durable work for later recovery; post-exit completion
   is deferred beyond MVP;
 - persisted scope setting is absent: use global scope;
@@ -656,7 +657,8 @@ to prove that a real model classifies, splits, or judges novelty correctly.
 5. **Capture mechanism seam**: given a private create/skip/supersede/escalate submission, the
    extension validates its original arguments, searches the destination project, applies validated
    creates or ordered supersession, and retains uncertain conflicts. Invalid decisions receive
-   bounded correction feedback. A stale decision never knowingly changes a newer memory.
+   bounded correction feedback. Content differences do not substitute code-owned judgments;
+   changed project access or disabled writes still prevent unauthorized operations.
 6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
    and project choices are loaded per repository and cannot be replaced by the planner; project
    requests set `strict_project_filter: true` and use the resolved numeric project ID, while
@@ -694,7 +696,10 @@ intelligence. For example:
 - reject a resolution referencing memory IDs outside the candidate's overlap results;
 - fail replacement creation and assert the old memory remains active; fail obsolescence after
   creation and assert retry uses the recorded replacement ID without creating another memory;
-- change the old memory before resolution and assert the stale decision is rejected;
+- change the old memory before resolution and assert the model receives its current content;
+- move an endpoint outside the authorized project and assert no mutation;
+- change resolution evidence after partial execution and assert a new model decision sees the
+  earlier request, replacement and actual execution outcomes;
 - with global recall enabled, create a candidate without an override and assert it belongs to
   the current project;
 - while working in this extension, return an evidenced Forgetful-project destination and assert

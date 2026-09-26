@@ -8,8 +8,10 @@ license: MIT
 # Encoding a repository
 
 Build a knowledge base a future session can use: entities describe the system, atomic memories
-record decisions and conventions, and documents hold long-form understanding. A second encoding
-is an update pass, not a second copy. Follow the bundled remember and entities workflows.
+record decisions and conventions, and documents hold long-form understanding. Prioritise what a
+future agent needs to work safely: boundaries, reasons, recurring pitfalls and unresolved questions.
+Do not turn every file or routine fact into a memory. A second encoding is an update pass, not a
+second copy. Follow the bundled remember and entities workflows.
 
 ## 1. Resolve the project
 
@@ -56,13 +58,15 @@ documents or artifacts when they drift, and use `supersede_memory` for a clearly
 memory. Preserve its historical predecessor. Shared or uncertain claims need clarification in
 this session. An unsuccessful write is an uncovered area, not a completed encode.
 
-Done when: every surveyed area has useful linked knowledge or an explicit reason for exclusion.
+Done when: the important future questions have useful, evidenced entry points. Areas with no
+distinct durable knowledge need no record. An unchanged refresh should not create duplicate facts.
 
 ## 5. Report coverage
 
 Report the project ID; entities created, updated or reused; relationships; memories created,
 updated or obsoleted; documents and code artifacts written; skipped source areas and reasons;
-and thin coverage. Include repository gaps such as missing documentation, tests or CI.
+and material gaps. Distinguish an area not inspected from one verified to be missing. Keep the
+report focused on useful coverage rather than record counts as a success target.
 Deliver this coverage report to the user. Do not store the report itself in Forgetful.
 
 Done when: the user can identify both coverage and omissions from the report.

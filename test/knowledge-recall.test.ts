@@ -100,6 +100,67 @@ test("rich recall renders complete stored records", async () => {
 });
 
 test(
+  "automatic recall rejects a claim supported only by an entity-linked title",
+  realOptions,
+  async (t) => {
+    // Arrange: real REST storage exposes four entity links but only three full search results.
+    const baseUrl = await startForgetful(t);
+    const client = new ApiForgetfulClient({ baseUrl, timeoutMs: 4_000 });
+    const project = await client.createProject({
+      name: "Recall evidence", description: "Title-only evidence regression",
+      repo_name: "test/recall-evidence",
+    });
+    const entity = await client.knowledge.createEntity({
+      name: "Recall", entity_type: "System", notes: "Memory recall component",
+      aka: [], tags: [], project_ids: [project.id],
+    });
+    const memories: Array<{ id: number }> = [];
+    for (const index of [1, 2, 3, 4]) {
+      const memory = await client.create({
+        title: `Recall default discussion ${index}`,
+        content: `Session ${index} reported distracting recall; no default change was adopted.`,
+        context: "A session observation, not a product decision",
+        keywords: ["recall"], tags: ["observation"], project_ids: [project.id],
+      });
+      memories.push(memory);
+      await client.knowledge.linkEntityMemory(entity.id, memory.id);
+    }
+    let titleOnlyId: number | undefined;
+    const service = new RecallService(client, {
+      complete: async (request) => {
+        if (request.purpose === "classification") return {
+          search: true, queries: ["recall default"], queryIntent: "Find an adopted default",
+          entities: ["Recall"],
+        };
+        const input = request.input as { retrievedContext: string };
+        // Choose an actual title-only lead, independent of equal-vector search ordering.
+        titleOnlyId = memories.find(({ id }) =>
+          input.retrievedContext.includes(`- Entity memory #${id} (`) &&
+          !input.retrievedContext.includes(`- Memory #${id}:`))?.id;
+        return {
+          summary: "Automatic recall should now be off by default.",
+          memoryIds: [titleOnlyId], reason: "The linked title appears relevant.",
+        };
+      },
+    });
+
+    // Act: a fresh session receives an invalid attempt to turn a lead into supporting evidence.
+    const result = await service.recall({
+      prompt: "Was a new recall default adopted?",
+      context: { cwd: "/work/evidence", repoName: project.repo_name ?? undefined, project,
+        sessionId: "fresh-session", branchId: "fresh-branch" },
+      scope: "project", classificationPolicy: "Find the prior decision.",
+      recallPolicy: "Use supported history only.", deadlineMs: 4_000,
+    });
+
+    // Assert: the linked record exists, but its unseen content cannot justify an injected claim.
+    assert.ok(titleOnlyId, "the fixture must expose a title-only linked memory");
+    assert.equal(result.text, "");
+    assert.deepEqual(result.memoryIds, []);
+  },
+);
+
+test(
   "recall expands scoped graph records and linked readable artifacts",
   realOptions,
   async (t) => {

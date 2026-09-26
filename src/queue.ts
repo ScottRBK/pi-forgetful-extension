@@ -81,6 +81,27 @@ export interface PendingConflict {
   status: "pending" | "resolved" | "rejected";
   replacementId?: number;
   replacement?: {
+    // Missing version identifies legacy implicit preservation plans; never execute as explicit.
+    planVersion?: 1;
+    requestKey?: string;
+    requestPayload?: string;
+    request?: {
+      evidenceEntryIds: string[];
+      selectedAdditionalEntries: EvidenceEntry[];
+      reason?: string;
+      additionalEvidence?: string;
+    };
+    // The model's update selection and this plan's actual target are distinct from older targets.
+    replacementMemoryId?: number;
+    memoryId?: number;
+    priorMemoryId?: number;
+    updateComplete?: boolean;
+    executionError?: string;
+    // Service creation output, separate from model-selected manual link operations.
+    autoLinkedMemoryIds?: number[];
+    completedEntityIds?: number[];
+    completedMemoryIds?: number[];
+    creationError?: string;
     input: MemoryInput;
     candidate: unknown;
     entityIds: number[];

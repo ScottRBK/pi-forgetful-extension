@@ -328,6 +328,13 @@ export class ApiKnowledgeClient implements KnowledgeClient {
     }
   }
 
+  async unlinkMemories(memoryId: number, targetId: number, signal?: AbortSignal): Promise<void> {
+    if (id(memoryId) === id(targetId)) throw new TypeError("A memory cannot unlink itself");
+    const result = object(await this.request(`/memories/${id(memoryId)}/links/${id(targetId)}`,
+      "DELETE", undefined, signal, [200]));
+    if (result.success !== true) throw new ForgetfulSchemaError("Forgetful did not confirm unlink");
+  }
+
   async listFiles(projectId?: number, signal?: AbortSignal): Promise<FileSummary[]> {
     const result = await this.request(projectPath("/files", projectId), "GET",
       undefined, signal, [200]);

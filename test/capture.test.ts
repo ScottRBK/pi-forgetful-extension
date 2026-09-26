@@ -160,7 +160,8 @@ test("capture file correlates failed write and retry despite sink errors", async
   const client = new UnavailableClient();
   const model = new FakeModel({ candidates: [{ id: "retry-candidate", title: "SQLite locally",
     content: "Use SQLite for development", context: "Database decision", keywords: [], tags: [],
-    sourceEntryIds: ["user-1"] }] }, { action: "create", reason: "Novel SQLite decision" });
+    sourceEntryIds: ["user-1"] }] }, { action: "create", reason: "Novel SQLite decision" },
+    { action: "retry", reason: "Retry the unavailable write." });
   const service = new CaptureService({ queue, client, model, logger, instanceId: "instance-a" });
 
   // Act.
@@ -364,7 +365,9 @@ class FakeClient implements ForgetfulClient {
 
   async create(input: MemoryInput): Promise<{ id: number }> {
     this.created.push(input);
-    return { id: this.nextId++ };
+    const id = this.nextId++;
+    this.memories.set(id, memory(id, input));
+    return { id };
   }
 
   async get(id: number): Promise<Memory> {
@@ -1174,7 +1177,11 @@ test("capture corrects stored context instead of truncating it for provenance", 
       if (path.endsWith("/memories") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { context?: unknown };
         createdBodies.push(body);
-        return new Response(JSON.stringify({ id: 101 }), { status: 201 });
+        return new Response(JSON.stringify({ id: 101, linked_memory_ids: [] }), { status: 201 });
+      }
+      if (path.endsWith("/memories/101") && init?.method === "GET") {
+        return new Response(JSON.stringify({ ...createdBodies[0], id: 101, is_obsolete: false,
+          linked_memory_ids: [] }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: "unexpected request" }), {
         status: 404,
@@ -1208,6 +1215,10 @@ test("capture corrects stored context instead of truncating it for provenance", 
           }],
         });
       }
+      if (context.tools?.[0]?.name === "submit_capture_links")
+        return providerTool("links-context", "submit_capture_links", {
+          reviews: [{ candidateId: "candidate-long-context", decisions: [] }],
+        });
       return providerTool("overlap-context", "submit_capture_decision", {
         action: "create",
         reason: "No overlap.",
@@ -1636,7 +1647,45 @@ test("observe snapshots cannot write during a persisted supersession retry", asy
   assert.equal(client.superseded.length, 0);
 });
 
-test("a partial or multi-memory change is retained for escalation", async () => {
+test("supersede requires one selected memory and does not reinterpret partial instructions",
+  async (t) => {
+    for (const ids of [[], [41], [41, 42]]) {
+      // Arrange: the model requests supersession, including when it labels the change partial.
+      const directory = await mkdtemp(join(tmpdir(), "capture-supersede-arity-"));
+      t.after(() => rm(directory, { recursive: true, force: true }));
+      const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+      const client = new FakeClient();
+      const candidate = { id: "sqlite", title: "Database", content: "Use SQLite locally.",
+        context: "Local database decision", keywords: ["sqlite"], tags: ["decision"],
+        sourceEntryIds: ["user-1"] };
+      client.searchResults = [41, 42].map((id) => memory(id, {
+        title: "Database", content: "Use PostgreSQL locally.", context: "Previous decision",
+        keywords: ["database"], tags: ["decision"], project_ids: [7],
+      }));
+      for (const old of client.searchResults) client.memories.set(old.id, old);
+      const model = new FakeModel({ candidates: [candidate] }, {
+        action: "supersede", conflictingMemoryIds: ids, partial: true,
+        oldClaim: "Use PostgreSQL locally.", newClaim: candidate.content,
+        reason: "Only the local database changes.", sourceEntryIds: ["user-1"],
+      });
+      const service = new CaptureService({ queue, client, model, instanceId: "instance-a" });
+
+      // Act.
+      await service.enqueue(snapshot());
+      await service.checkpoint();
+
+      // Assert: one target executes; invalid arity never becomes an escalation instruction.
+      assert.equal(client.created.length, ids.length === 1 ? 1 : 0);
+      assert.deepEqual(client.superseded,
+        ids.length === 1 ? [{ oldId: 41, replacementId: 100 }] : []);
+      assert.deepEqual(await service.pendingConflicts(), []);
+      const job = (await queue.listJobs({ instanceId: "instance-a" }))[0]!;
+      assert.equal((job.candidateOutcomes.sqlite as { stage: string }).stage,
+        ids.length === 1 ? "superseded" : "skipped");
+    }
+  });
+
+test("the model explicitly escalates a partial multi-memory change", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-escalate-"),
   );
@@ -1676,7 +1725,7 @@ test("a partial or multi-memory change is retained for escalation", async () => 
       ],
     },
     {
-      action: "supersede",
+      action: "escalate",
       conflictingMemoryIds: [old.id, second.id],
       partial: true,
       oldClaim: "The project uses PostgreSQL and deploys to Kubernetes.",
@@ -1713,7 +1762,7 @@ test("a partial or multi-memory change is retained for escalation", async () => 
   assert.equal(client.superseded.length, 0);
 });
 
-test("an already-obsolete memory is escalated without creating another replacement", async () => {
+test("the model explicitly escalates an already-obsolete memory", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-obsolete-"),
   );
@@ -1748,7 +1797,7 @@ test("an already-obsolete memory is escalated without creating another replaceme
       ],
     },
     {
-      action: "supersede",
+      action: "escalate",
       conflictingMemoryId: old.id,
       oldClaim: "PostgreSQL is used.",
       newClaim: "SQLite is used.",
@@ -1772,7 +1821,7 @@ test("an already-obsolete memory is escalated without creating another replaceme
   assert.equal(conflicts.length, 1);
 });
 
-test("shared-project memories escalate without being rewritten", async () => {
+test("the model escalates shared-project memories; resolution still enforces scope", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-shared-project-"),
   );
@@ -1803,11 +1852,11 @@ test("shared-project memories escalate without being rewritten", async () => {
       ],
     },
     {
-      action: "supersede",
+      action: "escalate",
       conflictingMemoryId: old.id,
       oldClaim: "PostgreSQL is used.",
       newClaim: "SQLite is used.",
-      reason: "The project migrated databases.",
+      reason: "The shared project decision needs review.",
       sourceEntryIds: ["user-1"],
     },
   );
@@ -1832,7 +1881,7 @@ test("shared-project memories escalate without being rewritten", async () => {
         reason: "The user confirmed the migration.",
         evidenceEntryIds: ["user-1"],
       }),
-    /shared|project|validated/i,
+    /shared|project|destination/i,
   );
   assert.equal(client.created.length, 0);
   assert.equal(client.superseded.length, 0);
@@ -2071,7 +2120,7 @@ test("capture diagnostics report exact extraction validation reasons", async () 
   });
 });
 
-test("partial supersession retries and logs both memory IDs and destination", async (t) => {
+test("model-authorized supersession retries log both memory IDs and destination", async (t) => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-retry-"),
   );
@@ -2112,6 +2161,7 @@ test("partial supersession retries and logs both memory IDs and destination", as
       reason: "The project migrated databases.",
       sourceEntryIds: ["user-1"],
     },
+    { action: "retry", reason: "Retry temporary obsolescence failure." },
   );
   const service = new CaptureService({
     queue,
@@ -2247,6 +2297,13 @@ test("resolution accepts later user evidence from the originating session", asyn
       newClaim: "SQLite is used.",
       reason: "The change needs confirmation.",
       sourceEntryIds: ["user-1"],
+    },
+    {
+      title: "Use SQLite", content: "The project uses SQLite.",
+      context: "The user confirmed the database change.", keywords: ["database"],
+      tags: ["decision"], importance: 8, sourceEntryIds: ["later-user"],
+      documentIds: [], codeArtifactIds: [], entityIds: [], memoryIds: [], fileIds: [],
+      sourceFiles: [],
     },
   );
   const service = new CaptureService({
@@ -2533,7 +2590,7 @@ test("a settle checkpoint sweeps bound branches within one total job budget", as
   );
 });
 
-test("stale reads after creation preserve the replacement ID", async () => {
+test("changed claims in the permitted project do not veto explicit supersession", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-stale-replacement-"),
   );
@@ -2589,12 +2646,12 @@ test("stale reads after creation preserve the replacement ID", async () => {
   await service.checkpoint();
 
   assert.equal(client.created.length, 1);
-  const conflict = (await service.pendingConflicts())[0];
-  assert.equal(conflict?.replacementId, 100);
-  assert.equal(client.superseded.length, 0);
+  assert.deepEqual(await service.pendingConflicts(), []);
+  assert.deepEqual(client.superseded, [{ oldId: 41, replacementId: 100 }]);
+  assert.equal(client.memories.get(41)!.content, "The project uses MySQL.");
 });
 
-async function partialConflictFixture(t: import("node:test").TestContext) {
+async function partialConflictFixture(t: import("node:test").TestContext, partial = true) {
   const directory = await mkdtemp(join(tmpdir(), "capture-partial-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
@@ -2612,6 +2669,13 @@ async function partialConflictFixture(t: import("node:test").TestContext) {
     return result;
   };
   client.memories.set(87, old);
+  client.memories.set(41, memory(41, { ...old, title: "Deployment constraint", project_ids: [7] }));
+  client.memories.set(42, memory(42, { ...old, title: "Deployment background", project_ids: [7] }));
+  const getEntity: KnowledgeClient["getEntity"] = async (id) => {
+    assert.ok([51, 52].includes(id), `Unexpected entity ${id}`);
+    return { id, name: `Deployment system ${id}`, entity_type: "System",
+      tags: [], aka: [], project_ids: [7] };
+  };
   client.searchResults = [old];
   const candidate = {
     id: "sqlite", title: "SQLite locally", content: "Local development uses SQLite.",
@@ -2623,10 +2687,12 @@ async function partialConflictFixture(t: import("node:test").TestContext) {
     content: "Local development uses SQLite. Production uses PostgreSQL and Docker.",
     context: "Only the local database decision changed", keywords: ["sqlite", "docker"],
     tags: ["decision"], importance: 9, sourceEntryIds: ["user-1"],
+    documentIds: [] as number[], codeArtifactIds: [] as number[], entityIds: [] as number[],
+    memoryIds: [] as number[], fileIds: [] as number[], sourceFiles: [] as string[],
   };
   const setup = new CaptureService({ queue, client, instanceId: "instance-a",
     model: new FakeModel({ candidates: [candidate] }, {
-      action: "escalate", conflictingMemoryId: 87, partial: true,
+      action: "escalate", conflictingMemoryId: 87, partial,
       oldClaim: "Local development uses PostgreSQL.", newClaim: candidate.content,
       sourceEntryIds: ["user-1"], reason: "Preserve production and deployment claims.",
     }) });
@@ -2647,7 +2713,7 @@ async function partialConflictFixture(t: import("node:test").TestContext) {
   const input = { action: "supersede" as const, reason: "Only local development changed.",
     evidenceEntryIds: ["user-1"] };
   return { directory, queue, client, old, candidate, revision, conflict, contexts,
-    outputs, model, service, input };
+    outputs, model, service, input, getEntity };
 }
 
 test("partial memory 87 resolution submits a complete revision retaining unaffected claims",
@@ -2664,7 +2730,8 @@ test("partial memory 87 resolution submits a complete revision retaining unaffec
     const tool = f.contexts[0]!.tools![0]!;
     assert.equal(tool.name, "submit_memory_revision");
     assert.deepEqual((tool.parameters as any).required,
-      ["title", "content", "context", "keywords", "tags", "importance", "sourceEntryIds"]);
+      ["title", "content", "context", "keywords", "tags", "importance", "sourceEntryIds",
+        "documentIds", "codeArtifactIds", "entityIds", "memoryIds", "fileIds", "sourceFiles"]);
     const modelInput = JSON.parse(String(f.contexts[0]!.messages[0]!.content));
     assert.deepEqual(modelInput.oldMemory, f.old);
     assert.deepEqual(modelInput.candidate, f.conflict.candidate);
@@ -2688,6 +2755,10 @@ test("partial revision retries invalid fields and evidence, then leaves exhausti
       delete value[key];
       return value;
     });
+    for (const field of ["documentIds", "codeArtifactIds", "entityIds", "memoryIds", "fileIds"]) {
+      invalid.push({ ...f.revision, [field]: [999] },
+        { ...f.revision, [field]: [999, 999] }, { ...f.revision, [field]: [-1] });
+    }
     invalid.push({ ...f.revision, sourceEntryIds: ["assistant-1"] },
       { ...f.revision, title: " " }, { ...f.revision, importance: "9" },
       { ...f.revision, sourceEntryIds: ["user-1", "user-1"] },
@@ -2744,140 +2815,140 @@ test("partial revision checkpoints the complete replacement before create and re
     assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "resolved");
   });
 
-test("partial replacement preserves provenance and unions every link before obsoleting old memory",
+for (const partial of [false, true]) {
+  test(`resolution uses model-selected references and source provenance; partial=${partial}`,
+    async (t) => {
+      // Arrange: the model selects some predecessor references and explicitly omits others.
+      const f = await partialConflictFixture(t, partial);
+      Object.assign(f.old, { document_ids: [11, 12], code_artifact_ids: [21, 22],
+        file_ids: [31, 32], linked_memory_ids: [41, 42],
+        source_files: ["old.ts", "shared.ts"], source_url: "https://example.com/design",
+        encoding_version: "v1", source_repo: "old/repo" });
+      await f.queue.updateConflict(f.conflict.id, { oldMemory: f.old,
+        candidate: { ...f.candidate, sourceFiles: ["candidate.ts"] } });
+      Object.assign(f.revision, { documentIds: [12], codeArtifactIds: [22], fileIds: [32],
+        memoryIds: [42], entityIds: [52], sourceFiles: ["chosen.ts"], sourceRepo: "chosen/repo" });
+      const entities = new Map([[87, [51, 52]], [100, [] as number[]]]);
+      f.client.getMemoryEntityIds = async (id) => entities.get(id) ?? [];
+      const events: string[] = [];
+      const knowledge: Partial<KnowledgeClient> = {
+        getDocument: async (id) => ({ id, title: `Document ${id}`, content: "Architecture",
+          description: "Design record", document_type: "text", tags: [], project_id: 7 }),
+        getCodeArtifact: async (id) => ({ id, title: `Code ${id}`, code: "const db = 'sqlite';",
+          description: "Database setup", language: "typescript", tags: [], project_id: 7 }),
+        getFile: async (id) => ({ id, filename: `file-${id}.txt`, data: "private-file-body",
+          description: "File metadata", mime_type: "text/plain", size_bytes: 17, tags: [],
+          project_id: 7 }),
+        getEntity: f.getEntity,
+        linkMemories: async (id, ids) => {
+          events.push("memory-links");
+          f.client.memories.get(id)!.linked_memory_ids = ids;
+        },
+        linkEntityMemory: async (entityId, id) => {
+          events.push("entity-links");
+          entities.get(id)!.push(entityId);
+        },
+      };
+      f.client.knowledge = knowledge as KnowledgeClient;
+      const supersede = f.client.supersede.bind(f.client);
+      f.client.supersede = async (id, replacementId) => {
+        const receipt = (await f.queue.getConflict(f.conflict.id))!.replacement!;
+        assert.deepEqual(receipt.completedMemoryIds, [42]);
+        assert.deepEqual(receipt.completedEntityIds, [52]);
+        events.push("obsolete");
+        await supersede(id, replacementId);
+      };
+
+      // Act.
+      await f.service.resolveConflict(f.conflict.id, f.input);
+
+      // Assert: omitted references and provenance are not copied from earlier records.
+      const replacement = f.client.memories.get(100)!;
+      assert.deepEqual(replacement.document_ids, [12]);
+      assert.deepEqual(replacement.code_artifact_ids, [22]);
+      assert.deepEqual(replacement.file_ids, [32]);
+      assert.deepEqual(replacement.linked_memory_ids, [42]);
+      assert.deepEqual(entities.get(100), [52]);
+      assert.deepEqual(replacement.source_files, ["chosen.ts"]);
+      assert.equal(replacement.source_repo, "chosen/repo");
+      assert.equal(replacement.source_url, undefined);
+      assert.equal(replacement.encoding_version, undefined);
+      assert.deepEqual(events, ["memory-links", "entity-links", "obsolete"]);
+      assert.doesNotMatch(JSON.stringify(f.contexts), /private-file-body/);
+    });
+}
+
+test("partial resolution does not copy links added after the model submission", async (t) => {
+  // Arrange: another writer adds links after the model explicitly selects empty lists.
+  const f = await partialConflictFixture(t);
+  const entities = new Map([[87, [] as number[]], [100, [] as number[]]]);
+  f.client.getMemoryEntityIds = async (id) => [...(entities.get(id) ?? [])];
+  const create = f.client.create.bind(f.client);
+  f.client.create = async (input) => {
+    const result = await create(input);
+    f.old.linked_memory_ids = [41];
+    entities.set(87, [51]);
+    return result;
+  };
+  const knowledge: Partial<KnowledgeClient> = {
+    getEntity: f.getEntity,
+    linkMemories: async (): Promise<void> => { assert.fail("No memory link was selected"); },
+    linkEntityMemory: async (): Promise<void> => { assert.fail("No entity link was selected"); },
+  };
+  f.client.knowledge = knowledge as KnowledgeClient;
+
+  // Act.
+  await f.service.resolveConflict(f.conflict.id, f.input);
+
+  // Assert: later associations do not revise the accepted instructions.
+  assert.deepEqual((await f.client.get(100)).linked_memory_ids, []);
+  assert.deepEqual(await f.client.getMemoryEntityIds(100), []);
+  const receipt = await f.queue.getConflict(f.conflict.id);
+  assert.deepEqual(receipt!.replacement!.memoryIds, []);
+  assert.deepEqual(receipt!.replacement!.entityIds, []);
+  assert.equal(receipt!.status, "resolved");
+  assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+});
+
+test("partial resolution resumes selected operations without adopting newly arriving links",
   async (t) => {
-    // Arrange: old links overlap links already added to the replacement by the server.
-    const f = await partialConflictFixture(t);
-    Object.assign(f.old, { project_ids: [7, 7], document_ids: [11, 11],
-      code_artifact_ids: [21, 21], file_ids: [31, 31], linked_memory_ids: [41, 41],
-      source_files: ["old.ts", "shared.ts"], source_url: "https://example.com/design",
-      encoding_version: "v1" });
-    await f.queue.updateConflict(f.conflict.id, { oldMemory: f.old,
-      candidate: { ...f.candidate, sourceFiles: ["shared.ts", "new.ts"] } });
-    const entities = new Map([[87, [51, 51]], [100, [51, 52]]]);
-    f.client.getMemoryEntityIds = async (id) => entities.get(id) ?? [];
-    const events: string[] = [];
-    const create = f.client.create.bind(f.client);
-    f.client.create = async (input) => {
-      events.push("create");
-      const result = await create(input);
-      const replacement = f.client.memories.get(result.id)!;
-      replacement.document_ids = [...(input.document_ids ?? []), 12];
-      replacement.code_artifact_ids = [...(input.code_artifact_ids ?? []), 22];
-      replacement.file_ids = [...(input.file_ids ?? []), 32];
-      replacement.linked_memory_ids = [42];
-      return result;
-    };
-    f.client.knowledge = {
-      linkMemories: async (id, ids) => {
-        events.push("memory-links");
-        assert.equal((await f.queue.getConflict(f.conflict.id))!.replacementId, id);
-        const replacement = f.client.memories.get(id)!;
-        replacement.linked_memory_ids = [...new Set([...replacement.linked_memory_ids!, ...ids])];
-      },
-      linkEntityMemory: async (entityId, id) => {
-        events.push("entity-links");
-        entities.set(id, [...new Set([...(entities.get(id) ?? []), entityId])]);
-      },
-    } as ForgetfulClient["knowledge"];
-    const supersede = f.client.supersede.bind(f.client);
-    f.client.supersede = async (id, replacementId) => {
-      const receipt = await f.queue.getConflict(f.conflict.id);
-      assert.equal(receipt!.replacement!.linksComplete, true);
-      events.push("obsolete");
-      await supersede(id, replacementId);
-    };
-
-    // Act.
-    await f.service.resolveConflict(f.conflict.id, f.input);
-
-    // Assert: preserve old and new links without changing the old memory in place.
-    const replacement = f.client.memories.get(100)!;
-    assert.deepEqual(replacement.project_ids, [7]);
-    assert.deepEqual(replacement.document_ids, [11, 12]);
-    assert.deepEqual(replacement.code_artifact_ids, [21, 22]);
-    assert.deepEqual(replacement.file_ids, [31, 32]);
-    assert.deepEqual(replacement.linked_memory_ids, [42, 41]);
-    assert.deepEqual(entities.get(100), [51, 52]);
-    assert.deepEqual(replacement.source_files, ["old.ts", "shared.ts", "new.ts"]);
-    assert.equal(replacement.source_url, "https://example.com/design");
-    assert.equal(replacement.encoding_version, "v1");
-    assert.equal(replacement.source_repo, "example/repo");
-    assert.deepEqual(events, ["create", "memory-links", "obsolete"]);
-    assert.equal(f.old.content,
-      "Local development uses PostgreSQL. Production uses PostgreSQL and Docker.");
-  });
-
-test("partial resolution migrates links added after the durable replacement plan",
-  async (t) => {
-    // Arrange: another writer adds both link kinds while replacement creation is in flight.
-    const f = await partialConflictFixture(t);
-    const entities = new Map([[87, [] as number[]], [100, [] as number[]]]);
-    f.client.getMemoryEntityIds = async (id) => [...(entities.get(id) ?? [])];
-    const create = f.client.create.bind(f.client);
-    f.client.create = async (input) => {
-      const result = await create(input);
-      f.old.linked_memory_ids = [41];
-      entities.set(87, [51]);
-      return result;
-    };
-    f.client.knowledge = {
-      linkMemories: async (id, ids) => {
-        f.client.memories.get(id)!.linked_memory_ids = ids;
-      },
-      linkEntityMemory: async (entityId, id) => { entities.get(id)!.push(entityId); },
-    } as ForgetfulClient["knowledge"];
-
-    // Act.
-    await f.service.resolveConflict(f.conflict.id, f.input);
-
-    // Assert: both late links survive on the replacement and in its durable receipt.
-    assert.deepEqual((await f.client.get(100)).linked_memory_ids, [41]);
-    assert.deepEqual(await f.client.getMemoryEntityIds(100), [51]);
-    const receipt = await f.queue.getConflict(f.conflict.id);
-    assert.deepEqual(receipt!.replacement!.memoryIds, [41]);
-    assert.deepEqual(receipt!.replacement!.entityIds, [51]);
-    assert.equal(receipt!.replacement!.linksComplete, true);
-    assert.equal(receipt!.status, "resolved");
-    assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
-  });
-
-test("partial resolution checkpoints links arriving during migration and resumes after restart",
-  async (t) => {
-    // Arrange: each link kind can arrive during migration, after the refreshed plan.
+    // Arrange: an unrelated link arrives while the selected entity link is being written.
     for (const kind of ["memory", "entity"] as const) {
       const f = await partialConflictFixture(t);
+      f.revision.entityIds = [51];
+      f.client.failSupersedeCount = 1;
       const entities = new Map([[87, [51]], [100, [] as number[]]]);
       f.client.getMemoryEntityIds = async (id) => [...(entities.get(id) ?? [])];
       const writes: number[] = [];
-      f.client.knowledge = {
-        linkMemories: async (id, ids) => { f.client.memories.get(id)!.linked_memory_ids = ids; },
+      const knowledge: Partial<KnowledgeClient> = {
+        getEntity: f.getEntity,
+        linkMemories: async (): Promise<void> => { assert.fail("No memory link was selected"); },
         linkEntityMemory: async (entityId, id) => {
           writes.push(entityId);
           entities.get(id)!.push(entityId);
           if (kind === "memory") f.old.linked_memory_ids = [41];
           else entities.set(87, [51, 52]);
         },
-      } as ForgetfulClient["knowledge"];
+      };
+      f.client.knowledge = knowledge as KnowledgeClient;
 
-      // Act: bounded work stops with the newly discovered links saved for retry.
+      // Act: the selected link succeeds; only supersession needs a retry after restart.
       await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
-        /links changed.*pending/i);
-
-      // Assert: a fresh queue/service resumes without repeating completed writes or creation.
+        /obsolescence failure/);
       const queue = new DurableQueueStore({ directory: f.directory, instanceId: "instance-a" });
       const pending = await queue.getConflict(f.conflict.id);
       assert.equal(pending!.status, "pending");
-      assert.equal(pending!.replacement!.linksComplete, false);
-      assert.deepEqual(pending!.replacement!.memoryIds, kind === "memory" ? [41] : []);
-      assert.deepEqual(pending!.replacement!.entityIds, kind === "entity" ? [51, 52] : [51]);
-      assert.equal((await f.client.get(87)).is_obsolete, false);
+      assert.deepEqual(pending!.replacement!.memoryIds, []);
+      assert.deepEqual(pending!.replacement!.entityIds, [51]);
+      assert.deepEqual(pending!.replacement!.completedEntityIds, [51]);
       const restarted = new CaptureService({ queue, client: f.client, model: f.model,
         instanceId: "instance-a" });
       await restarted.resolveConflict(f.conflict.id, f.input);
-      assert.deepEqual((await f.client.get(100)).linked_memory_ids, kind === "memory" ? [41] : []);
-      assert.deepEqual(await f.client.getMemoryEntityIds(100), kind === "entity" ? [51, 52] : [51]);
-      assert.deepEqual(writes, kind === "entity" ? [51, 52] : [51]);
+
+      // Assert: successful writes are receipts, and newly observed links are not instructions.
+      assert.deepEqual((await f.client.get(100)).linked_memory_ids, []);
+      assert.deepEqual(await f.client.getMemoryEntityIds(100), [51]);
+      assert.deepEqual(writes, [51]);
       assert.equal(f.client.created.length, 1);
       assert.equal(f.contexts.length, 1);
       assert.equal((await queue.getConflict(f.conflict.id))!.status, "resolved");
@@ -2899,22 +2970,20 @@ test("partial resolution never repeats a create whose outcome or ID checkpoint i
     const restarted = new CaptureService({ client: f.client, model: f.model,
       instanceId: "instance-a", queue: new DurableQueueStore({ directory: f.directory,
         instanceId: "instance-a" }) });
-    await assert.rejects(restarted.resolveConflict(f.conflict.id, f.input), /creation.*unknown/i);
+    await assert.rejects(restarted.resolveConflict(f.conflict.id, f.input),
+      /connection lost after create/);
     assert.equal(f.client.created.length, 1);
     assert.equal(f.client.superseded.length, 0);
     assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
   });
 
-test("partial resolution blocks stale memories, global/shared scope and multiple selected memories",
+test("partial resolution blocks invalid IDs, global/shared scope and multiple selected memories",
   async (t) => {
     // Arrange / Act / Assert: every unsafe target stays pending without model or write calls.
-    for (const scenario of ["content", "files", "keywords", "global", "shared", "other-project",
+    for (const scenario of ["global", "shared", "other-project",
       "multiple", "inconsistent-id", "obsolete"] as const) {
       const f = await partialConflictFixture(t);
       const current = structuredClone(f.old);
-      if (scenario === "content") current.content = "Changed since escalation";
-      if (scenario === "files") current.file_ids = [999];
-      if (scenario === "keywords") current.keywords = ["updated"];
       if (scenario === "obsolete") current.is_obsolete = true;
       if (["global", "shared", "other-project"].includes(scenario)) {
         current.project_ids = scenario === "global" ? [] : scenario === "shared" ? [7, 8] : [8];
@@ -2926,7 +2995,7 @@ test("partial resolution blocks stale memories, global/shared scope and multiple
         await f.queue.updateConflict(f.conflict.id, { oldMemoryIds: [88] });
       f.client.memories.set(87, current);
       await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
-        /changed|obsolete|project|multi-memory|selected memory/i, scenario);
+        /obsolete|destination|multi-memory|selected memory/i, scenario);
       assert.equal(f.contexts.length, 0, scenario);
       assert.equal(f.client.created.length, 0, scenario);
       assert.equal(f.client.superseded.length, 0, scenario);
@@ -2934,41 +3003,70 @@ test("partial resolution blocks stale memories, global/shared scope and multiple
     }
   });
 
-test("partial resolution rechecks old memory and live enablement after revision before creating",
+test("resolution gives fresh predecessor claims to the model without an equality veto",
   async (t) => {
-    // Arrange: the external discovery round trip races an old-memory edit or trust revocation.
-    for (const scenario of ["changed", "disabled"] as const) {
+    for (const field of ["content", "keywords", "file_ids"] as const) {
+      // Arrange: the predecessor changes after escalation but stays in the same project.
+      const f = await partialConflictFixture(t);
+      const current = { ...f.old, [field]: field === "content" ? "A corrected claim."
+        : field === "keywords" ? ["corrected"] : [999] };
+      f.client.memories.set(87, current);
+
+      // Act.
+      await f.service.resolveConflict(f.conflict.id, f.input);
+
+      // Assert: the model sees the current record and its explicit replacement is executed.
+      const supplied = JSON.parse(String(f.contexts[0]!.messages[0]!.content));
+      assert.deepEqual(supplied.oldMemory, current);
+      assert.equal(f.client.created[0]!.content, f.revision.content);
+      assert.deepEqual(f.client.created[0]!.file_ids, []);
+      assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "resolved");
+    }
+  });
+
+test("partial resolution rechecks destination and live enablement after model submission",
+  async (t) => {
+    // Arrange: the model round trip races scope or enablement revocation.
+    for (const scenario of ["scope", "disabled"] as const) {
       const f = await partialConflictFixture(t);
       let enabled = true;
-      f.client.getMemoryEntityIds = async () => {
-        if (scenario === "changed")
-          f.client.memories.set(87, { ...f.old, content: "Concurrent user edit" });
+      const complete = f.model.complete.bind(f.model);
+      f.model.complete = async (request) => {
+        const revision = await complete(request);
+        if (scenario === "scope") f.client.memories.set(87, { ...f.old, project_ids: [8] });
         else enabled = false;
-        return [];
+        return revision;
       };
       const service = new CaptureService({ queue: f.queue, client: f.client, model: f.model,
         instanceId: "instance-a", isEnabled: () => enabled });
 
-      // Act / Assert: never create from the now-stale revision or after disablement.
-      await assert.rejects(service.resolveConflict(f.conflict.id, f.input), /changed|disabled/);
+      // Act / Assert: a valid submission cannot authorize a write after permission changes.
+      await assert.rejects(service.resolveConflict(f.conflict.id, f.input), /destination|disabled/);
+      assert.equal(f.contexts.length, 1);
       assert.equal(f.client.created.length, 0);
       assert.equal(f.client.superseded.length, 0);
       assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
     }
   });
 
-test("partial link failure resumes without duplicate writes and verifies all retained links",
+test("partial link failure resumes remaining instructions without repairing completed links",
   async (t) => {
     // Arrange: entity 51 succeeds; entity 52 fails, then loses an existing memory link on retry.
     const f = await partialConflictFixture(t);
     f.old.linked_memory_ids = [41];
+    f.revision.memoryIds = [41];
+    f.revision.entityIds = [51, 52];
     await f.queue.updateConflict(f.conflict.id, { oldMemory: f.old });
     const entities = new Map([[87, [51, 52]], [100, [] as number[]]]);
     f.client.getMemoryEntityIds = async (id) => entities.get(id) ?? [];
     const linkedEntities: number[] = [];
+    const linkedMemories: number[][] = [];
     let fail = true;
     f.client.knowledge = {
+      getEntity: f.getEntity,
       linkMemories: async (id, ids) => {
+        linkedMemories.push(ids);
         f.client.memories.get(id)!.linked_memory_ids = ids;
       },
       linkEntityMemory: async (entityId, id) => {
@@ -2986,15 +3084,13 @@ test("partial link failure resumes without duplicate writes and verifies all ret
     assert.equal(f.client.superseded.length, 0);
     const restarted = new CaptureService({ queue: new DurableQueueStore({ directory: f.directory,
       instanceId: "instance-a" }), client: f.client, model: f.model, instanceId: "instance-a" });
-    await assert.rejects(restarted.resolveConflict(f.conflict.id, f.input),
-      /migration.*incomplete/);
-    assert.equal(f.client.superseded.length, 0);
-    assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
     await restarted.resolveConflict(f.conflict.id, f.input);
+    assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "resolved");
     assert.deepEqual(linkedEntities, [51, 52]);
     assert.equal(f.client.created.length, 1);
     assert.equal(f.contexts.length, 1);
-    assert.deepEqual(f.client.memories.get(100)!.linked_memory_ids, [41]);
+    assert.deepEqual(f.client.memories.get(100)!.linked_memory_ids, []);
+    assert.deepEqual(linkedMemories, [[41]]);
     assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
   });
 
@@ -3007,7 +3103,9 @@ test("partial revision exhaustion explains the rejected evidence while retaining
 
     // Act / Assert: the public resolver supplies a useful bounded reason to the Pi tool.
     await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input), (error: Error) => {
-      assert.match(error.message, /revision.*failed.*pending.*selected evidence/i);
+      assert.match(error.message, /submission failed/i);
+      const rejected = (error as Error & { rejectionReasons: string[] }).rejectionReasons;
+      assert.match(JSON.stringify(rejected), /selected evidence/i);
       assert.ok(error.message.length <= 600);
       return true;
     });
@@ -3032,25 +3130,27 @@ test("partial resolution resumes from the durable conflict after its capture job
     assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
   });
 
-test("partial resolution keeps old active if the replacement changes during link migration",
+test("partial resolution follows the model instruction despite replacement content edits",
   async (t) => {
-    // Arrange: another writer changes the replacement while an entity link is being written.
+    // Arrange: another writer changes content while the selected entity link is written.
     const f = await partialConflictFixture(t);
+    f.revision.entityIds = [51];
     const entities = new Map([[87, [51]], [100, [] as number[]]]);
     f.client.getMemoryEntityIds = async (id) => entities.get(id) ?? [];
     f.client.knowledge = {
+      getEntity: f.getEntity,
       linkEntityMemory: async (entityId, id) => {
         entities.get(id)!.push(entityId);
         f.client.memories.get(id)!.content = "A concurrent, different replacement";
       },
     } as ForgetfulClient["knowledge"];
 
-    // Act / Assert: the verified replacement must still contain the approved revision.
-    await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
-      /replacement.*changed/i);
+    // Act / Assert: content equality is not an executor permission check.
+    await f.service.resolveConflict(f.conflict.id, f.input);
     assert.equal(f.client.created.length, 1);
-    assert.equal(f.client.superseded.length, 0);
-    assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+    assert.equal(f.client.memories.get(100)!.content, "A concurrent, different replacement");
+    assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+    assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "resolved");
   });
 
 for (const field of ["keywords", "tags"] as const) {
@@ -3110,9 +3210,10 @@ test("partial resolution resumes a raw label receipt after server trimming", asy
 
 for (const field of ["keywords", "tags", "importance"] as const) {
   for (const stage of ["creation", "migration"] as const) {
-    test(`partial replacement rejects changed ${field} after ${stage}`, async (t) => {
-      // Arrange: the server returns changed metadata on creation or during link migration.
+    test(`partial replacement accepts ${field} edits during ${stage}`, async (t) => {
+      // Arrange: metadata changes while the selected operations execute.
       const f = await partialConflictFixture(t);
+      f.revision.entityIds = [51];
       const entities = new Map([[87, [51]], [100, [] as number[]]]);
       f.client.getMemoryEntityIds = async (id) => entities.get(id) ?? [];
       const change = (id: number) => {
@@ -3127,18 +3228,20 @@ for (const field of ["keywords", "tags", "importance"] as const) {
         return result;
       };
       f.client.knowledge = {
+        getEntity: f.getEntity,
         linkEntityMemory: async (entityId, id) => {
           entities.get(id)!.push(entityId);
           if (stage === "migration") change(id);
         },
       } as ForgetfulClient["knowledge"];
 
-      // Act / Assert: altered metadata must leave the old memory active and conflict pending.
-      await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
-        /replacement.*changed/i);
-      assert.equal((await f.client.get(87)).is_obsolete, false);
-      assert.equal(f.client.superseded.length, 0);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+      // Act / Assert: content edits neither veto supersession nor trigger restoration.
+      await f.service.resolveConflict(f.conflict.id, f.input);
+      assert.deepEqual((await f.client.get(100))[field],
+        field === "importance" ? 1 : ["concurrent-edit"]);
+      assert.equal(f.client.created.length, 1);
+      assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "resolved");
     });
   }
 }

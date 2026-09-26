@@ -456,6 +456,7 @@ describe("RecallService", () => {
       queries: ["architecture decisions"],
       queryIntent: "Find decisions made in the active repository",
       entities: [],
+      repositorySpecific: true,
     });
     const service = new RecallService(client, model);
 
@@ -472,6 +473,52 @@ describe("RecallService", () => {
     assert.equal(client.searches[0]?.project_ids, undefined);
     assert.match(client.searches[0]?.query ?? "", /architecture decisions/);
     assert.match(client.searches[0]?.query ?? "", /owner\/forgetful/);
+  });
+
+  it("uses the planner's repository judgment rather than interpreting query wording", async () => {
+    // Arrange: terminology can mention other projects while asking about this repository's rule.
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({ search: true,
+      queries: ["cross-project safety boundary"], queryIntent: "Find the local boundary",
+      entities: [], repositorySpecific: true });
+    const service = new RecallService(client, model);
+
+    // Act.
+    await service.recall({ prompt: "Explain our sharing boundary", context, scope: "global",
+      classificationPolicy: "Plan", recallPolicy: "Review" });
+
+    // Assert: apply the supplied decision, without changing the configured scope.
+    assert.equal(client.searches[0]?.query,
+      "cross-project safety boundary [repository: owner/forgetful]");
+    assert.equal(client.searches[0]?.strict_project_filter, false);
+    assert.equal(client.searches[0]?.project_ids, undefined);
+  });
+
+  it("does not invent a repository judgment when the planner omits it", async () => {
+    // Arrange: legacy planners may omit the optional flag.
+    const client = new FakeForgetfulClient();
+    const model = new FakeModel({ search: true, queries: ["current repository decision"],
+      queryIntent: "Inspect prior context", entities: [] });
+    const service = new RecallService(client, model);
+
+    // Act.
+    await service.recall({ prompt: "Explain the context", context, scope: "global",
+      classificationPolicy: "Plan", recallPolicy: "Review" });
+
+    // Assert: the model's query is preserved instead of classified by keywords.
+    assert.equal(client.searches[0]?.query, "current repository decision");
+  });
+
+  it("preserves an explicit foreground query without interpreting its words", async () => {
+    // Arrange: the active agent has already chosen this query.
+    const client = new FakeForgetfulClient();
+    const service = new RecallService(client, new FakeModel());
+
+    // Act.
+    await service.deeper({ query: "current repository decision", context, scope: "global" });
+
+    // Assert.
+    assert.equal(client.searches[0]?.query, "current repository decision");
   });
 
   it("keeps an explicit cross-project global query unscoped", async () => {

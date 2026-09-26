@@ -7,7 +7,8 @@ license: MIT
 # Modelling entities
 
 Entities are the things knowledge describes. Facts about them remain memories linked to them.
-Use `forgetful_knowledge_read` and `forgetful_knowledge_write` with the operations below.
+Create an entity when it helps future questions about identity, responsibility or dependencies,
+not for every noun mentioned. Use `forgetful_knowledge_read` and `forgetful_knowledge_write`.
 
 ## 1. Identify and deduplicate
 
@@ -37,7 +38,9 @@ Done when: knowledge is reachable from the thing it describes.
 
 Inspect `get_relationships` before `create_relationship`. Keep types consistent: `owns`,
 `depends_on`, `part_of`, `uses`, `created_by`. Direction matters: A depends_on B differs from
-B depends_on A. Record structure that answers real questions about impact or responsibility.
+B depends_on A. Require evidence for that relationship and its direction; a co-mention or similar
+memory does not establish it. Memory links are untyped associations, not typed entity relationships.
+Record structure that answers real questions about impact or responsibility.
 Flag stale or uncertain relationships in the coverage report if the available operations cannot
 correct them; never report an incomplete graph refresh as complete.
 

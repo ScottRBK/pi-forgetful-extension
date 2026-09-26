@@ -13,6 +13,8 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  type AgentSession,
+  type ExtensionError,
 } from "@earendil-works/pi-coding-agent";
 import {
   createAssistantMessageEventStream,
@@ -20,6 +22,20 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+
+async function shutdownSession(session: AgentSession): Promise<void> {
+  const errors: ExtensionError[] = [];
+  const unsubscribe = session.extensionRunner.onError((error) => errors.push(error));
+  try {
+    await session.abort();
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    if (errors.length) throw new AggregateError(errors,
+      `Pi extension shutdown failed: ${errors.map((error) => error.error).join("; ")}`);
+  } finally {
+    unsubscribe();
+    session.dispose();
+  }
+}
 
 test(
   "real Pi receives transient same-turn recall and exposes the bounded tools",
@@ -29,7 +45,15 @@ test(
   async (t) => {
     // Arrange: real Pi and extension services, fake external model and memory HTTP endpoint.
     const root = await mkdtemp(join(tmpdir(), "pi-forgetful-sdk-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
+    let closeSession: (() => Promise<void>) | undefined;
+    let closeServer: (() => Promise<void>) | undefined;
+    t.after(async () => {
+      try { await closeSession?.(); }
+      finally {
+        try { await closeServer?.(); }
+        finally { await rm(root, { recursive: true, force: true }); }
+      }
+    });
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "forgetful"), { recursive: true });
     await promisify(execFile)("git", ["init", "--quiet", root]);
@@ -56,6 +80,9 @@ test(
     const queries: unknown[] = [];
     const created: Record<string, unknown>[] = [];
     const obsoleted: number[] = [];
+    const stored = new Map<number, Record<string, unknown>>([[memory.id, memory]]);
+    // Reserve #99 for the foreground replacement asserted below.
+    let nextMemoryId = 100;
     let failCaptureSearch = false;
     const server = createServer(async (request, response) => {
       response.setHeader("content-type", "application/json");
@@ -73,13 +100,37 @@ test(
       if (request.url === "/api/v1/memories" && request.method === "POST") {
         let body = "";
         for await (const chunk of request) body += chunk;
-        created.push(JSON.parse(body));
+        const input = JSON.parse(body);
+        created.push(input);
+        const id = nextMemoryId++;
+        stored.set(id, {
+          importance: 7,
+          linked_memory_ids: [],
+          ...input,
+          id,
+          is_obsolete: false,
+        });
         response.statusCode = 201;
-        response.end(JSON.stringify({ id: 99 }));
+        response.end(JSON.stringify({ id }));
         return;
       }
-      if (request.url === "/api/v1/memories/42" && request.method === "GET") {
-        response.end(JSON.stringify(memory));
+      const memoryMatch = request.url?.match(/^\/api\/v1\/memories\/(\d+)$/);
+      if (memoryMatch && request.method === "GET") {
+        const found = stored.get(Number(memoryMatch[1]));
+        if (!found) response.statusCode = 404;
+        response.end(JSON.stringify(found ?? {}));
+        return;
+      }
+      const graphMatch = request.url?.match(/^\/api\/v1\/graph\/memory\/(\d+)\?depth=1$/);
+      if (graphMatch && request.method === "GET") {
+        const id = Number(graphMatch[1]);
+        if (!stored.has(id)) {
+          response.statusCode = 404;
+          response.end("{}");
+        } else {
+          // These fixtures have no entity or memory associations.
+          response.end(JSON.stringify({ center_memory_id: id, edges: [] }));
+        }
         return;
       }
       if (
@@ -88,7 +139,9 @@ test(
       ) {
         let body = "";
         for await (const chunk of request) body += chunk;
-        obsoleted.push(JSON.parse(body).superseded_by);
+        const supersededBy = JSON.parse(body).superseded_by;
+        obsoleted.push(supersededBy);
+        stored.set(memory.id, { ...memory, is_obsolete: true, superseded_by: supersededBy });
         response.end(JSON.stringify({ success: true }));
         return;
       }
@@ -121,7 +174,11 @@ test(
     });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
-    t.after(() => new Promise<void>((done) => server.close(() => done())));
+    closeServer = () => new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+      // An accepted connection without a request can otherwise hide failures during teardown.
+      server.closeAllConnections();
+    });
     const address = server.address();
     assert.ok(address && typeof address !== "string");
     await writeFile(
@@ -185,12 +242,10 @@ test(
           queryIntent: "Recall database decisions",
           entities: [],
         };
-        let reviewDecision = false;
-        let captureDecision = false;
-        let overlapDecision = false;
+        const submissionName = model.id === "memory" ? context.tools?.[0]?.name : undefined;
         if (model.id === "memory") {
-          const last = context.messages.at(-1);
-          const raw = last?.content;
+          // Corrections append feedback; the first user message retains the original input.
+          const raw = context.messages.find((message) => message.role === "user")?.content;
           const inputText =
             typeof raw === "string"
               ? raw
@@ -201,16 +256,7 @@ test(
                     .join("")
                 : "{}";
           const input = JSON.parse(inputText) as Record<string, unknown>;
-          captureDecision = Boolean(
-            Array.isArray(input.entries) &&
-              context.tools?.some((tool) => tool.name === "submit_capture_candidates"),
-          );
-          overlapDecision = Boolean(
-            input.candidate &&
-              context.tools?.some((tool) => tool.name === "submit_capture_decision"),
-          );
-          if (input.availableSources) {
-            reviewDecision = true;
+          if (submissionName === "submit_recall_review") {
             const prompt = (input.work as { prompt: string }).prompt;
             decision = prompt === "debug review evidence"
               ? { summary: "Rejected review marker REJECTED_PI_REVIEW", memoryIds: [],
@@ -238,7 +284,15 @@ test(
               queryIntent: "Recall queued topic",
               entities: [],
             };
-          } else if (input.candidate) {
+          } else if (submissionName === "submit_capture_retry") {
+            decision = { action: "retry", reason: "Retry the remaining fixture operation." };
+          } else if (submissionName === "submit_memory_revision") {
+            decision = { title: "Project storage", content: "The test project uses local storage.",
+              context: "User-confirmed project decision.", keywords: ["storage"], tags: [],
+              importance: 7, sourceEntryIds: input.evidenceEntryIds,
+              documentIds: [], codeArtifactIds: [], entityIds: [], memoryIds: [], fileIds: [],
+              sourceFiles: [] };
+          } else if (submissionName === "submit_capture_decision") {
             decision = createConflict
               ? {
                   action: "escalate",
@@ -253,11 +307,35 @@ test(
               : { action: "create", reason: "New project decision." };
             if (groupedSkipCandidates)
               decision = { action: "skip", reason: "already known" };
-          } else if (Array.isArray(input.entries)) {
+          } else if (submissionName === "submit_capture_decisions") {
+            const candidates = input.candidates as Array<{ candidate: { id: string } }>;
+            decision = {
+              decisions: candidates.map(({ candidate }) => ({
+                candidateId: candidate.id,
+                action: "skip",
+                reason: "already known",
+              })),
+            };
+          } else if (submissionName === "submit_capture_links") {
+            const candidates = input.candidates as Array<{
+              candidateId: string;
+              memories: Array<{ id: number }>;
+            }>;
+            decision = {
+              reviews: candidates.map(({ candidateId, memories }) => ({
+                candidateId,
+                decisions: memories.map(({ id }) => ({
+                  memoryId: id,
+                  action: "ignore",
+                  reason: "The SQLite history does not establish a local-storage dependency.",
+                })),
+              })),
+            };
+          } else if (submissionName === "submit_capture_candidates") {
             captureInputs.push(
               input as unknown as (typeof captureInputs)[number],
             );
-            const user = input.entries.find(
+            const user = (input.entries as (typeof captureInputs)[number]["entries"]).find(
               (e: { role: string }) => e.role === "user",
             );
             decision = user
@@ -318,31 +396,15 @@ test(
           api: "faux",
           provider: "test",
           model: model.id,
-          content: reviewDecision
+          content: submissionName
             ? [{
                 type: "toolCall",
-                id: "review-1",
-                name: "submit_recall_review",
+                id: `${submissionName}-1`,
+                name: submissionName,
                 arguments: decision as Record<string, any>,
               }]
-            : captureDecision
-              ? [{
-                  type: "toolCall",
-                  id: "capture-1",
-                  name: "submit_capture_candidates",
-                  arguments: decision as Record<string, any>,
-                }]
-              : overlapDecision
-                ? [{
-                    type: "toolCall",
-                    id: "decision-1",
-                    name: "submit_capture_decision",
-                    arguments: decision as Record<string, any>,
-                  }]
-              : [{ type: "text", text }],
-          stopReason: reviewDecision || captureDecision || overlapDecision
-            ? "toolUse"
-            : "stop",
+            : [{ type: "text", text }],
+          stopReason: submissionName ? "toolUse" : "stop",
           timestamp: Date.now(),
           usage: {
             input: 1,
@@ -479,7 +541,11 @@ test(
       resourceLoader: loader,
       noTools: "builtin",
     });
-    t.after(() => session.dispose());
+    closeSession = async () => {
+      releaseMain?.();
+      releaseCapture?.();
+      await shutdownSession(session);
+    };
     await session.bindExtensions({});
 
     // Act.
@@ -1209,6 +1275,7 @@ test(
 
         // The main model uses the bounded resolver after a real user clarification.
         skipExtraction = true;
+        nextMemoryId = 99;
         resolveOnNextMain = true;
         await session.prompt(
           "Yes, replace the old SQLite decision with local storage.",
@@ -1299,7 +1366,15 @@ test(
   async (t) => {
     // Arrange: the real SDK, a scripted provider, and a memory endpoint that first fails.
     const root = await mkdtemp(join(tmpdir(), "pi-forgetful-errors-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
+    let closeSession: (() => Promise<void>) | undefined;
+    let closeServer: (() => Promise<void>) | undefined;
+    t.after(async () => {
+      try { await closeSession?.(); }
+      finally {
+        try { await closeServer?.(); }
+        finally { await rm(root, { recursive: true, force: true }); }
+      }
+    });
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "forgetful"), { recursive: true });
     await promisify(execFile)("git", ["init", "--quiet", root]);
@@ -1332,7 +1407,11 @@ test(
     });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
-    t.after(() => new Promise<void>((done) => server.close(() => done())));
+    closeServer = () => new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+      // An accepted connection without a request can otherwise hide failures during teardown.
+      server.closeAllConnections();
+    });
     const address = server.address();
     assert.ok(address && typeof address !== "string");
     await writeFile(
@@ -1455,7 +1534,7 @@ test(
       resourceLoader: loader,
       noTools: "builtin",
     });
-    t.after(() => session.dispose());
+    closeSession = () => shutdownSession(session);
     await session.bindExtensions({});
     const toolEnds: Array<{ isError?: boolean }> = [];
     session.subscribe((event) => {
