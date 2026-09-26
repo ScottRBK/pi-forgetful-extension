@@ -14,6 +14,7 @@ import {
   createAssistantMessageEventStream, type AssistantMessage,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 for (const outcome of ["shutdown", "navigation"] as const) {
   test(`real Pi refuses a late foreground update during ${outcome} drain`,
@@ -102,9 +103,9 @@ for (const outcome of ["shutdown", "navigation"] as const) {
         streamSimple(model, context) {
           const submission = context.tools?.[0]?.name;
           const capture = model.id === "memory" && submission === "submit_capture_candidates";
-          const raw = context.messages.find((message) => message.role === "user")?.content;
-          const input = capture && typeof raw === "string" ? JSON.parse(raw) : {};
-          const evidence = input.entries?.find((entry: { role: string }) => entry.role === "user");
+          const input = capture ? decodeProviderContext(context).input : {};
+          const evidence = input.eligibleEvidence?.find(
+            (entry: { role: string }) => entry.role === "user");
           const write = model.id === "main" && writeOnNextMain;
           if (write) writeOnNextMain = false;
           const message: AssistantMessage = {

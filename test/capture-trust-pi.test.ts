@@ -22,24 +22,11 @@ import {
 import {
   createAssistantMessageEventStream,
   type AssistantMessage,
-  type Context,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
-
-function jsonInput(context: Context): Record<string, unknown> {
-  const message = context.messages[0];
-  if (!message || typeof message.content !== "string") return {};
-  try {
-    const value = JSON.parse(message.content) as unknown;
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
-}
 
 async function captureJobSettled(agentDir: string): Promise<boolean> {
   const queues = join(agentDir, "forgetful", "queues");
@@ -132,15 +119,15 @@ test(
       streamSimple(model, context) {
         const stream = createAssistantMessageEventStream();
         queueMicrotask(() => {
-          const input = jsonInput(context);
+          const input = model.id === "memory" ? decodeProviderContext(context).input : {};
           let output: unknown = {
             text: "The request was handled.",
           };
           if (model.id === "memory") {
-            if (Array.isArray(input.entries)) {
+            if (Array.isArray(input.eligibleEvidence)) {
               captureStarted = true;
               settings.setProjectTrusted(false);
-              const entries = input.entries as Array<{
+              const entries = input.eligibleEvidence as Array<{
                 id?: unknown;
                 role?: unknown;
               }>;

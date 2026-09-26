@@ -7,14 +7,12 @@ import type {
   Scope,
   WorkContext,
 } from "./contracts.ts";
-import { isMemoryOperation, sanitizeText } from "./privacy.ts";
-
-export const MAX_SNAPSHOT_ENTRIES = 100;
+import { isMemoryOperation, sanitizeText, sanitizeValue } from "./privacy.ts";
 
 export interface SnapshotSessionReader {
   getSessionId(): string;
   getLeafId(): string | null;
-  getBranch(): SessionEntry[];
+  getBranch(fromId?: string): SessionEntry[];
 }
 
 export interface SnapshotOptions {
@@ -29,6 +27,10 @@ export interface SnapshotOptions {
   baselineEntryId?: string | null;
   branchId?: string;
   createdAt?: string;
+  /** Freeze the active leaf at settlement before asynchronous lifecycle work. */
+  leafEntryId?: string;
+  /** Explicit opt-outs affect evidence eligibility, never conversation visibility. */
+  excludedEvidenceEntryIds?: readonly string[];
   includeToolEvidence?: (toolName: string, text: string) => boolean;
 }
 
@@ -46,6 +48,8 @@ interface MessageRecord {
   toolName?: unknown;
   isError?: unknown;
   stopReason?: unknown;
+  toolCallId?: unknown;
+  details?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +75,45 @@ function contentText(content: unknown): string {
 
 function safeText(text: string): string {
   return sanitizeText(text).trim();
+}
+
+/** Scrub payloads without treating Pi structural fields such as tokensBefore as credentials. */
+function sanitizeConversation(value: unknown): unknown {
+  if (typeof value === "string") return sanitizeText(value);
+  if (Array.isArray(value)) return value.map(sanitizeConversation);
+  if (!isRecord(value)) return value;
+  if (value.type === "image") {
+    return { ...value, mimeType: sanitizeText(String(value.mimeType)), data: value.data };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+    ["arguments", "details", "data"].includes(key) ? sanitizeValue(item)
+      : sanitizeConversation(item),
+  ]));
+}
+
+export function sanitizeCaptureConversation(conversation: readonly unknown[]): unknown[] {
+  return conversation.map(sanitizeConversation);
+}
+
+/** Also used at the queue boundary, including callers that did not use the Pi adapter. */
+export function sanitizeCaptureSnapshot(snapshot: CaptureSnapshot): CaptureSnapshot {
+  const { conversation, entries, ...metadata } = snapshot;
+  return {
+    ...sanitizeValue(metadata) as Omit<CaptureSnapshot, "entries" | "conversation">,
+    entries: entries.map((entry) => sanitizeValue(entry) as EvidenceEntry),
+    ...(conversation !== undefined
+      ? { conversation: sanitizeCaptureConversation(conversation) } : {}),
+  };
+}
+
+function conversationForEntry(entry: SessionEntry): unknown {
+  const message = asMessage(entry);
+  const memory = (typeof message?.toolName === "string" && isMemoryOperation(message.toolName)) ||
+    ("customType" in entry && isMemoryOperation(entry.customType)) ||
+    (isRecord(entry) && isRecord(entry.message) &&
+      typeof entry.message.customType === "string" && isMemoryOperation(entry.message.customType));
+  return { ...sanitizeConversation(entry) as Record<string, unknown>,
+    ...(memory ? { trust: "untrusted-memory" } : {}) };
 }
 
 function rootId(branch: SessionEntry[], fallback: string): string {
@@ -114,7 +157,10 @@ function evidenceForEntry(
   const message = asMessage(entry);
   if (!message) return undefined;
   if (message.role === "user") {
-    const text = safeText(contentText(message.content));
+    const nonText = Array.isArray(message.content) && message.content.some((part) =>
+      isRecord(part) && typeof part.type === "string" && part.type !== "text");
+    const text = safeText(contentText(message.content)) || (nonText
+      ? "[User supplied non-text content; see the original conversation entry.]" : "");
     return text ? { id: entry.id, role: "user", text } : undefined;
   }
   if (message.role === "assistant") {
@@ -123,15 +169,18 @@ function evidenceForEntry(
   }
   if (message.role === "toolResult" && typeof message.toolName === "string") {
     if (isMemoryOperation(message.toolName)) return undefined;
-    if (message.isError === true) return undefined;
-    const text = safeText(contentText(message.content));
-    if (!text || !includeToolEvidence?.(message.toolName, text))
+    const text = safeText(contentText(message.content)) || (message.isError === true
+      ? "[Tool returned an error without text content; see the original conversation entry.]" : "");
+    if (!text || (includeToolEvidence && !includeToolEvidence(message.toolName, text)))
       return undefined;
     return {
       id: entry.id,
       role: "toolResult",
       text,
       toolName: message.toolName,
+      ...(typeof message.isError === "boolean" ? { isError: message.isError } : {}),
+      ...(typeof message.toolCallId === "string" ? { toolCallId: message.toolCallId } : {}),
+      ...(message.details !== undefined ? { details: sanitizeValue(message.details) } : {}),
     };
   }
   return undefined;
@@ -154,7 +203,6 @@ function collectEvidence(
 ): EvidenceEntry[] {
   const evidenceEntries: EvidenceEntry[] = [];
   for (const entry of entries) {
-    if (evidenceEntries.length >= MAX_SNAPSHOT_ENTRIES) break;
     const evidence = evidenceForEntry(entry, includeToolEvidence);
     if (!evidence) continue;
     evidenceEntries.push(evidence);
@@ -166,7 +214,8 @@ export function buildCaptureSnapshot(options: SnapshotOptions): SnapshotResult {
   if (options.mode === "off")
     return { status: "skipped", reason: "capture is off" };
 
-  const branch = options.session.getBranch();
+  const leafEntryId = options.leafEntryId ?? options.session.getLeafId() ?? undefined;
+  const branch = options.session.getBranch(leafEntryId);
   const start = deltaStartIndex(
     branch,
     options.afterEntryId,
@@ -201,14 +250,9 @@ export function buildCaptureSnapshot(options: SnapshotOptions): SnapshotResult {
     };
   }
 
-  const entries = collectEvidence(delta, options.includeToolEvidence);
-  if (entries.length === 0) {
-    return {
-      status: "skipped",
-      reason: "settled run has no eligible evidence",
-      finalEntryId: finalAssistant.entry.id,
-    };
-  }
+  const excluded = new Set(options.excludedEvidenceEntryIds);
+  const entries = collectEvidence(branch, options.includeToolEvidence)
+    .filter((entry) => !excluded.has(entry.id));
 
   const sessionId = options.session.getSessionId();
   const branchId =
@@ -219,6 +263,10 @@ export function buildCaptureSnapshot(options: SnapshotOptions): SnapshotResult {
     context,
     instanceId: options.instanceId,
     entries,
+    conversation: branch.map(conversationForEntry),
+    conversationCoverage: "complete",
+    processedThroughEntryId: options.afterEntryId ?? options.baselineEntryId ?? null,
+    leafEntryId,
     finalEntryId: finalAssistant.entry.id,
     mode: options.mode,
     scope: options.scope,

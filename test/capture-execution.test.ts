@@ -9,6 +9,7 @@ import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 const candidate = {
   id: "fact", title: "Storage", content: "SQLite is the storage engine.",
@@ -76,7 +77,7 @@ test("a model supersession is not rewritten into an escalation by a partial flag
       async complete(request) {
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") {
-          conversation = inputOf(request).conversationEntries ?? [];
+          conversation = [...(request.conversation ?? [])];
           return { action: "supersede", conflictingMemoryId: old.id, partial: true,
             oldClaim: "Postgres", newClaim: "SQLite", reason: "Corrected factual error.",
             sourceEntryIds: ["correction"] };
@@ -405,7 +406,7 @@ test(`rejected batch corrections never resurrect earlier decisions: ${correction
       find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
       complete: async (_model, context) => {
         const name = context.tools![0]!.name;
-        const input = JSON.parse(context.messages[0]!.content as string);
+        const input = decodeProviderContext(context).input;
         let args: unknown;
         if (name === "submit_capture_candidates") args = { candidates: [
           { ...candidate, id: "first" }, { ...candidate, id: "second" },

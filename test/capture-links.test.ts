@@ -10,6 +10,7 @@ import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 function candidate(id = "decision") {
   return { id, title: "Durable retry decision", content: "Retry transient failures twice.",
@@ -31,7 +32,7 @@ function model(reply: (name: string, input: any) => unknown) {
     find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
     complete: async (_model, context) => {
       const tool = context.tools![0]!;
-      const input = JSON.parse(context.messages[0]!.content as string);
+      const input = decodeProviderContext(context).input;
       return { role: "assistant", api: "test", provider: "test", model: "memory",
         content: [{ type: "toolCall", id: "submission", name: tool.name,
           arguments: await reply(tool.name, input) }], stopReason: "toolUse", timestamp: Date.now(),
@@ -1271,7 +1272,7 @@ test("batch overlap has an explicit array contract and preserves the trusted ove
       find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
       complete: async (_model, context) => {
         const name = context.tools![0]!.name;
-        const input = JSON.parse(context.messages[0]!.content as string);
+        const input = decodeProviderContext(context).input;
         let args: unknown;
         if (name === "submit_capture_candidates") args = {
           candidates: [candidate("first"), { ...candidate("second"), title: "Another fact" }] };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,36 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import type { CaptureSnapshot, EvidenceEntry } from "../src/contracts.ts";
+import { decodeProviderContext } from "./provider-context.ts";
+
+type CaptureProviderInput = Pick<CaptureSnapshot,
+  "processedThroughEntryId" | "conversationCoverage"> & {
+  conversation: Array<Record<string, any>>;
+  eligibleEvidence: EvidenceEntry[];
+};
+
+function captureProviderInput(
+  input: Record<string, any>,
+  conversation: Array<Record<string, any>>,
+): CaptureProviderInput {
+  assert.equal(input.entries, undefined, "Task metadata must not duplicate conversation text");
+  assert.equal(input.conversationCoverage, "complete");
+  assert.ok(Array.isArray(input.eligibleEvidence));
+  const eligibleEvidence = input.eligibleEvidence.map((entry: Omit<EvidenceEntry, "text">) => {
+    const record = conversation.find(record => record.id === entry.id);
+    assert.ok(record?.message, `Eligible evidence ${entry.id} must be visible to the provider`);
+    assert.equal(record.message.role, entry.role);
+    assert.equal(record.message.toolName, entry.toolName);
+    assert.equal(record.message.isError, entry.isError);
+    const content = record.message.content;
+    const text = typeof content === "string" ? content : content
+      .filter((part: { type: string }) => part.type === "text")
+      .map((part: { text: string }) => part.text).join("\n");
+    return { ...entry, text: text.trim() };
+  });
+  return { ...input, conversation, eligibleEvidence };
+}
 
 async function shutdownSession(session: AgentSession): Promise<void> {
   const errors: ExtensionError[] = [];
@@ -51,7 +81,17 @@ test(
       try { await closeSession?.(); }
       finally {
         try { await closeServer?.(); }
-        finally { await rm(root, { recursive: true, force: true }); }
+        finally {
+          const directory = join(root, ".pi/forgetful/logs");
+          for (const name of await readdir(directory).catch(() => [])) {
+            const lines = (await readFile(join(directory, name), "utf8")).trim().split("\n");
+            for (const line of lines) {
+              const event = JSON.parse(line);
+              if (event.event === "model.error_detail") t.diagnostic(line);
+            }
+          }
+          await rm(root, { recursive: true, force: true });
+        }
       }
     });
     const agentDir = join(root, "agent");
@@ -84,6 +124,12 @@ test(
     // Reserve #99 for the foreground replacement asserted below.
     let nextMemoryId = 100;
     let failCaptureSearch = false;
+    let markFirstSearch!: () => void;
+    const firstSearch = new Promise<void>(resolve => { markFirstSearch = resolve; });
+    let releaseFirstSearch!: () => void;
+    const firstSearchResponse = new Promise<void>(resolve => { releaseFirstSearch = resolve; });
+    let markFirstRecallWake!: () => void;
+    const firstRecallWake = new Promise<void>(resolve => { markFirstRecallWake = resolve; });
     const server = createServer(async (request, response) => {
       response.setHeader("content-type", "application/json");
       if (request.url?.startsWith("/api/v1/projects")) {
@@ -153,6 +199,10 @@ test(
           strict_project_filter?: boolean;
         };
         queries.push(query);
+        if (queries.length === 1) {
+          markFirstSearch();
+          await firstSearchResponse;
+        }
         if (failCaptureSearch && query.strict_project_filter === true) {
           response.statusCode = 503;
           response.end("{}");
@@ -188,6 +238,7 @@ test(
         model: "test/memory",
         capture_mode: "off",
         verbosity: "debug",
+        logging: "debug",
         timeout_ms: 2000,
       }),
     );
@@ -195,9 +246,7 @@ test(
     const mainContexts: Context[] = [];
     const memoryContexts: Context[] = [];
     const providerSessions: Array<{ model: string; sessionId?: string }> = [];
-    const captureInputs: Array<{
-      entries: Array<{ id: string; role: string; text: string }>;
-    }> = [];
+    const captureInputs: CaptureProviderInput[] = [];
     const notifications: Array<{ message: string; type?: string }> = [];
     const patchedUis = new WeakSet<object>();
     let holdNextMain = false;
@@ -235,6 +284,7 @@ test(
         (model.id === "main" ? mainContexts : memoryContexts).push(
           JSON.parse(JSON.stringify(context)) as Context,
         );
+        if (model.id === "main" && mainContexts.length === 1) releaseFirstSearch();
         let holdCapture = false;
         let decision: unknown = {
           search: true,
@@ -244,18 +294,7 @@ test(
         };
         const submissionName = model.id === "memory" ? context.tools?.[0]?.name : undefined;
         if (model.id === "memory") {
-          // Corrections append feedback; the first user message retains the original input.
-          const raw = context.messages.find((message) => message.role === "user")?.content;
-          const inputText =
-            typeof raw === "string"
-              ? raw
-              : Array.isArray(raw)
-                ? raw
-                    .filter((p) => p.type === "text")
-                    .map((p) => (p.type === "text" ? p.text : ""))
-                    .join("")
-                : "{}";
-          const input = JSON.parse(inputText) as Record<string, unknown>;
+          const { input, conversation } = decodeProviderContext(context);
           if (submissionName === "submit_recall_review") {
             const prompt = (input.work as { prompt: string }).prompt;
             decision = prompt === "debug review evidence"
@@ -332,12 +371,15 @@ test(
               })),
             };
           } else if (submissionName === "submit_capture_candidates") {
-            captureInputs.push(
-              input as unknown as (typeof captureInputs)[number],
-            );
-            const user = (input.entries as (typeof captureInputs)[number]["entries"]).find(
-              (e: { role: string }) => e.role === "user",
-            );
+            const captureInput = captureProviderInput(input, conversation);
+            captureInputs.push(captureInput);
+            const boundary = captureInput.processedThroughEntryId;
+            const processed = boundary
+              ? conversation.findIndex(record => record.id === boundary) : -1;
+            assert.ok(!boundary || processed >= 0, "Processed boundary must remain visible");
+            const newIds = new Set(conversation.slice(processed + 1).map(record => record.id));
+            const user = captureInput.eligibleEvidence.findLast(entry =>
+              entry.role === "user" && newIds.has(entry.id));
             decision = user
               ? {
                 candidates: [
@@ -519,10 +561,20 @@ test(
           };
           pi.on("session_start", (_event, ctx) => observeNotifications(ctx));
           pi.on("agent_settled", (_event, ctx) => observeNotifications(ctx));
+          let firstContext = true;
+          pi.on("context", async () => {
+            // Observe the retrieval phase after planning, before the fixture releases its response.
+            if (!firstContext) return;
+            firstContext = false;
+            await firstSearch;
+          });
           const sendMessage = pi.sendMessage.bind(pi);
           pi.sendMessage = (message, options) => {
             handoffs.push(message);
             sendMessage(message, options);
+            if (message.customType === "forgetful_recall_async" &&
+                (message.details as { phase?: string } | undefined)?.phase === "wake")
+              markFirstRecallWake();
           };
           return createForgetfulExtension({ agentDir })(pi);
         },
@@ -542,6 +594,9 @@ test(
       noTools: "builtin",
     });
     closeSession = async () => {
+      markFirstSearch();
+      releaseFirstSearch();
+      markFirstRecallWake();
       releaseMain?.();
       releaseCapture?.();
       await shutdownSession(session);
@@ -550,6 +605,8 @@ test(
 
     // Act.
     await session.prompt("Which database did we choose?");
+    await firstRecallWake;
+    await session.waitForIdle();
 
     // Assert: the first boundary carries current progress; completion replaces it later.
     assert.equal(mainContexts.length, 2, JSON.stringify(session.messages));
@@ -700,6 +757,12 @@ test(
           "The test project uses local storage.",
         );
         assert.deepEqual(saved.project_ids, [7]);
+        const captureInput = captureInputs[0]!;
+        assert.match(JSON.stringify(captureInput.conversation), /Which database did we choose/);
+        const decision = captureInput.eligibleEvidence.find(entry =>
+          entry.text === "We decided that the test project uses local storage.");
+        assert.ok(decision);
+        assert.ok(String(saved.context).includes(`Evidence entries: ${decision.id}`));
         const savedFeedback = notifications.find(({ message }) =>
           /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
         );
@@ -782,7 +845,10 @@ test(
             JSON.stringify({
               created: created.slice(beforeCreated),
               captureInputs: captureInputs.slice(-5).map((input) => ({
-                entries: input.entries.map((entry) => `${entry.role}:${entry.text}`),
+                eligibleEvidence: input.eligibleEvidence.map(entry =>
+                  `${entry.role}:${entry.text}`),
+                conversation: input.conversation,
+                processedThroughEntryId: input.processedThroughEntryId,
               })),
               memoryContexts: memoryContexts.slice(-8).map((context) => ({
                 systemPrompt: context.systemPrompt?.slice(0, 80),
@@ -1082,9 +1148,11 @@ test(
         assert.ok(
           captureInputs
             .at(-1)
-            ?.entries.every((entry) => !entry.text.includes(marker)),
+            ?.eligibleEvidence.every((entry) => !entry.text.includes(marker)),
           JSON.stringify(captureInputs.slice(captureCount)),
         );
+        assert.ok(JSON.stringify(captureInputs.at(-1)?.conversation).includes(marker),
+          "Skipped work remains visible context, but must not become eligible evidence");
       },
     );
 

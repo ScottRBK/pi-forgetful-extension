@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
@@ -68,11 +69,12 @@ test("real Pi capture rechecks trust synchronously after final endpoint authoriz
         const name = model.id === "memory" ? context.tools?.[0]?.name : undefined;
         let args: unknown;
         if (name) {
-          const input = JSON.parse(context.messages[0]!.content as string);
+          const { input } = decodeProviderContext(context);
           if (name === "submit_capture_candidates") args = { candidates: [{ id: "reports",
             title: "Queue reports", content: "Queue report generation to keep requests short.",
             context: "Latency decision", keywords: ["reports"], tags: [],
-            sourceEntryIds: [input.entries.find((e: { role: string }) => e.role === "user").id],
+            sourceEntryIds: [input.eligibleEvidence.find(
+              (e: { role: string }) => e.role === "user").id],
             evidenceType: "userDecision" }] };
           else if (name === "submit_capture_decision") args = { action: "create" };
           else if (name === "submit_capture_links") {

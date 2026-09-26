@@ -183,8 +183,9 @@ class RichModel implements MemoryModelClient {
   async complete(request: ModelRequest): Promise<unknown> {
     if (request.submission?.name === "submit_capture_links") return reviewConnections(request);
     if (request.purpose === "capture") {
-      const input = request.input as { entries?: Array<{ id: string }> };
-      const entryId = input.entries?.[0]?.id ?? "missing-entry";
+      const input = request.input as { eligibleEvidence: Array<{ id: string }> };
+      const entryId = input.eligibleEvidence[0]?.id;
+      assert.ok(entryId, "Capture fixture requires a supplied eligible evidence ID");
       return {
         candidates: [richCandidate(entryId, this.candidateId, this.entityKey)],
       };
@@ -211,8 +212,9 @@ class SupersedingModel implements MemoryModelClient {
     if (request.submission?.name === "submit_capture_links") return reviewConnections(request);
     if (request.purpose === "capture") {
       this.captureCount += 1;
-      const input = request.input as { entries?: Array<{ id: string }> };
-      const entryId = input.entries?.[0]?.id ?? "missing-entry";
+      const input = request.input as { eligibleEvidence: Array<{ id: string }> };
+      const entryId = input.eligibleEvidence[0]?.id;
+      assert.ok(entryId, "Capture fixture requires a supplied eligible evidence ID");
       const candidate = richCandidate(
         entryId,
         `superseding-${this.captureCount}`,
@@ -263,8 +265,9 @@ class EscalatingModel implements MemoryModelClient {
     }
     if (request.purpose === "capture") {
       this.captureCount += 1;
-      const input = request.input as { entries?: Array<{ id: string }> };
-      const entryId = input.entries?.[0]?.id ?? "missing-entry";
+      const input = request.input as { eligibleEvidence: Array<{ id: string }> };
+      const entryId = input.eligibleEvidence[0]?.id;
+      assert.ok(entryId, "Capture fixture requires a supplied eligible evidence ID");
       const candidate = richCandidate(
         entryId,
         `escalating-${this.captureCount}`,

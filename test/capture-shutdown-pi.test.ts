@@ -14,6 +14,7 @@ import {
   createAssistantMessageEventStream, type AssistantMessage,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 test("public Pi shutdown drains capture before the queue directory can be removed",
   { timeout: 15_000 }, async (t) => {
@@ -74,9 +75,9 @@ test("public Pi shutdown drains capture before the queue directory can be remove
       streamSimple(model, context) {
         const submission = context.tools?.[0]?.name;
         const capture = model.id === "memory" && submission === "submit_capture_candidates";
-        const raw = context.messages.find((message) => message.role === "user")?.content;
-        const input = capture && typeof raw === "string" ? JSON.parse(raw) : {};
-        const evidence = input.entries?.find((entry: { role: string }) => entry.role === "user");
+        const input = capture ? decodeProviderContext(context).input : {};
+        const evidence = input.eligibleEvidence?.find(
+          (entry: { role: string }) => entry.role === "user");
         const message: AssistantMessage = {
           role: "assistant", api: "faux", provider: "test", model: model.id,
           content: capture ? [{ type: "toolCall", id: "capture-1", name: submission!,
@@ -156,7 +157,8 @@ test("public Pi shutdown drains capture before the queue directory can be remove
     // Assert: the queue is settled and no worker locks survive the awaited shutdown.
     const settledQueue = JSON.parse(await readFile(queueFile, "utf8"));
     assert.equal(settledQueue.jobs[0].status, "paused");
-    assert.deepEqual(await readdir(join(queues, directory!)), ["queue.json"]);
+    assert.deepEqual((await readdir(join(queues, directory!)))
+      .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
     assert.deepEqual(extensionErrors, []);
     await closeSession();
     closeSession = undefined;
@@ -265,13 +267,13 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
         streamSimple(model, context) {
           let name = model.id === "memory" ? context.tools?.[0]?.name : undefined;
-          const raw = context.messages.find((message) => message.role === "user")?.content;
-          const input = model.id === "memory" && typeof raw === "string" ? JSON.parse(raw) : {};
+          const input = model.id === "memory" ? decodeProviderContext(context).input : {};
           let decision: Record<string, unknown> = {
             search: false, queries: [], queryIntent: "No recall needed", entities: [],
           };
           if (name === "submit_capture_candidates") {
-            const user = input.entries.find((entry: { role: string }) => entry.role === "user");
+            const user = input.eligibleEvidence.find(
+              (entry: { role: string }) => entry.role === "user");
             decision = { candidates: user && !conflictId ? [{ id: "storage",
               title: "Local storage", content: "Use local storage for this repo.",
               context: "Explicit user decision.", keywords: ["storage"], tags: [],
@@ -376,7 +378,8 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
         assert.equal(saved.conflicts[0].replacementId, 99);
         assert.equal(saved.conflicts[0].replacement.memoryId, 99);
         assert.equal(saved.conflicts[0].status, "pending");
-        assert.deepEqual(await readdir(join(queues, directory!)), ["queue.json"]);
+        assert.deepEqual((await readdir(join(queues, directory!)))
+      .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
       }
       await resolving;
       assert.deepEqual(mutations, ["create"], "stopped resolution must not dispatch supersession");

@@ -11,6 +11,7 @@ import type {
 import {
   getAgentDir,
   ModelSelectorComponent,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, UserMessage } from "@earendil-works/pi-ai";
 import { Loader, Text } from "@earendil-works/pi-tui";
@@ -55,7 +56,7 @@ import {
   resolveMemoryModel,
 } from "./model.ts";
 import { isMemoryOperation, sanitizeText } from "./privacy.ts";
-import { buildCaptureSnapshot } from "./snapshot.ts";
+import { buildCaptureSnapshot, sanitizeCaptureConversation } from "./snapshot.ts";
 import {
   RecallService,
   type DeeperRecallRequest,
@@ -318,6 +319,7 @@ export interface CaptureServicePort {
       evidenceEntryIds?: string[];
       additionalEvidence?: string;
       additionalEntries?: EvidenceEntry[];
+      conversation?: readonly unknown[];
     },
   ): Promise<unknown>;
 }
@@ -705,6 +707,16 @@ function conflictBelongsToActiveBranch(
   const sourceEntryIds = Array.isArray(rawSourceEntryIds)
     ? rawSourceEntryIds.filter((id): id is string => typeof id === "string")
     : [];
+  if (conflict.verifiedOrigin !== undefined) {
+    const origin = conflict.verifiedOrigin as {
+      entryId?: unknown; inspectionEntryIds?: unknown;
+    } | null;
+    const inspectionIds = origin?.inspectionEntryIds;
+    return origin !== null && typeof origin.entryId === "string" &&
+      activeIds.has(origin.entryId) && Array.isArray(inspectionIds) &&
+      Array.isArray(rawSourceEntryIds) && sourceEntryIds.length === rawSourceEntryIds.length &&
+      sourceEntryIds.every((id) => activeIds.has(id) || inspectionIds.includes(id));
+  }
   if (
     Array.isArray(rawSourceEntryIds) &&
     rawSourceEntryIds.length > 0 &&
@@ -1721,6 +1733,10 @@ export function createForgetfulExtension(
           ctx.isProjectTrusted() &&
           (state.runtime?.config.enabled ?? config.enabled) &&
           (state.runtime?.config.captureMode ?? config.captureMode) === "auto",
+        canReadNow: () =>
+          ctx.isProjectTrusted() &&
+          (state.runtime?.config.enabled ?? config.enabled) &&
+          (state.runtime?.config.captureMode ?? config.captureMode) !== "off",
       });
     };
 
@@ -1747,6 +1763,9 @@ export function createForgetfulExtension(
           sessionId,
           logger,
           classificationTimeoutMs: config.recallModelTimeoutMs,
+          compactionSettings: SettingsManager.create(ctx.cwd, agentDir, {
+            projectTrusted: ctx.isProjectTrusted(),
+          }).getCompactionSettings(),
         })
         : undefined;
       const recall = resolveRuntimeRecall(config, client, model);
@@ -1900,9 +1919,10 @@ export function createForgetfulExtension(
       ctx: ExtensionContext,
       context: ExtensionWorkContext,
       finalEntryId?: string,
+      leafEntryId?: string,
     ): Promise<void> => {
       if (!runtime.capture?.advanceWatermark) return;
-      const entries = ctx.sessionManager.getBranch();
+      const entries = ctx.sessionManager.getBranch(leafEntryId);
       const marker = runtime.lastCaptureEntryId ?? runtime.baselineEntryId;
       const markerIndex = marker
         ? entries.findIndex((entry) => entry.id === marker)
@@ -1910,6 +1930,8 @@ export function createForgetfulExtension(
       if (marker && markerIndex < 0) return;
       const entryIds = entries.slice(markerIndex + 1).map((entry) => entry.id);
       if (entryIds.length === 0) return;
+      // Preserve an explicit opt-out independently from context visibility and queue progress.
+      pi.appendEntry("forgetful_capture_excluded", { entryIds });
       await runtime.capture.advanceWatermark({
         sessionId: context.sessionId,
         branchId: context.branchId,
@@ -2247,9 +2269,10 @@ export function createForgetfulExtension(
       ctx: ExtensionContext,
       context: ExtensionWorkContext,
       messagePrefix: string,
+      leafEntryId?: string,
     ): Promise<void> => {
       try {
-        await advanceSettledRange(runtime, ctx, context);
+        await advanceSettledRange(runtime, ctx, context, undefined, leafEntryId);
       } catch (error) {
         logFailure(ctx, runtime.config, `Forgetful ${messagePrefix}`, error);
       }
@@ -2311,6 +2334,7 @@ export function createForgetfulExtension(
       runtime: Runtime,
       ctx: ExtensionContext,
       context: ExtensionWorkContext,
+      leafEntryId?: string,
     ): Promise<void> => {
       const capture = runtime.capture;
       if (!capture) return;
@@ -2326,8 +2350,16 @@ export function createForgetfulExtension(
           afterEntryId: runtime.lastCaptureEntryId,
           baselineEntryId: runtime.baselineEntryId,
           branchId: runtime.branchId,
-          includeToolEvidence: (toolName) =>
-            toolName === "edit" || toolName === "write",
+          leafEntryId,
+          // Opt-outs apply to reused entry IDs even when their marker is on another branch or
+          // was appended after settlement. Read only control metadata from the whole journal.
+          excludedEvidenceEntryIds: ctx.sessionManager.getEntries().flatMap((entry) => {
+            if (entry.type !== "custom" || entry.customType !== "forgetful_capture_excluded")
+              return [];
+            const ids = (entry.data as { entryIds?: unknown } | undefined)?.entryIds;
+            return Array.isArray(ids)
+              ? ids.filter((id): id is string => typeof id === "string") : [];
+          }),
         });
         if (result.status === "ready") {
           const enqueueResult = await capture.enqueue(result.snapshot);
@@ -2375,7 +2407,7 @@ export function createForgetfulExtension(
           runtime.logger.emit("info", "capture.snapshot_skipped", {
             branchId: runtime.branchId, reason: result.reason,
           });
-          await advanceSettledRange(runtime, ctx, context, result.finalEntryId);
+          await advanceSettledRange(runtime, ctx, context, result.finalEntryId, leafEntryId);
         }
       } catch (error) {
         if (isCurrentRuntime(runtime, ctx))
@@ -2470,6 +2502,7 @@ export function createForgetfulExtension(
     pi.on("agent_settled", async (_event, ctx) => {
       const runtime = state.runtime;
       if (!runtime?.capture || !isCurrentRuntime(runtime, ctx)) return;
+      const leafEntryId = ctx.sessionManager.getLeafId() ?? undefined;
       const previous = runtime.settledCaptureTail ?? Promise.resolve();
       const current = previous.then(async () => {
         if (!isCurrentRuntime(runtime, ctx)) return;
@@ -2482,6 +2515,7 @@ export function createForgetfulExtension(
             ctx,
             context,
             "skipped range was not advanced",
+            leafEntryId,
           );
           return;
         }
@@ -2491,10 +2525,11 @@ export function createForgetfulExtension(
             ctx,
             context,
             "disabled range was not advanced",
+            leafEntryId,
           );
           return;
         }
-        await enqueueSettledCapture(runtime, ctx, context);
+        await enqueueSettledCapture(runtime, ctx, context, leafEntryId);
       });
       runtime.settledCaptureTail = current.catch(() => undefined);
       await runtime.settledCaptureTail;
@@ -3025,6 +3060,7 @@ export function createForgetfulExtension(
               ? { evidenceEntryIds: params.evidenceEntryIds }
               : {}),
             additionalEntries: resolutionEvidence(ctx, preferredEvidenceIds),
+            conversation: sanitizeCaptureConversation(ctx.sessionManager.getBranch()),
           },
         );
         runtime.activeResolutions.add(resolution);

@@ -12,8 +12,11 @@ The intended experience requires no memory commands during normal work:
 - `forgetful_recall_wait` and foreground tool results use normal Pi tool-result persistence;
 - the main agent can search memories, inspect rich knowledge, initialise projects, and write
   evidenced repository knowledge through bounded tools;
-- successful settled work is captured through a durable queue using validated extraction and
-  overlap submissions with bounded correction attempts;
+- successful settled work is captured from the full pinned conversation, with a durable snapshot
+  separate from the queue index; the watermark tracks work, not context truncation;
+- capture can inspect sources read-only; recall can explore only stored Forgetful knowledge;
+- private tasks use the selected model window and Pi compaction settings, with validated
+  submissions and bounded correction attempts;
 - capture can create and link memories, entities, relationships, documents, and code artifacts;
   file uploads are excluded;
 - configured recall scope is authoritative and independent of each capture destination;
@@ -113,6 +116,12 @@ That means the model should see what Forgetful actually said, including for:
  - validation field details;
  - plain 404 bodies such as Not Found;
  - service diagnostics when they are present.
+## Repository hygiene
+
+Keep agent handoffs and disposable review reports outside the repository. Put durable guidance in
+existing documentation, not session-summary documents. Remove temporary review artifacts when the
+review ends unless the user asks to keep them.
+
 ## Status
 
 MVP implemented for Pi 1. Run `npm run check` for deterministic

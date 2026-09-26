@@ -86,6 +86,22 @@ FORGETFUL_TEST_SOURCE=/path/to/forgetful \
   node --import tsx --test --test-concurrency=1 test/*.test.ts
 ```
 
+### Whole-context quality evaluation
+
+This opt-in check uses the configured Pi model, isolated REST storage and fresh Pi answering
+sessions. It covers long-history corrections, read-only source inspection and stored-context
+exploration. It spends up to 48 provider calls without changing production budgets:
+
+```bash
+FORGETFUL_LIVE_CONTEXT_QUALITY=1 FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test test/live-context-quality.test.ts
+```
+
+Use `FORGETFUL_CONTEXT_QUALITY_DRY_RUN=1` instead of the live switch for local scripted checks.
+Reports default to `/tmp`; `FORGETFUL_CONTEXT_QUALITY_REPORT` overrides the location. Read the
+stored claims and final answers: mechanical passes do not establish accuracy, and fixed test
+embeddings do not assess production search ranking. Keep disposable reports outside the repository.
+
 ## Documentation and architecture
 
 The README hero is rendered from the architecture source at

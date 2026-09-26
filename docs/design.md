@@ -313,11 +313,13 @@ before returning.
 
 The extension-owned capture queue must be durable before automatic mode is enabled:
 
-1. Snapshot the completed turn using stable session/branch entry IDs and the final assistant
-   status. Do not reread a mutable session later and assume it is the same run.
-2. Persist the fixed snapshot, current project context, recall scope, capture mode, run identity,
-   and prompt/model versions as one queue record. Record each candidate's resolved destination
-   with its outcome before writing, so retries do not reroute it from a changed working directory.
+1. Pin the complete active conversation at settlement, using stable session/branch entry IDs
+   and the final assistant status. Include pre-compaction history, roles, calls and actual outcomes;
+   never reread a mutable session later and assume it is the same run.
+2. Persist the full sanitized conversation in immutable private snapshot files, referenced by the
+   queue index with a verified digest. The index retains project context, recall scope, capture
+   mode, run identity and prompt/model versions. Record each candidate's resolved destination
+   before writing, so retries do not reroute it from a changed working directory.
 3. Advance the capture watermark with the durable enqueue. A stable session/branch plus final
    entry identity (and snapshot hash where needed) prevents the same settled turn being queued
    twice after retries, compaction, or restart.
@@ -332,8 +334,8 @@ it cannot prevent two independent clients from racing to create the same memory.
 
 The MVP worker runs inside the live Pi process. Durable pending records can be recovered on a
 later normal start, but capture completion after Pi exits is not an MVP guarantee. External
-workers and shutdown draining are deferred until MVP usage demonstrates a need; this does not
-remove the existing snapshot, watermark, and retry requirements.
+workers remain deferred. Shutdown and navigation drain accepted in-process work and its receipts;
+this does not promise post-exit completion or remove snapshot, watermark and retry requirements.
 
 Queue files live under the user's Pi agent directory, in `forgetful/queues/`. The directory key
 separates repository and service/account identity. Repository-controlled settings cannot redirect
@@ -347,10 +349,14 @@ follow-ups. It does not itself mean the work succeeded, so the extension must in
 assistant message and skip capture when its stop reason is error or aborted. The fixed snapshot
 is then processed by the durable worker described above.
 
-1. Read only the conversation messages in the fixed snapshot after the last capture watermark.
+1. Read the whole pinned conversation. The watermark marks processed work; it does not remove
+   context. Capture exclusions remain attached to original entry IDs across branches. Evidence
+   eligibility is separate from visibility; failed tools establish failures, not successful changes.
 2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
-   a target project and rationale. Accept exactly one private `submit_capture_candidates` tool call;
-   do not parse text output as fallback JSON.
+   a target project and rationale. It may inspect trusted repository text and source URLs through
+   a read-only tool before submitting candidates. Actual observations carry durable evidence IDs
+   and provenance; source editing, shell execution and uploads are unavailable. Accept exactly one
+   private `submit_capture_candidates` submission; do not parse text output as fallback JSON.
 3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
    Reject the submission for correction if any candidate or attached resource is invalid. Do not
    silently discard an invalid record or write valid siblings before the submission is corrected.
@@ -561,17 +567,23 @@ The benchmark matrix covers every supported memory planner model, warm and cold 
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the asynchronous recall path. The
 implementation bounds recall to one planner call and one review path per prompt, with at most three
-private review-submission attempts. Capture extraction and each overlap decision use one model call
-from the per-run budget, with at most three private submission attempts inside that call and its
-15-second deadline. Debug shows aggregate usage and bounded rejection details.
+private review-submission attempts. The reviewer may explore only stored Forgetful records through
+read-only tools in that same path. Capture extraction, overlap and connection review each consume
+a task from the four-task durable budget. Read turns, compaction and at most three submission
+attempts share each task's existing 15-second deadline. Debug counts provider invocations
+separately.
 
 ### Model capacity and record validation
 
 Use the selected Pi model's configured output allowance for every background purpose, including
 correction attempts. The registry's raw completion path receives `model.maxTokens` explicitly;
-there is no separate extension-owned output-token budget. The extension does not estimate or
-truncate context to fit a model's context window, or add automatic background compaction.
-Pi/provider capacity failures remain failure-open.
+there is no separate extension-owned output-token budget. Private tasks prepare context using Pi
+compaction helpers, persisted Pi settings and the selected model window, before the first request
+and between continuations. Current task instructions and tool schemas are preserved. Historical
+images use native blocks for capable models, including during summarization. Unsupported images
+or indivisible records that cannot fit fail explicitly; evidence is never silently clipped.
+Unsaved host settings are not available through Pi's extension context. Summaries are derived
+context, not new source evidence. Pi/provider capacity failures remain failure-open.
 
 Selected evidence, policies, rich records and private correction history are not character-clipped.
 The model adapter does not reject complete responses merely for exceeding an extension byte cap.
@@ -579,10 +591,12 @@ Character limits belong to the final recall summary and Forgetful's stored field
 schemas return validation failures to the model for correction rather than silently shortening
 content. Corrections remain subject to the existing attempt count and request deadline.
 
-Record/entry selection counts, trust and scope checks, secret redaction, transport safety, durable
-queue capacity, and diagnostic preview limits remain separate safeguards. Large evidence can still
-exceed the queue's storage capacity or the provider's context capacity; it must not be silently
-shortened to disguise either failure.
+Stored-record selection counts, trust and scope checks, secret redaction, transport safety, queue
+index capacity and diagnostic preview limits remain separate safeguards. Full conversation files
+do not share the index's 5 MiB limit. They remain private and durable until outstanding work and
+pending conflicts release them. Large input can still exceed provider capacity or the unchanged
+task deadline; neither failure permits silent clipping. Legacy truncated snapshots remain marked
+as incomplete rather than being called full conversations.
 
 ## Transport
 
@@ -650,8 +664,10 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    already-delivered state only after a context boundary.
 3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
    scoped Forgetful data to the main agent.
-4. **Capture input seam**: the capture model receives only the completed turn delta and the
+4. **Capture input seam**: the capture model receives the full pinned active conversation and
    composed capture policy, including the current project and evidence for another destination.
+   The watermark tracks processed work without hiding earlier context. Evidence eligibility is
+   separate from conversation visibility.
    Candidate extraction accepts one private tool submission, returns bounded validation feedback
    for correction, and never treats text-only JSON as a valid submission.
 5. **Capture mechanism seam**: given a private create/skip/supersede/escalate submission, the

@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
   chmod,
+  lstat,
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import type {
   CaptureSnapshot,
@@ -17,6 +20,7 @@ import type {
   WorkContext,
 } from "./contracts.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
+import { sanitizeCaptureSnapshot } from "./snapshot.ts";
 
 export type QueueJobStatus =
   | "pending"
@@ -138,6 +142,8 @@ export interface QueueCheckpoint {
   submissionRejections?: string[];
   lastError?: string;
   startedAt?: string;
+  /** Append-only source observations; inspection: IDs must never reuse session IDs. */
+  inspectionEntries?: EvidenceEntry[];
 }
 
 export interface DurableQueueStoreOptions {
@@ -154,9 +160,16 @@ export interface DurableQueueStoreOptions {
   now?: () => Date;
 }
 
+interface StoredQueueJob extends QueueJob {
+  snapshotDigest?: string;
+  inspectionDigest?: string;
+}
+
+type SnapshotPayload = Pick<CaptureSnapshot, "entries" | "conversation">;
+
 interface QueueState {
-  version: 1;
-  jobs: QueueJob[];
+  version: 1 | 2;
+  jobs: StoredQueueJob[];
   conflicts: PendingConflict[];
   watermarks: Record<string, QueueWatermark>;
 }
@@ -226,7 +239,7 @@ function normaliseState(value: unknown): QueueState {
     throw new Error("Invalid queue state");
   const record = value as Partial<QueueState>;
   if (
-    record.version !== 1 ||
+    (record.version !== 1 && record.version !== 2) ||
     !Array.isArray(record.jobs) ||
     !Array.isArray(record.conflicts) ||
     !record.watermarks ||
@@ -234,9 +247,22 @@ function normaliseState(value: unknown): QueueState {
   ) {
     throw new Error("Invalid queue state");
   }
+  if (record.version === 1) {
+    for (const job of record.jobs) {
+      job.snapshot = { ...job.snapshot, conversationCoverage: "legacy-partial" };
+    }
+  } else {
+    for (const job of record.jobs) {
+      const needsSnapshot = !["complete", "failed"].includes(job.status) ||
+        record.conflicts.some((conflict) =>
+          conflict.status === "pending" && conflict.jobId === job.id);
+      if (needsSnapshot && !job.snapshotDigest)
+        throw new Error("Capture snapshot reference is missing");
+    }
+  }
   return {
-    version: 1,
-    jobs: Array.isArray(record.jobs) ? (record.jobs as QueueJob[]) : [],
+    version: record.version,
+    jobs: record.jobs as StoredQueueJob[],
     conflicts: Array.isArray(record.conflicts)
       ? (record.conflicts as PendingConflict[])
       : [],
@@ -303,6 +329,11 @@ export class DurableQueueStore {
   private readonly maxAttempts: number;
   private readonly retentionMs: number;
   private readonly now: () => Date;
+  private readonly snapshotPrefix: string;
+  private readonly snapshotCache = new Map<string, {
+    stamp: string;
+    payload: SnapshotPayload;
+  }>();
 
   constructor(options: DurableQueueStoreOptions | string = {}) {
     const resolved =
@@ -311,6 +342,8 @@ export class DurableQueueStore {
       resolved.filePath ??
       join(resolved.directory ?? ".pi/forgetful", "queue.json");
     this.directory = resolved.directory ?? dirname(this.filePath);
+    this.snapshotPrefix = "snapshot-" + createHash("sha256")
+      .update(basename(this.filePath)).digest("hex").slice(0, 16) + "-";
     this.lockPath = resolved.lockPath ?? `${this.filePath}.lock`;
     this.instanceId = resolved.instanceId;
     this.endpoint = resolved.endpoint;
@@ -336,7 +369,141 @@ export class DurableQueueStore {
 
   private async ensureDirectory(): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    if (!(await lstat(this.directory)).isDirectory())
+      throw new Error("Capture queue directory must not be a symlink");
     await chmod(this.directory, 0o700);
+  }
+
+  private snapshotPath(digest: string): string {
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error("Invalid capture snapshot digest");
+    return join(this.directory, `${this.snapshotPrefix}${digest}.json`);
+  }
+
+  private async syncDirectory(): Promise<void> {
+    const handle = await open(this.directory, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
+
+  private async readSnapshot(digest: string): Promise<SnapshotPayload> {
+    if (!(await lstat(this.directory)).isDirectory())
+      throw new Error("Capture queue directory must not be a symlink");
+    const handle = await open(this.snapshotPath(digest),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const details = await handle.stat({ bigint: true });
+      if (!details.isFile()) throw new Error("Capture snapshot must be a regular file");
+      const stamp = [details.dev, details.ino, details.size,
+        details.mtimeNs, details.ctimeNs].join();
+      const cached = this.snapshotCache.get(digest);
+      if (cached?.stamp === stamp) return cached.payload;
+      const encoded = await handle.readFile("utf8");
+      if (createHash("sha256").update(encoded).digest("hex") !== digest)
+        throw new Error("Capture snapshot digest mismatch");
+      const payload = JSON.parse(encoded) as SnapshotPayload;
+      if (!Array.isArray(payload.entries) ||
+          (payload.conversation !== undefined && !Array.isArray(payload.conversation)))
+        throw new Error("Invalid capture snapshot payload");
+      this.snapshotCache.set(digest, { stamp, payload });
+      return payload;
+    } finally { await handle.close(); }
+  }
+
+  private async storeSnapshot(payload: SnapshotPayload): Promise<string> {
+    const encoded = JSON.stringify(payload);
+    const digest = createHash("sha256").update(encoded).digest("hex");
+    try {
+      await this.readSnapshot(digest);
+      return digest;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const path = this.snapshotPath(digest);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(encoded);
+      await handle.sync();
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    } finally { await handle.close(); }
+    try {
+      await rename(temporary, path);
+      await this.syncDirectory();
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+    return digest;
+  }
+
+  private async hydrateJob(job: StoredQueueJob): Promise<QueueJob> {
+    const { snapshotDigest, inspectionDigest, ...publicJob } = job;
+    const payload = snapshotDigest ? await this.readSnapshot(snapshotDigest)
+      : job.snapshot;
+    const inspections = inspectionDigest
+      ? (await this.readSnapshot(inspectionDigest)).entries : [];
+    return jsonSnapshot({ ...publicJob, snapshot: { ...job.snapshot, ...payload,
+      entries: [...payload.entries, ...inspections] } });
+  }
+
+  private releaseTerminalSnapshot(state: QueueState, job: StoredQueueJob): void {
+    if ((job.status === "complete" || job.status === "failed") &&
+        !state.conflicts.some((conflict) => conflict.status === "pending" &&
+          conflict.jobId === job.id)) {
+      delete job.snapshotDigest;
+      delete job.inspectionDigest;
+    }
+  }
+
+  private async appendInspections(job: StoredQueueJob, additions: EvidenceEntry[]): Promise<void> {
+    if (job.status === "complete" || job.status === "failed")
+      throw new Error("Cannot append inspection evidence to a terminal capture job");
+    const original = job.snapshotDigest
+      ? await this.readSnapshot(job.snapshotDigest) : job.snapshot;
+    const reserved = new Set(original.entries.map((entry) => entry.id));
+    for (const entry of original.conversation ?? []) {
+      if (entry && typeof entry === "object" && "id" in entry) reserved.add(String(entry.id));
+    }
+    const entries = job.inspectionDigest
+      ? [...(await this.readSnapshot(job.inspectionDigest)).entries] : [];
+    for (const input of additions) {
+      if (!input || typeof input.id !== "string" || !input.id.startsWith("inspection:") ||
+          input.id === "inspection:" || reserved.has(input.id) || input.role !== "toolResult" ||
+          typeof input.text !== "string" || !input.toolName)
+        throw new Error("Invalid inspection evidence or original session entry ID");
+      const entry = sanitizeValue(jsonSnapshot(input)) as EvidenceEntry;
+      const existing = entries.find((item) => item.id === entry.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(entry))
+        throw new Error("Inspection evidence IDs are immutable once recorded");
+      if (!existing) entries.push(entry);
+    }
+    if (entries.length) job.inspectionDigest = await this.storeSnapshot({ entries });
+  }
+
+  private async collectSnapshots(state: QueueState): Promise<void> {
+    const retained = new Set(state.jobs.flatMap((job) =>
+      [job.snapshotDigest, job.inspectionDigest].filter((value): value is string => Boolean(value))
+        .map((digest) => this.snapshotPath(digest))));
+    for (const name of await readdir(this.directory)) {
+      if (!name.startsWith(this.snapshotPrefix)) continue;
+      const suffix = name.slice(this.snapshotPrefix.length);
+      if (/^[a-f0-9]{64}\.json\.[a-f0-9-]{36}\.tmp$/.test(suffix)) {
+        const path = join(this.directory, name);
+        const details = await lstat(path);
+        if (this.now().getTime() - details.mtimeMs > this.retentionMs)
+          await rm(path, { force: true });
+        continue;
+      }
+      if (!name.endsWith(".json")) continue;
+      const digest = name.slice(this.snapshotPrefix.length, -5);
+      if (!/^[a-f0-9]{64}$/.test(digest)) continue;
+      const path = this.snapshotPath(digest);
+      if (retained.has(path)) continue;
+      await rm(path, { force: true });
+      this.snapshotCache.delete(digest);
+    }
+    await this.syncDirectory();
   }
 
   private async readState(): Promise<QueueState> {
@@ -354,7 +521,7 @@ export class DurableQueueStore {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { version: 1, jobs: [], conflicts: [], watermarks: {} };
+        return { version: 2, jobs: [], conflicts: [], watermarks: {} };
       }
       throw error;
     }
@@ -362,6 +529,15 @@ export class DurableQueueStore {
 
   private async writeState(state: QueueState): Promise<void> {
     await this.ensureDirectory();
+    for (const job of state.jobs) {
+      this.releaseTerminalSnapshot(state, job);
+      if (job.snapshotDigest || ((job.status === "complete" || job.status === "failed") &&
+          !job.snapshot.entries.length && job.snapshot.conversation === undefined)) continue;
+      const { entries, conversation, ...metadata } = sanitizeCaptureSnapshot(job.snapshot);
+      job.snapshotDigest = await this.storeSnapshot({ entries, conversation });
+      job.snapshot = { ...metadata, entries: [] };
+    }
+    state.version = 2;
     const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
     const handle = await open(temporary, "wx", 0o600);
     try {
@@ -385,6 +561,10 @@ export class DurableQueueStore {
       throw error;
     }
     await chmod(this.filePath, 0o600);
+    await this.syncDirectory();
+    // A committed receipt remains successful if optional reclamation fails. The next mutation
+    // retries collection; retaining an unreachable private file is safer than losing evidence.
+    await this.collectSnapshots(state).catch(() => undefined);
   }
 
   private async acquireFileLock(path: string): Promise<FileLock> {
@@ -530,6 +710,8 @@ export class DurableQueueStore {
         job.status === "pending" ||
         job.status === "running" ||
         job.status === "paused" ||
+        state.conflicts.some((conflict) => conflict.status === "pending" &&
+          conflict.jobId === job.id) ||
         shouldRetain(job.updatedAt, cutoff, this.retentionMs),
     );
     state.conflicts = state.conflicts.filter(
@@ -604,7 +786,7 @@ export class DurableQueueStore {
     if (this.instanceId && snapshot.instanceId !== this.instanceId) {
       throw new Error("Capture snapshot belongs to another Forgetful instance");
     }
-    const safeSnapshot = sanitizeValue(snapshot) as CaptureSnapshot;
+    const safeSnapshot = sanitizeCaptureSnapshot(snapshot);
     const identity: QueueIdentity = {
       instanceId: safeSnapshot.instanceId,
       endpoint: this.endpoint,
@@ -715,36 +897,35 @@ export class DurableQueueStore {
   async listPending(
     identity: QueueIdentity = this.defaultIdentity(),
   ): Promise<QueueJob[]> {
-    const state = await this.readState();
-    return jsonSnapshot(
-      state.jobs.filter(
+    return this.mutate(async (state) => ({ changed: false,
+      value: await Promise.all(state.jobs.filter(
         (job) =>
           identityMatches(job, identity) &&
           ["pending", "running", "paused"].includes(job.status),
-      ),
-    );
+      ).map((job) => this.hydrateJob(job))),
+    }));
   }
 
   async listJobs(identity?: QueueIdentity): Promise<QueueJob[]> {
-    const state = await this.readState();
-    return jsonSnapshot(
-      identity
+    return this.mutate(async (state) => ({ changed: false,
+      value: await Promise.all((identity
         ? state.jobs.filter((job) => identityMatches(job, identity))
-        : state.jobs,
-    );
+        : state.jobs).map((job) => this.hydrateJob(job))),
+    }));
   }
 
   async getJob(jobId: string): Promise<QueueJob | undefined> {
-    const state = await this.readState();
-    const job = state.jobs.find((item) => item.id === jobId);
-    return job ? jsonSnapshot(job) : undefined;
+    return this.mutate(async (state) => {
+      const job = state.jobs.find((item) => item.id === jobId);
+      return { value: job ? await this.hydrateJob(job) : undefined, changed: false };
+    });
   }
 
   async claimNext(
     identity: QueueIdentity = this.defaultIdentity(),
     branch?: { sessionId: string; branchId: string },
   ): Promise<QueueJob | undefined> {
-    return this.mutate((state) => {
+    return this.mutate(async (state) => {
       const currentTime = this.now().getTime();
       let changed = false;
       for (const job of state.jobs) {
@@ -763,7 +944,7 @@ export class DurableQueueStore {
           continue;
         }
         this.claimJob(job);
-        return { value: jsonSnapshot(job) };
+        return { value: await this.hydrateJob(job) };
       }
       return { value: undefined, changed };
     });
@@ -794,10 +975,11 @@ export class DurableQueueStore {
     );
   }
 
-  private failExhaustedJob(job: QueueJob): void {
+  private failExhaustedJob(job: StoredQueueJob): void {
     job.status = "failed";
     job.lastError = "retry limit reached";
-    job.snapshot = { ...job.snapshot, entries: [] as EvidenceEntry[] };
+    const { conversation: _conversation, ...metadata } = job.snapshot;
+    job.snapshot = { ...metadata, entries: [] };
     job.updatedAt = nowIso(this.now);
   }
 
@@ -824,9 +1006,10 @@ export class DurableQueueStore {
       typeof patchOrCandidate === "string"
         ? { candidateOutcomes: { [patchOrCandidate]: outcome } }
         : patchOrCandidate;
-    return this.mutate((state) => {
+    return this.mutate(async (state) => {
       const job = state.jobs.find((item) => item.id === jobId);
       if (!job) throw new Error(`Unknown capture job: ${jobId}`);
+      if (patch.inspectionEntries) await this.appendInspections(job, patch.inspectionEntries);
       if (patch.status) job.status = patch.status;
       if (patch.callCount !== undefined) job.callCount = patch.callCount;
       if (patch.extractedCandidates !== undefined) {
@@ -851,9 +1034,11 @@ export class DurableQueueStore {
       if (patch.status && patch.status !== "running") job.ownerPid = undefined;
       job.updatedAt = nowIso(this.now);
       if (job.status === "complete" || job.status === "failed") {
-        job.snapshot = { ...job.snapshot, entries: [] as EvidenceEntry[] };
+        const { conversation: _conversation, ...metadata } = job.snapshot;
+        job.snapshot = { ...metadata, entries: [] };
+        this.releaseTerminalSnapshot(state, job);
       }
-      return { value: jsonSnapshot(job) };
+      return { value: await this.hydrateJob(job) };
     });
   }
 

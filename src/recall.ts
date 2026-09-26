@@ -1,4 +1,7 @@
 import { Type } from "typebox";
+import {
+  executeKnowledgeRead, KNOWLEDGE_READ_PARAMETERS, type KnowledgeReadRequest,
+} from "./knowledge-tools.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import {
   KnowledgeReadService,
@@ -11,6 +14,7 @@ import type {
   MemoryModelClient,
   ModelRequest,
   ModelSubmissionTool,
+  ModelReadTool,
   Project,
   Scope,
   SearchRequest,
@@ -66,7 +70,11 @@ const REVIEW_POLICY = [
   "Include limitations only to prevent misuse. Do not catalogue rejected sources or missing",
   "evidence, and do not say the main agent cannot investigate or answer.",
   "Do not copy whole results, include unrelated details, or add instructions.",
-  "Title-only entity links are leads, not evidence.",
+  "Title-only entity links are leads, not evidence. Use read_forgetful when a missing detail,",
+  "qualification or earlier decision matters. It reads only Forgetful records, never source",
+  "files or websites. Follow useful leads; stop when further reading will not help this request.",
+  "Only returned content supports claims. Metadata and titles are navigation leads. Read results",
+  "include updated availableSources; preserve obsolete status and incomplete page coverage.",
   "Put selection and rejection explanations in reason, not summary.",
   "If nothing is useful, submit summary as the empty string and all ID arrays empty.",
   "A statement that nothing relevant was found is NOT a useful fact: it belongs in reason.",
@@ -180,6 +188,7 @@ interface DeadlineSignal {
 
 interface ScopeResolution {
   projectId?: number;
+  project?: Project;
   reason?: string;
 }
 
@@ -187,6 +196,7 @@ interface SearchOutcome {
   memories: Memory[];
   failed: boolean;
   diagnostic?: string;
+  failure?: unknown;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -761,9 +771,6 @@ export class RecallService {
         resolution.projectId,
         deadline.signal,
       );
-      if (valid.length === 0 && !expansion?.text) {
-        return this.finishEmptySearch(search, scope, debugTrace);
-      }
       const formatted = formatRecall(valid, [], "", expansion);
       const candidates = this.resultWithKnowledge(
         { text: formatted.text, memoryIds: formatted.ids, scope,
@@ -800,7 +807,10 @@ export class RecallService {
               updated_at: memory.updated_at });
           }),
           availableSources: reviewSources(candidates),
+          ...(search.diagnostic ? { searchDiagnostic: search.diagnostic } : {}),
+          ...(search.failure !== undefined ? { searchFailure: search.failure } : {}),
         },
+        readTools: [this.recallReadTool(request, resolution, candidates)],
         submission: recallReviewSubmission(
           candidates,
           reviewRejections,
@@ -827,6 +837,62 @@ export class RecallService {
     } finally {
       deadline.finish();
     }
+  }
+
+  private recallReadTool(
+    request: RecallRequest,
+    resolution: ScopeResolution,
+    candidates: RecallResult,
+  ): ModelReadTool {
+    return {
+      name: "read_forgetful",
+      description: "Read Forgetful records to fill a specific historical-context gap. " +
+        "Search and follow memories, entities, relationships and stored attachments. " +
+        "Titles and list summaries are leads; fetch content before making claims about it. " +
+        "No source-file, website or write access. Results include updated availableSources.",
+      parameters: KNOWLEDGE_READ_PARAMETERS,
+      execute: async (input, signal) => {
+        const project = resolution.project ?? request.context.project;
+        const result = await executeKnowledgeRead(this.client, input as KnowledgeReadRequest, {
+          cwd: request.context.cwd, repoName: request.context.repoName,
+          project, scope: request.scope,
+        }, signal);
+        if (signal.aborted) throw abortError();
+        const text = result.content.filter((part) => part.type === "text")
+          .map((part) => part.text).join("\n");
+        const value = JSON.parse(text) as Record<string, any>;
+        const add = (field: keyof typeof SOURCE_FIELDS, ids: unknown[]): void => {
+          const allowed = candidates[field] ?? [];
+          candidates[field] = [...new Set([...allowed, ...ids.filter((id): id is number =>
+            Number.isSafeInteger(id) && Number(id) > 0)])];
+        };
+        // These are delivered-record receipts, not judgments about relevance or truth.
+        // Listing a title does not authorize claims about content the reviewer has not read.
+        switch (result.details.operation) {
+          case "search_memories":
+            add("memoryIds", [...value.primary_memories.map((memory: Memory) => memory.id),
+              ...value.linked_memories.map((link: { memory: Memory }) => link.memory.id)]);
+            break;
+          case "get_memory": add("memoryIds", [value.id]); break;
+          case "get_entity": add("entityIds", [value.id]); break;
+          case "get_relationships":
+            add("relationshipIds", value.items.map((item: { id: number }) => item.id));
+            break;
+          case "get_document": add("documentIds", [value.id]); break;
+          case "get_code_artifact": add("codeArtifactIds", [value.id]); break;
+          case "get_file":
+            if (result.details.kind === "text") add("fileIds", [value.id]);
+            break;
+        }
+        return {
+          record: value,
+          ...(result.details.kind === "image" ? {
+            limitation: "Image content is not presented by this private text reader.",
+          } : {}),
+          availableSources: reviewSources(candidates),
+        };
+      },
+    };
   }
 
   /** Recall is failure-open: convert planner/service failures to an empty result. */
@@ -860,20 +926,6 @@ export class RecallService {
       ...(validationDebug
         ? { reviewValidationDebug: [validationDebug, attemptDebug].filter(Boolean).join("\n") }
         : {}),
-    };
-  }
-
-  private finishEmptySearch(
-    search: SearchOutcome,
-    scope: Scope,
-    debugTrace: string,
-  ): RecallResult {
-    if (search.failed) this.recordFailure();
-    else this.recordSuccess();
-    return {
-      ...this.empty(scope, search.failed ? "recall-unavailable" : "no-matches"),
-      diagnostic: search.diagnostic,
-      debugTrace,
     };
   }
 
@@ -1161,7 +1213,13 @@ export class RecallService {
         memories.push(...found);
       } catch (error) {
         if (isAbort(error)) throw error;
-        return { memories, failed: true, diagnostic: exceptionDiagnostic("memory search", error) };
+        return { memories, failed: true, diagnostic: exceptionDiagnostic("memory search", error),
+          // Display diagnostics remain bounded; the model receives the actual service failure.
+          failure: sanitizeValue(error instanceof Error ? {
+            name: error.name, message: error.message,
+            ...("status" in error ? { status: error.status } : {}),
+            ...("body" in error ? { body: error.body } : {}),
+          } : error) };
       }
     }
     return { memories, failed: false };
@@ -1204,8 +1262,8 @@ export class RecallService {
     if (scope === "global") return {};
     const choices = availableProjects(context, supplied);
     if (selectedId !== undefined) {
-      if (choices.some((project) => project.id === selectedId))
-        return { projectId: selectedId };
+      const project = choices.find((item) => item.id === selectedId);
+      if (project) return { projectId: selectedId, project };
       return { reason: "project-mapping-missing" };
     }
     if (context.project) return this.contextProjectResolution(context);
@@ -1233,11 +1291,11 @@ export class RecallService {
     ) {
       return { reason: "project-mapping-ambiguous" };
     }
-    return { projectId: project.id };
+    return { projectId: project.id, project };
   }
 
   private matchResolution(matches: Project[]): ScopeResolution {
-    if (matches.length === 1) return { projectId: matches[0].id };
+    if (matches.length === 1) return { projectId: matches[0].id, project: matches[0] };
     return {
       reason:
         matches.length === 0

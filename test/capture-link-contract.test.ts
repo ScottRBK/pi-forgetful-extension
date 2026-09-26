@@ -10,6 +10,7 @@ import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 for (const scenario of ["unlinked-irrelevant", "foreign-only", "keep-during-review",
   "ignore-during-review"] as const) {
@@ -46,7 +47,7 @@ for (const scenario of ["unlinked-irrelevant", "foreign-only", "keep-during-revi
           else {
             assert.notEqual(scenario, "foreign-only",
               "No eligible endpoints or predecessor means there is no model judgment to request");
-            const input = JSON.parse(context.messages[0]!.content as string);
+            const input = decodeProviderContext(context).input;
             const savedId = input.candidates[0].memory.id;
             if (scenario === "keep-during-review")
               await client.knowledge.unlinkMemories(savedId, existing.id);

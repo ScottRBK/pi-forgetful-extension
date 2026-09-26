@@ -211,8 +211,12 @@ export interface ModelRequest {
   purpose: "classification" | "recall-review" | "capture" | "overlap";
   policy: string;
   input: unknown;
+  /** Ordered historical records, kept separate from the current task and its instructions. */
+  conversation?: readonly unknown[];
   signal?: AbortSignal;
   submission?: ModelSubmissionTool;
+  /** Task-specific read capabilities. Private models never inherit the main agent's tools. */
+  readTools?: ModelReadTool[];
   /** Diagnostic correlation only; never included in the model input. */
   diagnosticContext?: {
     jobId?: string;
@@ -220,6 +224,13 @@ export interface ModelRequest {
     branchId?: string;
     candidateId?: string;
   };
+}
+
+export interface ModelReadTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute(input: unknown, signal: AbortSignal): Promise<unknown>;
 }
 
 export interface ModelSubmissionTool {
@@ -259,6 +270,9 @@ export interface EvidenceEntry {
   role: "user" | "assistant" | "toolResult";
   text: string;
   toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  details?: unknown;
 }
 
 export interface CaptureSnapshot {
@@ -266,6 +280,12 @@ export interface CaptureSnapshot {
   context: WorkContext;
   instanceId: string;
   entries: EvidenceEntry[];
+  /** Sanitized Pi entry records in root-to-pinned-leaf order; never evidence by role alone. */
+  conversation?: readonly unknown[];
+  conversationCoverage?: "complete" | "legacy-partial";
+  /** Previously processed boundary, for scheduling only; never a context cutoff. */
+  processedThroughEntryId?: string | null;
+  leafEntryId?: string;
   finalEntryId: string;
   mode: CaptureMode;
   scope: Scope;

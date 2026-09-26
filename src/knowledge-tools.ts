@@ -809,12 +809,11 @@ async function readEntityMemories(read: KnowledgeReadContext): Promise<Knowledge
     read.request.limit as number | undefined,
   );
   const checked = await Promise.all(linkedPage.items.map(async (item) => {
-    try {
-      const memory = await assertReadMemory(read.client, item.id, read.context, read.signal);
-      return memory.is_obsolete ? undefined : item;
-    } catch {
+    const memory = await read.client.get(item.id, read.signal);
+    if (memory.is_obsolete ||
+        (read.projectId !== undefined && !inMemoryProject(memory, read.projectId)))
       return undefined;
-    }
+    return item;
   }));
   const values = checked.filter(
     (item): item is { id: number; title: string } => item !== undefined,
@@ -847,15 +846,11 @@ async function readRelationships(read: KnowledgeReadContext): Promise<KnowledgeT
   const endpointIds = [...new Set(relationshipPage.items.flatMap((item) => [
     item.source_entity_id, item.target_entity_id,
   ]))].slice(0, MAX_RECORD_LIMIT * 2);
-  const endpoints = await Promise.all(endpointIds.map(async (id) => {
-    try {
-      return await assertReadEntity(knowledge, id, read.context, read.signal);
-    } catch {
-      return undefined;
-    }
-  }));
+  const endpoints = await Promise.all(endpointIds.map((id) =>
+    knowledge.getEntity(id, read.signal)));
   const endpointMap = new Map(
-    endpoints.filter((item): item is Entity => item !== undefined)
+    endpoints.filter((item) =>
+      read.projectId === undefined || inEntityProject(item, read.projectId))
       .map((item) => [item.id, item]),
   );
   const values = relationshipPage.items.filter((item) =>
@@ -1101,13 +1096,7 @@ async function hydrateEntities(
   signal?: AbortSignal,
 ): Promise<Entity[]> {
   const bounded = candidates.slice(0, 100);
-  return Promise.all(bounded.map(async (candidate) => {
-    try {
-      return await knowledge.getEntity(candidate.id, signal);
-    } catch {
-      return candidate;
-    }
-  }));
+  return Promise.all(bounded.map((candidate) => knowledge.getEntity(candidate.id, signal)));
 }
 
 async function validateAttachments(

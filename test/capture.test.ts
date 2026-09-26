@@ -16,11 +16,13 @@ import type {
   Memory,
   MemoryModelClient,
   MemoryInput,
+  ModelRequest,
 } from "../src/contracts.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { FileLogger } from "../src/logging.ts";
 import { PiMemoryModel, type ModelRegistryPort } from "../src/model.ts";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import { decodeProviderContext } from "./provider-context.ts";
 
 for (const level of ["debug", "info", "off"] as const) {
   test(`capture ${level} file explains rejected evidence and saves valid capture`, async (t) => {
@@ -217,8 +219,8 @@ test("large rejected candidate keeps reason, evidence and bounded raw details", 
   assert.ok(lines.every((line) => Buffer.byteLength(line + "\n") <= 64 * 1024));
 });
 
-test("capture snapshot log retains the full bounded evidence sent for extraction", async (t) => {
-  // Arrange: the normal 50KB snapshot is already bounded; it must remain useful for debugging.
+test("capture snapshot log retains the full evidence sent for extraction", async (t) => {
+  // Arrange: this roughly 50KB snapshot must remain useful for debugging in full.
   const directory = await mkdtemp(join(tmpdir(), "capture-snapshot-log-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const logger = new FileLogger({ directory, sessionId: "session-1", level: "debug" });
@@ -243,7 +245,8 @@ test("capture snapshot log retains the full bounded evidence sent for extraction
     .map((line) => JSON.parse(line));
   const event = events.find((entry) => entry.event === "capture.snapshot");
   assert.deepEqual(event.data.entries, input.entries);
-  assert.deepEqual(event.data.entries, (model.requests[0]?.input as any).entries);
+  assert.deepEqual(event.data.entries, model.requests[0]?.conversation);
+  assert.equal((model.requests[0]?.input as any).entries, undefined);
   assert.equal(event.data.history, undefined);
 });
 
@@ -280,17 +283,56 @@ test("CaptureService gives Pi the complete persisted evidence and capture contex
   const queued = await service.enqueue(input);
   const job = await queue.getJob(queued.jobId);
   await service.checkpoint();
-  const modelInput = JSON.parse(String(contexts[0]?.messages[0]?.content)) as {
-    context: { cwd: string };
-    entries: Array<{ text: string }>;
-  };
+  const { input: modelInput, conversation } = decodeProviderContext(contexts[0]!);
 
   // Assert.
   assert.equal(job?.snapshot.entries[0]?.text.length, evidence.length);
   assert.equal(job?.snapshot.policy.length, policy.length);
-  assert.equal(modelInput.entries[0]?.text.length, evidence.length);
+  assert.equal(conversation[0]?.text.length, evidence.length);
+  assert.deepEqual(conversation, job?.snapshot.entries);
+  assert.ok(conversation.some(entry => entry.id === "assistant-1"),
+    "Assistant history stays visible without being advertised as independent evidence");
+  assert.deepEqual(modelInput.eligibleEvidence, [{ id: "user-1", role: "user" }]);
+  assert.equal(modelInput.entries, undefined);
+  assert.equal(modelInput.conversationCoverage, "legacy-partial");
   assert.equal(modelInput.context.cwd.length, cwd.length);
   assert.match(String(contexts[0]?.systemPrompt), new RegExp(`${policy.slice(-100)}$`));
+});
+
+test("tool evidence correction explains observation as well as verified changes", async (t) => {
+  // Arrange: a failed read is an observation, not a user decision or successful change.
+  const directory = await mkdtemp(join(tmpdir(), "capture-observation-feedback-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const contexts: Context[] = [];
+  const model = new PiMemoryModel({
+    find: () => ({ provider: "fake", id: "memory" }) as any,
+    complete: async (_model, context) => {
+      contexts.push(structuredClone(context));
+      return providerTool("observation-feedback", "submit_capture_candidates", {
+        candidates: [{ id: "read-failure", title: "Receipt unavailable",
+          content: "The receipt read returned ENOENT; rollout remains unverified.",
+          context: "Observed verification gap", keywords: [], tags: [],
+          sourceEntryIds: ["failed-read"],
+          evidenceType: contexts.length === 1 ? "userDecision" : "observation" }],
+      });
+    },
+  }, { provider: "fake", id: "memory" });
+  const service = new CaptureService({ queue, client: new FakeClient(), model,
+    instanceId: "instance-a", getMode: () => "observe" });
+  const input = { ...snapshot(), mode: "observe" as const };
+  input.entries.push({ id: "failed-read", role: "toolResult", toolName: "read",
+    text: "ENOENT: receipt not found", isError: true });
+
+  // Act.
+  const queued = await service.enqueue(input);
+  await service.checkpoint();
+
+  // Assert: actionable correction reaches the provider, and the permitted observation is accepted.
+  assert.equal(contexts.length, 2);
+  const feedback = contexts[1]!.messages.find(message => message.role === "toolResult");
+  assert.match(JSON.stringify(feedback), /verifiedToolChange or observation/);
+  assert.equal((await queue.getJob(queued.jobId))?.status, "complete");
 });
 
 test("capture file records disabled and unsuccessful settlements as skipped", async (t) => {
@@ -391,6 +433,7 @@ class FakeModel implements MemoryModelClient {
     purpose: string;
     policy: string;
     input: unknown;
+    conversation?: readonly unknown[];
   }> = [];
   private readonly responses: unknown[];
 
@@ -398,15 +441,12 @@ class FakeModel implements MemoryModelClient {
     this.responses = responses;
   }
 
-  async complete(request: {
-    purpose: "classification" | "capture" | "overlap";
-    policy: string;
-    input: unknown;
-  }): Promise<unknown> {
+  async complete(request: ModelRequest): Promise<unknown> {
     this.requests.push({
       purpose: request.purpose,
       policy: request.policy,
       input: request.input,
+      conversation: request.conversation,
     });
     const response = this.responses.shift();
     if (response instanceof Error) throw response;
@@ -476,14 +516,7 @@ test("capture candidate submission retries through the durable checkpoint flow",
     find: () => ({ provider: "fake", id: "memory" }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
-      const firstContent = context.messages[0]?.content;
-      const input = typeof firstContent === "string"
-        ? JSON.parse(firstContent) as Record<string, unknown>
-        : {};
-      if (Array.isArray(input.entries)) {
-        if (!context.tools?.[0]) {
-          return providerText(JSON.stringify({ candidates: [validCandidate] }));
-        }
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
         if (captureAttempts === 1) {
           return providerTool("capture-1", "submit_capture_candidates", {
@@ -524,10 +557,8 @@ test("capture candidate submission retries through the durable checkpoint flow",
   // Assert.
   assert.deepEqual(result.errors, []);
   assert.equal(captureAttempts, 3);
-  const captureContexts = contexts.filter((context) => {
-    const content = context.messages[0]?.content;
-    return typeof content === "string" && content.includes('"entries"');
-  });
+  const captureContexts = contexts.filter(context =>
+    context.tools?.[0]?.name === "submit_capture_candidates");
   const candidateTool = captureContexts[0]?.tools?.[0];
   assert.equal(candidateTool?.name, "submit_capture_candidates");
   assert.match(candidateTool?.description ?? "", /when no durable.*candidates.*\[\]/i);
@@ -557,10 +588,12 @@ test("capture candidate submission retries through the durable checkpoint flow",
   assert.deepEqual(candidateProperties.evidenceType?.enum, [
     "userDecision",
     "verifiedToolChange",
+    "observation",
   ]);
   assert.match(candidateProperties.sourceEntryIds?.description ?? "", /never.*assistant/i);
   assert.match(candidateProperties.evidenceType?.description ?? "", /userDecision.*user/i);
   assert.match(candidateProperties.evidenceType?.description ?? "", /verifiedToolChange.*tool/i);
+  assert.match(candidateProperties.evidenceType?.description ?? "", /observation.*source/i);
   assert.equal(candidateProperties.entities?.items?.type, "object");
   const feedback = captureContexts[1]?.messages.at(-1) as Record<string, any>;
   assert.equal(feedback.role, "toolResult");
@@ -600,11 +633,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
     }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
-      const firstContent = context.messages[0]?.content;
-      const input = typeof firstContent === "string"
-        ? JSON.parse(firstContent) as Record<string, unknown>
-        : {};
-      if (Array.isArray(input.entries)) {
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
         if (captureAttempts === 1) {
           return providerTool("capture-invalid-evidence", "submit_capture_candidates", {
@@ -794,8 +823,7 @@ test("capture corrects overlong stored fields and preserves service-sized resour
     }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
-      const input = JSON.parse(String(context.messages[0]?.content)) as Record<string, unknown>;
-      if (Array.isArray(input.entries)) {
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
         const candidate = captureAttempts === 1
           ? {
@@ -881,11 +909,7 @@ test("capture overlap submission retries through the durable checkpoint flow", a
     find: () => ({ provider: "fake", id: "memory" }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
-      const firstContent = context.messages[0]?.content;
-      const input = typeof firstContent === "string"
-        ? JSON.parse(firstContent) as Record<string, unknown>
-        : {};
-      if (Array.isArray(input.entries)) {
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         return providerTool("capture-1", "submit_capture_candidates", {
           candidates: [candidate],
         });
@@ -940,10 +964,8 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   // Assert.
   assert.deepEqual(result.errors, []);
   assert.equal(overlapAttempts, 2);
-  const overlapContexts = contexts.filter((context) => {
-    const content = context.messages[0]?.content;
-    return typeof content === "string" && content.includes('"candidate"');
-  });
+  const overlapContexts = contexts.filter(context =>
+    context.tools?.[0]?.name === "submit_capture_decision");
   const decisionTool = overlapContexts[0]?.tools?.[0];
   assert.equal(decisionTool?.name, "submit_capture_decision");
   assert.match(decisionTool?.description ?? "", /create.*skip.*supersede.*escalate/i);
@@ -1026,11 +1048,8 @@ test("exhausted overlap submission skips one candidate and continues siblings", 
   const registry: ModelRegistryPort = {
     find: () => ({ provider: "fake", id: "memory" }) as any,
     complete: async (_model, context) => {
-      const content = context.messages[0]?.content;
-      const input = typeof content === "string"
-        ? JSON.parse(content) as Record<string, any>
-        : {};
-      if (Array.isArray(input.entries)) {
+      const { input } = decodeProviderContext(context);
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         return providerTool("capture-1", "submit_capture_candidates", { candidates });
       }
       if (input.candidate?.id === "invalid-overlap") {
@@ -1199,8 +1218,7 @@ test("capture corrects stored context instead of truncating it for provenance", 
     }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
-      const input = JSON.parse(String(context.messages[0]?.content)) as Record<string, unknown>;
-      if (Array.isArray(input.entries)) {
+      if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
         return providerTool(`capture-context-${captureAttempts}`, "submit_capture_candidates", {
           candidates: [{
@@ -2732,7 +2750,7 @@ test("partial memory 87 resolution submits a complete revision retaining unaffec
     assert.deepEqual((tool.parameters as any).required,
       ["title", "content", "context", "keywords", "tags", "importance", "sourceEntryIds",
         "documentIds", "codeArtifactIds", "entityIds", "memoryIds", "fileIds", "sourceFiles"]);
-    const modelInput = JSON.parse(String(f.contexts[0]!.messages[0]!.content));
+    const { input: modelInput } = decodeProviderContext(f.contexts[0]!);
     assert.deepEqual(modelInput.oldMemory, f.old);
     assert.deepEqual(modelInput.candidate, f.conflict.candidate);
     assert.equal(modelInput.oldClaim, "Local development uses PostgreSQL.");
@@ -3016,7 +3034,7 @@ test("resolution gives fresh predecessor claims to the model without an equality
       await f.service.resolveConflict(f.conflict.id, f.input);
 
       // Assert: the model sees the current record and its explicit replacement is executed.
-      const supplied = JSON.parse(String(f.contexts[0]!.messages[0]!.content));
+      const { input: supplied } = decodeProviderContext(f.contexts[0]!);
       assert.deepEqual(supplied.oldMemory, current);
       assert.equal(f.client.created[0]!.content, f.revision.content);
       assert.deepEqual(f.client.created[0]!.file_ids, []);

@@ -28,7 +28,7 @@ function session(entries: SessionEntry[]): SnapshotSessionReader {
   };
 }
 
-test("capture snapshot contains only the new safe conversation delta", () => {
+test("capture snapshot retains earlier safe evidence while its marker tracks only new work", () => {
   const entries = [
     messageEntry(
       "old-user",
@@ -93,13 +93,15 @@ test("capture snapshot contains only the new safe conversation delta", () => {
   assert.deepEqual(
     result.snapshot?.entries.map((entry) => [entry.id, entry.role]),
     [
+      ["old-user", "user"],
+      ["old-assistant", "assistant"],
       ["new-user", "user"],
       ["new-assistant", "assistant"],
     ],
   );
-  assert.match(result.snapshot?.entries[0]?.text ?? "", /\[redacted\]/);
+  assert.match(result.snapshot?.entries[2]?.text ?? "", /\[redacted\]/);
   assert.doesNotMatch(
-    result.snapshot?.entries[0]?.text ?? "",
+    result.snapshot?.entries[2]?.text ?? "",
     /sk-abcdefghijklmnopqrstuvwxyz/,
   );
 });
@@ -205,7 +207,7 @@ test("a stale capture marker fails closed instead of replaying the active branch
   assert.match(result.reason, /active branch/);
 });
 
-test("failed edit evidence is excluded even when the tool name is allowlisted", () => {
+test("failed edit evidence preserves the observed failure and its original tool metadata", () => {
   const entries = [
     messageEntry(
       "user",
@@ -217,8 +219,10 @@ test("failed edit evidence is excluded even when the tool name is allowlisted", 
       {
         role: "toolResult",
         toolName: "edit",
+        toolCallId: "edit-call",
         isError: true,
         content: [{ type: "text", text: "The edit failed." }],
+        details: { status: 409, password: "fixture-secret" },
         timestamp: 2,
       },
       "user",
@@ -245,10 +249,10 @@ test("failed edit evidence is excluded even when the tool name is allowlisted", 
     includeToolEvidence: () => true,
   });
   assert.equal(result.status, "ready");
-  assert.equal(
-    result.snapshot.entries.some((entry) => entry.id === "failed-edit"),
-    false,
-  );
+  assert.deepEqual(result.snapshot.entries.find((entry) => entry.id === "failed-edit"), {
+    id: "failed-edit", role: "toolResult", toolName: "edit", toolCallId: "edit-call",
+    isError: true, text: "The edit failed.", details: { status: 409, password: "[redacted]" },
+  });
 });
 
 test("capture snapshot preserves complete evidence beyond the old character budgets", () => {

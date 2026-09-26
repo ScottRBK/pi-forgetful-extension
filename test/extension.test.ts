@@ -29,7 +29,7 @@ type Handler = (event: any, context: any) => Promise<unknown> | unknown;
 interface FakeCapture extends CaptureServicePort {
   enqueued: CaptureSnapshot[];
   checkpoints: Array<{ sessionId?: string; branchId?: string }>;
-  advanced: Array<{ sessionId: string; branchId: string; entryIds: string[] }>;
+  advanced: Array<Parameters<NonNullable<CaptureServicePort["advanceWatermark"]>>[0]>;
   stopped: Array<{ sessionId?: string; branchId?: string }>;
   conflicts: unknown[];
   resolutions: Array<{ id: string; value: unknown }>;
@@ -197,6 +197,7 @@ async function harness(
     getSessionId: () => "session-1",
     getLeafId: () => leaf,
     getBranch: () => entries,
+    getEntries: () => entries,
   };
   const ctx: any = {
     cwd: root,
@@ -274,6 +275,14 @@ async function harness(
     },
     sendUserMessage(content: unknown, sendOptions: unknown) {
       sentUserMessages.push({ content, options: sendOptions });
+    },
+    appendEntry(customType: string, data: unknown) {
+      const id = `custom-${entries.length}`;
+      entries.push({
+        type: "custom", id, parentId: entries.at(-1)?.id ?? null,
+        timestamp: new Date().toISOString(), customType, data,
+      });
+      leaf = id;
     },
     exec: async () => ({
       code: options.gitRemote ? 0 : 1,
@@ -1668,10 +1677,14 @@ for (const selectDocument of [true, false]) {
   });
 }
 
-test("empty search skips review and injects nothing", async () => {
-  // Arrange.
+test("empty search allows review and injects nothing when review finds no context", async () => {
+  // Arrange: an empty atomic search still permits review of other stored knowledge.
   let reviewed = false;
-  const fixture = await recallReviewHarness(() => { reviewed = true; return {}; }, {
+  const fixture = await recallReviewHarness((input) => {
+    reviewed = true;
+    assert.deepEqual(input.availableSources.memoryIds, []);
+    return { summary: "", memoryIds: [], reason: "No relevant stored context was found." };
+  }, {
     fetchImpl: async () => new Response(JSON.stringify({
       primary_memories: [], linked_memories: [],
     })),
@@ -1683,11 +1696,15 @@ test("empty search skips review and injects nothing", async () => {
       type: "before_agent_start", prompt: "Context size?", systemPrompt: "base",
     });
     await waitForRecallTerminal(fixture);
-    // Assert: no unnecessary external review request when there is nothing to judge.
+    // Assert: a valid empty review supplies no historical context to the main agent.
     assert.match(JSON.stringify(initial), /memory-decision-pending/);
-    assert.equal(reviewed, false);
-    assert.match(String(latestRecallMessage(fixture, "completion").content), /no-context/);
-    assert.match(fixture.notifications.join("\n"), /no-matches/);
+    assert.equal(reviewed, true);
+    const terminal = latestRecallMessage(fixture, "completion");
+    assert.equal(terminal.details?.status, "no-context");
+    assert.match(String(terminal.content), /no-context/);
+    assert.doesNotMatch(String(terminal.content), /historical context —|Sources:/);
+    assert.match(fixture.notifications.join("\n"), /review-no-relevant-results/);
+    assert.doesNotMatch(fixture.notifications.join("\n"), /failed|review validation debug/);
   } finally {
     await fixture.cleanup();
   }
@@ -2235,7 +2252,9 @@ for (const queryIntent of ["", "   "]) {
           return new Response(JSON.stringify({ primary_memories: [], linked_memories: [] }));
         },
       }), {
-        async complete() {
+        async complete(request) {
+          if (request.purpose === "recall-review")
+            return { summary: "", memoryIds: [], reason: "No stored database decision." };
           return {
             search, queries: search ? ["database"] : [], entities: [],
             queryIntent: search ? "Find database decisions" : queryIntent,
@@ -2270,6 +2289,8 @@ for (const queryIntent of ["", "   "]) {
         });
         await waitForRecallTerminal(fixture, 5);
         assert.equal(searches, 1, "valid no-search decisions must not open the failure circuit");
+        assert.equal(latestRecallMessage(fixture, "completion").details?.status, "no-context");
+        assert.doesNotMatch(fixture.notifications.join("\n"), /failed|circuit-open/);
       } finally {
         await fixture.cleanup();
       }
@@ -2317,11 +2338,18 @@ test("search plans require intent and debug identifies the search decision", asy
 
 test("debug reports search exceptions for automatic and manual recall", async () => {
   // Arrange: real recall and REST adapter, with an external service returning HTTP 503.
+  let reviews = 0;
   const service = new RecallService(new ApiForgetfulClient({
     baseUrl: "http://localhost:8020/api/v1",
     fetchImpl: async () => new Response("{}", { status: 503 }),
   }), {
-    async complete() {
+    async complete(request) {
+      if (request.purpose === "recall-review") {
+        reviews += 1;
+        const input = request.input as { searchDiagnostic?: string };
+        assert.match(input.searchDiagnostic ?? "", /ForgetfulHttpError:.*HTTP 503: \{\}/);
+        return { summary: "", memoryIds: [], reason: "Search failed; no evidence was retrieved." };
+      }
       return { search: true, queries: ["decisions"], queryIntent: "History", entities: [] };
     },
   });
@@ -2338,8 +2366,10 @@ test("debug reports search exceptions for automatic and manual recall", async ()
     assert.match(JSON.stringify(initial), /memory-decision-pending/);
 
     // Assert: the failure names the step, exception and HTTP status.
+    assert.equal(reviews, 1);
     let notifications = fixture.notifications.join("\n");
     assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);
+    assert.match(notifications, /HTTP 503: \{\}/);
     assert.doesNotMatch(notifications, /completed|no-matches/);
     assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
 
@@ -2679,6 +2709,7 @@ test("controls persist capture, enablement, debug, and project scope safely", as
 });
 
 test("skip and off advance the range while observe enqueues evidence", async () => {
+  // Arrange/Act: explicitly skip the first settled work, then capture the next run.
   const skipped = await harness();
   try {
     await skipped.emit("session_start", {
@@ -2692,11 +2723,34 @@ test("skip and off advance the range while observe enqueues evidence", async () 
     skipped.entries.push(
       entry("skip-assistant", "skip-user", "assistant", "done", "stop"),
     );
+    skipped.setLeaf("skip-assistant");
     await skipped.emit("agent_settled", { type: "agent_settled" });
     assert.equal(skipped.capture.enqueued.length, 0);
     assert.deepEqual(skipped.capture.advanced[0]?.entryIds, [
       "skip-user",
       "skip-assistant",
+    ]);
+    assert.equal(skipped.capture.advanced[0]?.finalEntryId, "skip-assistant");
+
+    skipped.entries.push(
+      entry("keep-user", skipped.entries.at(-1)!.id, "user", "retain the next decision"),
+      entry("keep-assistant", "keep-user", "assistant", "next decision saved", "stop"),
+    );
+    skipped.setLeaf("keep-assistant");
+    await skipped.emit("agent_settled", { type: "agent_settled" });
+
+    // Assert: the processed boundary and explicit exclusion do not remove visible history.
+    assert.equal(skipped.capture.enqueued.length, 1);
+    const snapshot = skipped.capture.enqueued[0]!;
+    assert.equal(snapshot.processedThroughEntryId, "skip-assistant");
+    assert.equal(snapshot.conversationCoverage, "complete");
+    assert.deepEqual(snapshot.entries.map((item) => item.id), ["keep-user", "keep-assistant"]);
+    assert.deepEqual((snapshot.conversation as Array<Record<string, any>>)
+      .filter((item) => item.type === "message")
+      .map((item) => [item.id, item.message.content]), [
+      ["root", "session root"],
+      ["skip-user", "do not retain this"], ["skip-assistant", "done"],
+      ["keep-user", "retain the next decision"], ["keep-assistant", "next decision saved"],
     ]);
   } finally {
     await skipped.cleanup();
@@ -2713,8 +2767,13 @@ test("skip and off advance the range while observe enqueues evidence", async () 
     observed.entries.push(
       entry("observe-assistant", "observe-user", "assistant", "done", "stop"),
     );
+    observed.setLeaf("observe-assistant");
     await observed.emit("agent_settled", { type: "agent_settled" });
     assert.equal(observed.capture.enqueued.length, 1);
+    assert.equal(observed.capture.enqueued[0]?.processedThroughEntryId, "root");
+    assert.deepEqual(observed.capture.enqueued[0]?.entries.map((item) => item.id), [
+      "observe-user", "observe-assistant",
+    ]);
     assert.doesNotMatch(
       observed.capture.enqueued[0]?.policy ?? "",
       /Return exactly one JSON object/,
@@ -2731,11 +2790,37 @@ test("skip and off advance the range while observe enqueues evidence", async () 
     off.entries.push(
       entry("off-assistant", "off-user", "assistant", "done", "stop"),
     );
+    off.setLeaf("off-assistant");
     await off.emit("agent_settled", { type: "agent_settled" });
     assert.equal(off.capture.enqueued.length, 0);
     assert.deepEqual(off.capture.advanced[0]?.entryIds, [
       "off-user",
       "off-assistant",
+    ]);
+    assert.equal(off.capture.advanced[0]?.finalEntryId, "off-assistant");
+
+    const processedBoundary = off.ctx.sessionManager.getLeafId();
+    await off.command("on");
+    await off.emit("session_start", { type: "session_start", reason: "resume" });
+    off.entries.push(
+      entry("on-user", processedBoundary, "user", "capture this later decision"),
+      entry("on-assistant", "on-user", "assistant", "later decision saved", "stop"),
+    );
+    off.setLeaf("on-assistant");
+    await off.emit("agent_settled", { type: "agent_settled" });
+
+    // Assert: reloading the runtime preserves exclusion while retaining the full conversation.
+    assert.equal(off.capture.enqueued.length, 1);
+    const snapshot = off.capture.enqueued[0]!;
+    assert.equal(snapshot.processedThroughEntryId, processedBoundary);
+    assert.equal(snapshot.conversationCoverage, "complete");
+    assert.deepEqual(snapshot.entries.map((item) => item.id), ["on-user", "on-assistant"]);
+    assert.deepEqual((snapshot.conversation as Array<Record<string, any>>)
+      .filter((item) => item.type === "message")
+      .map((item) => [item.id, item.message.content]), [
+      ["root", "session root"],
+      ["off-user", "do not capture"], ["off-assistant", "done"],
+      ["on-user", "capture this later decision"], ["on-assistant", "later decision saved"],
     ]);
   } finally {
     await off.cleanup();
@@ -3723,6 +3808,7 @@ test("startup recovery and escalation handoff stay on the originating branch", a
       additionalEntries: [
         { id: "user-1", role: "user", text: "Please settle this" },
       ],
+      conversation: fixture.entries,
     });
   } finally {
     await fixture.cleanup();

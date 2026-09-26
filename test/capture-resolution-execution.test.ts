@@ -8,6 +8,7 @@ import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 async function fixture(
   t: import("node:test").TestContext, partial = false, autoLinks = "0",
@@ -72,7 +73,7 @@ async function fixture(
     find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
     complete: async (_model, context) => {
       state.calls++;
-      state.inputs.push(JSON.parse(context.messages[0]!.content as string));
+      state.inputs.push(decodeProviderContext(context).input);
       return { role: "assistant", api: "test", provider: "test", model: "memory",
         content: [{ type: "toolCall", id: "revision", name: context.tools![0]!.name,
           arguments: state.reply }], stopReason: "toolUse", timestamp: Date.now(),

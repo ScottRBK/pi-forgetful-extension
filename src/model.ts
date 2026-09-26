@@ -10,11 +10,15 @@ import type {
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import { validateToolCall } from "@earendil-works/pi-ai";
+import type { CompactionSettings } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
+import type { TSchema } from "typebox";
 import {
   ModelSubmissionError,
   type MemoryModelClient,
   type ModelRequest,
   type ModelSubmissionTool,
+  type ModelReadTool,
 } from "./contracts.ts";
 import {
   DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
@@ -22,6 +26,7 @@ import {
 } from "./config.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import type { DiagnosticLogger } from "./logging.ts";
+import { evidenceMessage, MemoryTaskContext } from "./model-context.ts";
 
 export interface ModelRegistryPort {
   find(provider: string, modelId: string): Model<any> | undefined;
@@ -56,6 +61,8 @@ export interface PiMemoryModelOptions {
   sessionId?: string;
   /** Public pi-ai header transform for provider-specific background request preparation. */
   transformHeaders?: MemoryModelHeaderTransform;
+  /** Persisted Pi settings; unsaved host settings are not exposed through ExtensionContext. */
+  compactionSettings?: CompactionSettings;
 }
 
 function textContent(message: AssistantMessage): string {
@@ -225,7 +232,7 @@ function textBlock(text: string): TextContent {
   return { type: "text", text };
 }
 
-function submissionTool(submission: ModelSubmissionTool): Tool {
+function submissionTool(submission: ModelSubmissionTool | ModelReadTool): Tool {
   return {
     name: submission.name,
     description: submission.description,
@@ -300,6 +307,8 @@ interface RequestDeadline {
   callerAbort: Promise<never>;
   timeout: Promise<never>;
   readonly timedOut: boolean;
+  providerCalls: number;
+  compactionCalls: number;
   cleanup(): void;
 }
 
@@ -328,6 +337,8 @@ function requestDeadline(
     timer.unref?.();
   });
   return {
+    providerCalls: 0,
+    compactionCalls: 0,
     controller,
     callerAbort,
     timeout,
@@ -364,6 +375,7 @@ export class PiMemoryModel implements MemoryModelClient {
   private readonly sessionId?: string;
   private readonly transformHeaders?: MemoryModelHeaderTransform;
   private readonly logger?: DiagnosticLogger;
+  private readonly compactionSettings?: CompactionSettings;
 
   constructor(
     private readonly registry: ModelRegistryPort,
@@ -378,6 +390,7 @@ export class PiMemoryModel implements MemoryModelClient {
     this.sessionId = options.sessionId || undefined;
     this.transformHeaders = options.transformHeaders;
     this.logger = options.logger;
+    this.compactionSettings = options.compactionSettings;
     if (
       !Number.isFinite(this.classificationTimeoutMs) ||
       this.classificationTimeoutMs <= 0
@@ -458,6 +471,8 @@ export class PiMemoryModel implements MemoryModelClient {
       const context: Context = {
         systemPrompt: sanitizeText(request.policy),
         messages: [
+          ...(request.conversation ?? []).map((record, index) =>
+            evidenceMessage(record, `Historical record ${index + 1}`, Date.now())),
           {
             role: "user",
             content: serializeInput(request.input),
@@ -465,7 +480,8 @@ export class PiMemoryModel implements MemoryModelClient {
           },
         ],
         ...(request.submission
-          ? { tools: [submissionTool(request.submission)] }
+          ? { tools: [submissionTool(request.submission),
+            ...(request.readTools ?? []).map(submissionTool)] }
           : {}),
       };
       const options = requestOptions(
@@ -474,6 +490,19 @@ export class PiMemoryModel implements MemoryModelClient {
         this.transformHeaders,
         deadline.controller.signal,
       );
+      const taskContext = new MemoryTaskContext(
+        model, context.messages.at(-1)!, this.compactionSettings,
+      );
+      const prepare = () => taskContext.prepare(
+        context, deadline.controller.signal, this.sessionId,
+        async (summaryContext, summaryOptions) => {
+          const response = await this.completeAttempt(model, summaryContext,
+            { ...options, maxTokens: summaryOptions.maxTokens },
+            request, deadline, deadline.compactionCalls + 1, "compaction");
+          ensureCompletionFinished(response, request, deadline.timedOut, false);
+          return response;
+        },
+      );
       if (request.submission) {
         return await this.completeWithSubmission(
           model,
@@ -481,14 +510,19 @@ export class PiMemoryModel implements MemoryModelClient {
           options,
           request,
           deadline,
+          prepare,
         );
       }
+      await prepare();
       const response = await this.completeAttempt(model, context, options, request, deadline, 1);
 
       return parseCompletionResponse(response, request, deadline.timedOut);
     } catch (error) {
       throwRequestFailure(error, request);
     } finally {
+      this.emit("info", "model.calls", request, {
+        providerCalls: deadline.providerCalls, compactionCalls: deadline.compactionCalls,
+      });
       deadline.cleanup();
     }
   }
@@ -500,10 +534,14 @@ export class PiMemoryModel implements MemoryModelClient {
     request: ModelRequest,
     deadline: RequestDeadline,
     attempt: number,
+    kind: "task" | "compaction" = "task",
   ): Promise<AssistantMessage> {
+    if (deadline.controller.signal.aborted) throw new Error("Memory model request aborted");
     const started = performance.now();
-    this.emit("info", "model.attempt", request, { attempt });
-    this.emit("debug", "model.request", request, { attempt, context });
+    const call = ++deadline.providerCalls;
+    if (kind === "compaction") deadline.compactionCalls++;
+    this.emit("info", "model.attempt", request, { attempt, call, kind });
+    this.emit("debug", "model.request", request, { attempt, call, kind, context });
     let response: AssistantMessage;
     try {
       response = await Promise.race([
@@ -513,19 +551,48 @@ export class PiMemoryModel implements MemoryModelClient {
       ]);
     } catch (error) {
       this.emit("info", "model.attempt_error", request, {
-        attempt, elapsedMs: performance.now() - started,
+        attempt, call, kind, elapsedMs: performance.now() - started,
       });
       this.emit("debug", "model.attempt_error_detail", request, {
-        attempt, error: rejectionText(error),
+        attempt, call, kind, error: rejectionText(error),
       });
       throw error;
     }
     // Preserve provider output before parsing or submission validation can reject it.
-    this.emit("debug", "model.response", request, { attempt, response });
+    this.emit("debug", "model.response", request, { attempt, call, kind, response });
     this.emit("info", "model.attempt_completed", request, {
-      attempt, elapsedMs: performance.now() - started,
+      attempt, call, kind, elapsedMs: performance.now() - started,
     });
     return response;
+  }
+
+  private async executeRead(
+    read: ModelReadTool,
+    call: ToolCall,
+    request: ModelRequest,
+    deadline: RequestDeadline,
+  ): Promise<ToolResultMessage> {
+    try {
+      if (deadline.controller.signal.aborted) throw new Error("Memory model request aborted");
+      validateToolCall([submissionTool(read)], call);
+      // The SDK validator may coerce values. Only original arguments authorize execution.
+      const schema = read.parameters as TSchema;
+      if (!Value.Check(schema, call.arguments)) {
+        throw new Error(JSON.stringify([...Value.Errors(schema, call.arguments)]));
+      }
+      const value = await Promise.race([
+        read.execute(call.arguments, deadline.controller.signal),
+        deadline.callerAbort,
+        deadline.timeout,
+      ]);
+      return {
+        role: "toolResult", toolCallId: call.id, toolName: call.name,
+        content: [textBlock(serializeInput(value))], isError: false, timestamp: Date.now(),
+      };
+    } catch (error) {
+      if (request.signal?.aborted || deadline.timedOut) throw error;
+      return errorToolResult(call, rejectionText(error));
+    }
   }
 
   private async completeWithSubmission(
@@ -534,6 +601,7 @@ export class PiMemoryModel implements MemoryModelClient {
     options: ModelsSimpleStreamOptions,
     request: ModelRequest,
     deadline: RequestDeadline,
+    prepare: () => Promise<void>,
   ): Promise<unknown> {
     const submission = request.submission!;
     const tool = submissionTool(submission);
@@ -547,15 +615,28 @@ export class PiMemoryModel implements MemoryModelClient {
       rejections.push(safeReason);
       submission.onRejection?.(safeReason, input);
     };
-    for (let attempt = 1; attempt <= MAX_SUBMISSION_ATTEMPTS; attempt++) {
+    let rejected = 0;
+    for (let attempt = 1; rejected < MAX_SUBMISSION_ATTEMPTS; attempt++) {
+      await prepare();
       const response = await this.completeAttempt(
         model, context, options, request, deadline, attempt,
       );
       ensureCompletionFinished(response, request, deadline.timedOut, true);
       const calls = toolCalls(response);
+      const reads = request.readTools ?? [];
+      if (calls.length > 0 && calls.every((call) =>
+        reads.some((read) => read.name === call.name))) {
+        context.messages.push(sanitizedAssistantForHistory(response));
+        for (const call of calls) {
+          const read = reads.find((item) => item.name === call.name)!;
+          context.messages.push(await this.executeRead(read, call, request, deadline));
+        }
+        continue;
+      }
       if (calls.length !== 1) {
         const base = `Call ${submission.name} exactly one time; received ` +
           `${calls.length} tool calls.`;
+        rejected++;
         recordRejection(attempt, base);
         appendCallCountCorrection(context, response, calls, submission.name, base);
         continue;
@@ -564,12 +645,20 @@ export class PiMemoryModel implements MemoryModelClient {
       const call = calls[0]!;
       try {
         validateToolCall([tool], call);
-        // Pi may coerce types or remove optional nulls. Domain rules validate the original input.
-        return submission.validate(call.arguments);
+        // Pi may coerce values. Both schema and domain checks apply to the original input.
+        const schema = submission.parameters as TSchema;
+        const schemaError = Value.Check(schema, call.arguments) ? undefined :
+          new Error(JSON.stringify([...Value.Errors(schema, call.arguments)]));
+        // Keep actionable domain diagnostics. A corrected return value (or mutation) cannot
+        // override the schema result captured from the original arguments before validation.
+        const result = submission.validate(call.arguments);
+        if (schemaError) throw schemaError;
+        return result;
       } catch (error) {
         const reason = rejectionText(error);
         // Recovery may retain independently valid batch items. Wrong-tool arguments must never
         // reach that path; the original provider response remains available in private diagnostics.
+        rejected++;
         recordRejection(attempt, reason,
           call.name === submission.name ? call.arguments : undefined);
         context.messages.push(

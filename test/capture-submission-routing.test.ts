@@ -10,6 +10,7 @@ import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { decodeProviderContext } from "./provider-context.ts";
 
 test("wrong-name batch submissions cannot authorize capture writes", realOptions, async (t) => {
   // Arrange: real private submission validation, real service, scripted external provider replies.
@@ -38,7 +39,7 @@ test("wrong-name batch submissions cannot authorize capture writes", realOptions
           ({ candidateId, action: "create" })) };
       } else {
         // If the invalid decisions leak, allow review to finish so actual unauthorized writes show.
-        const input = JSON.parse(context.messages[0]!.content as string);
+        const input = decodeProviderContext(context).input;
         args = { reviews: input.candidates.map((item: { candidateId: string;
           memories: Array<{ id: number }> }) => ({ candidateId: item.candidateId,
           decisions: item.memories.map((memory) => ({ memoryId: memory.id,

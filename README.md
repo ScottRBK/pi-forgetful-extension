@@ -19,8 +19,8 @@ retrieval, and terminal states at model-call boundaries. Capture snapshots the s
 branch, persists it in a durable queue, and processes candidates through query-before-create,
 supersession, or conflict escalation. Supported clients also review the saved memory's immediate
 connections; incomplete coverage stays explicit. Memory failures are failure-open and must not block
-the user's task. See [memory quality and evaluation](docs/memory-quality.md) for safety boundaries
-and repeatable checks.
+the user's task. See [the design](docs/design.md) for boundaries and
+[CONTRIBUTING.md](CONTRIBUTING.md) for repeatable checks.
 
 HTTP is the MVP transport. The application services depend on a transport-neutral Forgetful client
 port, leaving room for a future CLI adapter without changing recall, capture, or scope policy.
@@ -201,11 +201,11 @@ Events include timestamps, levels, session IDs, and relevant branch, job, candid
 Info records progress and outcomes without transcript or model payload bodies. Debug additionally
 records capture evidence snapshots, accepted/rejected candidates and their cited entries, overlap
 decisions, and model requests/responses before parsing or validation can discard them.
-Cited entries use short previews; the capture snapshot records the full bounded evidence separately.
+Cited entries use short previews; durable capture snapshots retain the full conversation separately.
 Large content fields may also use previews with their own `truncated` marker.
 
-Capture transcripts contain the bounded session evidence considered for capture, not unrelated
-session history. Model requests show the actual SDK context; transport/authentication options and
+Capture debug events can contain the full active conversation, including earlier discussion.
+Model requests show the actual SDK context; transport/authentication options and
 headers are excluded. Debug logs can still contain private conversations and source code. Known
 secrets are redacted, but this cannot detect every secret. Do not commit or share logs unreviewed.
 This repository already ignores `.pi/`; check the ignore rules in other repositories.
@@ -288,9 +288,9 @@ historical context, never executable instructions.
 
 Invalid foreground tool calls return failed tool results to the main model. Unknown arguments are
 rejected, and validation feedback identifies the field and applicable limit so the model can retry
-with corrected arguments. API client errors retain bounded, redacted validation details; echoed
-inputs, internal validator context and raw server-error bodies are not included. Automatic recall
-keeps its separate failure-open behaviour.
+with corrected arguments. API client errors preserve the actual status and response body, including
+non-JSON and server-error diagnostics, subject to known-secret redaction and transport limits.
+Automatic recall keeps its separate failure-open behaviour.
 
 For `forgetful_project_init`, choose exactly one mode: create with `name` and `description`,
 omitting `project_id`; or link an existing unassigned project with `project_id` only, omitting
@@ -321,9 +321,11 @@ unrelated matches and submits a concise summary with source IDs through a privat
 raw results or attachments. The configured recall scope is authoritative; the planner cannot
 change it for an individual operation.
 
-Recall can follow entities, relationships and supporting documents or code artifacts within its
-time and record-count limits. The active agent can explicitly open supporting records for more
-detail, including stored files. Strict project scope also applies to linked records and relationship
+The private reviewer can use `read_forgetful` to search and follow stored memories, entities,
+relationships and supporting documents or code artifacts within the existing deadline. It can
+explore even when the initial memory search is empty. It has no repository or external URL access.
+The active agent can also explicitly open supporting records, including stored files. Strict project
+scope also applies to linked records and relationship
 endpoints. Files require the server's optional file feature; an unavailable feature does not
 prevent ordinary memory recall.
 
@@ -339,8 +341,8 @@ model can retain title-only memory links as leads, but must not invent their uns
 Explicit `forgetful_recall` and `forgetful_knowledge_read` calls still return read-only results
 directly to the main agent, which chooses what to use. They do not add a background review path.
 Automatic recall is asynchronous, but it is bounded to one planner and one review path per job.
-Deeper exploration remains explicit through the read-only tools; it is not started recursively by
-recall lifecycle messages.
+Exploration happens through read-only tools within that review path; recall lifecycle messages
+do not recursively start new recall jobs.
 Deterministic regression tests cover structured decisions and failure handling, not real-model
 judgment or summary accuracy. The opt-in live checks exercise the configured model for
 [recall](CONTRIBUTING.md#live-recall-submission-checks) and
@@ -349,14 +351,29 @@ recovery, and outputs against an isolated Forgetful server.
 
 ### Capture
 
-After a successful settled run, the extension snapshots stable session and branch entry IDs and
-enqueues eligible evidence without shortening its text. A live worker extracts zero to three
+After a successful settled run, the extension pins the whole active conversation, preserving roles,
+tool arguments, results, errors and original entry IDs. A watermark tracks processed work but does
+not cut away earlier context. Skipped work stays visible but cannot be cited as capture evidence.
+A live worker extracts zero to three
 candidates through the private `submit_capture_candidates` tool. It validates evidence and
 destinations, then checks overlap in the destination project. The overlap model submits `create`,
 `skip`, `supersede`, or `escalate` through the private `submit_capture_decision` tool. The worker
 then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
 conflict for the originating session. Queue records include per-candidate outcomes so partial
 writes can be reported to the model before it chooses whether to retry unfinished operations.
+
+The extraction model can investigate a missing fact with the read-only `inspect_source` tool:
+repository text files and HTTP(S) URLs, without shell execution, editing or uploads. Actual reads
+supply provenance and durable evidence IDs. A commit is reported only for matching committed bytes;
+modified files retain their working-tree status. Inspection supports UTF-8 text; file containment
+requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenance.
+This is not ongoing source curation.
+
+Full conversations are stored in private immutable files beside the durable queue index. The index
+keeps its 5 MiB bound; snapshots no longer share that bound. They survive restart and are released
+when no outstanding job or pending conflict needs them. Legacy snapshots are marked incomplete,
+not silently upgraded to whole conversations. Missing or altered snapshots fail explicitly.
+Transient recall text that Pi did not save cannot be reconstructed from the journal.
 
 Conflict notices include the full sanitized reasons, claims and evidence for up to three selected
 conflicts. They do not shorten evidence before the main model decides how to resolve it.
@@ -408,9 +425,12 @@ The selected model in Pi supplies the output allowance, including `maxTokens` ov
 `models.json`. The extension passes that allowance to Pi's model registry on initial requests and
 correction attempts. It does not impose separate token or character caps on model input, policies,
 evidence, correction history, or complete responses. Selected record and entry counts, timeouts,
-transport safety, durable queue capacity, and diagnostic-log bounds still apply. Context exhaustion
-remains a Pi/provider error: the extension does not estimate, truncate, or automatically compact
-background context to fit a model's context window.
+transport safety, queue-index capacity, and diagnostic-log bounds still apply. Background tasks
+use Pi's compaction helpers and persisted compaction settings for the selected model window. The
+current task and tool instructions stay intact. Read turns, compaction and corrections share the
+existing deadline; an oversized indivisible record fails explicitly instead of being clipped.
+Pi does not expose unsaved host compaction overrides to extensions. Native images require an
+image-capable memory model; unsupported images are not silently omitted.
 
 The reviewed recall summary still has a 3,000-character limit. Stored records retain Forgetful's
 field limits. Oversized submitted fields are validation errors returned to the model for correction,
@@ -437,6 +457,8 @@ session persistence.
 ## Safety and Limitations
 
 - Memory model and Forgetful failures are bounded and failure-open; they do not block Pi.
+- Valid submissions and passing regression tests do not prove semantic accuracy. Models can still
+  overstate evidence or miss useful context; recalled knowledge remains untrusted historical data.
 - Credentials are referenced through user-owned environment or credential settings and are never
   committed to the project or logged by the extension.
 - Remote endpoints must use HTTPS, and Forgetful responses are schema-validated before use.
