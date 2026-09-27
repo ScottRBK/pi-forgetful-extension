@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
   mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { DurableQueueStore, type PendingConflict } from "../src/queue.ts";
 import type { CaptureSnapshot } from "../src/contracts.ts";
@@ -79,6 +81,54 @@ test("DurableQueueStore persists one fixed snapshot and deduplicates a settled e
   assert.equal(persisted.jobs.length, 1);
   assert.equal(persisted.jobs[0]?.snapshot.id, "snapshot-assistant-1");
   assert.equal((await stat(join(directory, "queue.json"))).mode & 0o777, 0o600);
+});
+
+test("sequential job reads release full snapshots within a bounded heap", async (t) => {
+  // Arrange: 192 MiB of distinct payloads exceed the reader's 128 MiB heap in aggregate.
+  // One 8 MiB payload fits comfortably, including parsing and caller-owned copies.
+  const directory = await mkdtemp(join(tmpdir(), "queue-sequential-memory-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const jobIds: string[] = [];
+  for (let index = 0; index < 24; index += 1) {
+    const input = snapshot(`assistant-${index}`);
+    const text = `${index}: ${"history ".repeat(512 * 1024)}`;
+    input.entries[0]!.text = text;
+    input.conversation = [{ id: `history-${index}`, type: "message",
+      message: { role: "user", content: text } }];
+    input.conversationCoverage = "complete";
+    jobIds.push((await queue.enqueue(input)).jobId);
+  }
+  const queueModule = new URL("../src/queue.ts", import.meta.url).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { DurableQueueStore } from ${JSON.stringify(queueModule)};
+    const [directory, encodedIds] = process.argv.slice(1);
+    const jobIds = JSON.parse(encodedIds);
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    async function readJob(index) {
+      const job = await queue.getJob(jobIds[index]);
+      const text = index + ": " + "history ".repeat(512 * 1024);
+      assert.equal(job.snapshot.entries[0].text, text);
+      assert.equal(job.snapshot.conversation[0].message.content, text);
+      assert.equal(job.snapshot.conversationCoverage, "complete");
+    }
+    for (let index = 0; index < jobIds.length; index += 1) {
+      await readJob(index);
+      await new Promise(setImmediate);
+      global.gc();
+    }
+    process.stdout.write("Read all 24 full snapshots");
+  `;
+
+  // Act: a fresh reader releases each result before requesting the next job.
+  const { stdout } = await promisify(execFile)(process.execPath, [
+    "--max-old-space-size=128", "--expose-gc", "--import", import.meta.resolve("tsx"),
+    "--input-type=module", "--eval", script, directory, JSON.stringify(jobIds),
+  ], { cwd: directory, timeout: 60_000 });
+
+  // Assert: every full payload was read successfully under the fixed heap budget.
+  assert.equal(stdout, "Read all 24 full snapshots");
 });
 
 test("undefined conflict patch fields preserve the persisted decision", async () => {

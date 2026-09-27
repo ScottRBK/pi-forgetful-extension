@@ -3488,7 +3488,8 @@ export class CaptureService {
     } else if (this.sessionId && this.branchId) {
       requestedBranch = { sessionId: this.sessionId, branchId: this.branchId };
     }
-    const jobs = await this.queue.listPending(this.identity);
+    const jobs = (await this.queue.listJobMetadata(this.identity))
+      .filter((job) => ["pending", "running", "paused"].includes(job.status));
     const allBranches = [
       ...new Map(
         jobs.map((job) => [
@@ -3543,7 +3544,7 @@ export class CaptureService {
     limit?: number;
   }): Promise<CaptureDiagnostics> {
     const limit = Math.max(1, Math.min(20, options?.limit ?? 20));
-    const jobs = (await this.queue.listJobs(this.identity))
+    const jobs = (await this.queue.listJobMetadata(this.identity))
       .filter(
         (job) =>
           (!options?.sessionId ||

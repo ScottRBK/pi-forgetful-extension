@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1273,6 +1273,37 @@ test("capture stores the complete semantic context without appended provenance",
   );
 });
 
+test("capture diagnostics stay bounded without opening pending transcripts", async (t) => {
+  // Arrange: more pending jobs than diagnostics can show; none of their sidecars is readable.
+  const directory = await mkdtemp(join(tmpdir(), "capture-metadata-diagnostics-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const jobIds: string[] = [];
+  for (let index = 0; index < 22; index += 1) {
+    const input = snapshot();
+    input.id = `snapshot-${index}`;
+    input.finalEntryId = `assistant-${index}`;
+    input.entries[1]!.id = input.finalEntryId;
+    jobIds.push((await queue.enqueue(input)).jobId);
+  }
+  for (const name of await readdir(directory)) {
+    if (name.startsWith("snapshot-")) await rm(join(directory, name));
+  }
+  const service = new CaptureService({ queue, client: new FakeClient(),
+    model: new FakeModel(), instanceId: "instance-a" });
+
+  // Act: inspect recent jobs and an older, specifically selected job.
+  const recent = await service.diagnostics({ limit: 100 });
+  const selected = await service.diagnostics({ sessionId: "session-1", branchId: "branch-1",
+    jobId: jobIds[0], limit: 1 });
+
+  // Assert: the cap and filters still apply even when transcripts cannot be loaded.
+  assert.equal(recent.jobs.length, 20);
+  assert.deepEqual(recent.jobs.map((job) => job.id), jobIds.slice(2));
+  assert.deepEqual(selected, { jobs: [{ id: jobIds[0], status: "pending", attempts: 0,
+    callCount: 0, sessionId: "session-1", branchId: "branch-1", candidates: [] }], conflicts: [] });
+});
+
 test("capture diagnostics expose bounded outcomes without transcript text", async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-diagnostics-"),
@@ -2542,6 +2573,32 @@ test("capture keeps extraction plus overlap judgment within four model calls", a
     ["capture", "overlap", "overlap", "overlap"],
   );
   assert.equal(client.created.length, 3);
+});
+
+test("a checkpoint does not load snapshots for branches outside its job budget", async (t) => {
+  // Arrange: another branch has unavailable evidence, but the requested branch is ready.
+  const directory = await mkdtemp(join(tmpdir(), "capture-branch-discovery-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const unrelated = snapshot();
+  unrelated.context.branchId = "unrelated-branch";
+  unrelated.entries[0]!.text = "Evidence for the unrelated branch.";
+  await queue.enqueue(unrelated);
+  const sidecar = (await readdir(directory)).find((name) => name.startsWith("snapshot-"))!;
+  const requested = await queue.enqueue(snapshot());
+  await rm(join(directory, sidecar));
+  const service = new CaptureService({ queue, client: new FakeClient(),
+    model: new FakeModel({ candidates: [] }), instanceId: "instance-a",
+    maxJobsPerCheckpoint: 1 });
+
+  // Act: the requested branch consumes the whole checkpoint budget.
+  const result = await service.checkpoint({ sessionId: "session-1", branchId: "branch-1" });
+
+  // Assert: unrelated evidence cannot prevent the selected job from completing.
+  assert.equal(result.processed, 1);
+  assert.deepEqual(result.processedJobIds, [requested.jobId]);
+  assert.deepEqual(result.errors, []);
+  assert.equal((await queue.getJob(requested.jobId))?.status, "complete");
 });
 
 test("a settle checkpoint sweeps bound branches within one total job budget", async () => {

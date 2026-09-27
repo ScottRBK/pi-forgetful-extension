@@ -63,6 +63,10 @@ export interface QueueJob {
   ownerPid?: number;
 }
 
+export interface QueueJobMetadata extends Omit<QueueJob, "snapshot"> {
+  snapshot: Omit<CaptureSnapshot, "entries" | "conversation">;
+}
+
 export interface PendingConflict {
   id: string;
   jobId?: string;
@@ -330,10 +334,6 @@ export class DurableQueueStore {
   private readonly retentionMs: number;
   private readonly now: () => Date;
   private readonly snapshotPrefix: string;
-  private readonly snapshotCache = new Map<string, {
-    stamp: string;
-    payload: SnapshotPayload;
-  }>();
 
   constructor(options: DurableQueueStoreOptions | string = {}) {
     const resolved =
@@ -390,12 +390,8 @@ export class DurableQueueStore {
     const handle = await open(this.snapshotPath(digest),
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
-      const details = await handle.stat({ bigint: true });
+      const details = await handle.stat();
       if (!details.isFile()) throw new Error("Capture snapshot must be a regular file");
-      const stamp = [details.dev, details.ino, details.size,
-        details.mtimeNs, details.ctimeNs].join();
-      const cached = this.snapshotCache.get(digest);
-      if (cached?.stamp === stamp) return cached.payload;
       const encoded = await handle.readFile("utf8");
       if (createHash("sha256").update(encoded).digest("hex") !== digest)
         throw new Error("Capture snapshot digest mismatch");
@@ -403,7 +399,6 @@ export class DurableQueueStore {
       if (!Array.isArray(payload.entries) ||
           (payload.conversation !== undefined && !Array.isArray(payload.conversation)))
         throw new Error("Invalid capture snapshot payload");
-      this.snapshotCache.set(digest, { stamp, payload });
       return payload;
     } finally { await handle.close(); }
   }
@@ -438,13 +433,14 @@ export class DurableQueueStore {
   }
 
   private async hydrateJob(job: StoredQueueJob): Promise<QueueJob> {
-    const { snapshotDigest, inspectionDigest, ...publicJob } = job;
+    const { snapshotDigest, inspectionDigest, snapshot, ...metadata } = job;
     const payload = snapshotDigest ? await this.readSnapshot(snapshotDigest)
-      : job.snapshot;
+      : snapshot;
     const inspections = inspectionDigest
       ? (await this.readSnapshot(inspectionDigest)).entries : [];
-    return jsonSnapshot({ ...publicJob, snapshot: { ...job.snapshot, ...payload,
-      entries: [...payload.entries, ...inspections] } });
+    // Payloads belong to this read, so only metadata needs the JSON copy's undefined handling.
+    return { ...jsonSnapshot(metadata), snapshot: { ...snapshot, ...payload,
+      entries: [...payload.entries, ...inspections] } };
   }
 
   private releaseTerminalSnapshot(state: QueueState, job: StoredQueueJob): void {
@@ -501,7 +497,6 @@ export class DurableQueueStore {
       const path = this.snapshotPath(digest);
       if (retained.has(path)) continue;
       await rm(path, { force: true });
-      this.snapshotCache.delete(digest);
     }
     await this.syncDirectory();
   }
@@ -911,6 +906,17 @@ export class DurableQueueStore {
       value: await Promise.all((identity
         ? state.jobs.filter((job) => identityMatches(job, identity))
         : state.jobs).map((job) => this.hydrateJob(job))),
+    }));
+  }
+
+  /** Read bounded index metadata without opening transcript or inspection sidecars. */
+  async listJobMetadata(identity?: QueueIdentity): Promise<QueueJobMetadata[]> {
+    return this.mutate((state) => ({ changed: false,
+      value: state.jobs.filter((job) => !identity || identityMatches(job, identity))
+        .map(({ snapshotDigest, inspectionDigest, snapshot, ...metadata }) => {
+          const { entries, conversation, ...snapshotMetadata } = snapshot;
+          return { ...metadata, snapshot: snapshotMetadata };
+        }),
     }));
   }
 
