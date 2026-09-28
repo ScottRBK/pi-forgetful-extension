@@ -3205,10 +3205,16 @@ export function createForgetfulExtension(
         notify(ctx, "Usage: /forgetful capture auto|observe|off|skip", "error");
         return;
       }
-      await resetRuntime(ctx, runtime);
-      await updateUserSettings(runtime.config.paths.userSettings, {
-        capture_mode: value,
-      });
+      const previousMode = runtime.config.captureMode;
+      runtime.config.captureMode = value;
+      try {
+        await updateUserSettings(runtime.config.paths.userSettings, {
+          capture_mode: value,
+        });
+      } catch (error) {
+        runtime.config.captureMode = previousMode;
+        throw error;
+      }
       notify(ctx, `Forgetful capture set to ${value}.`);
     };
 

@@ -793,7 +793,7 @@ test("info file logs never inherit private errors from terminal debug verbosity"
   }
 });
 
-test("capture off still completes while the log filesystem is stalled",
+test("turning Forgetful off still completes while the log filesystem is stalled",
   { skip: process.platform !== "linux", timeout: 5_000 }, async () => {
     // Arrange: use the actual command path and a real blocked filesystem write.
     const fixture = await harness();
@@ -812,14 +812,14 @@ test("capture off still completes while the log filesystem is stalled",
 
       // Act.
       const started = performance.now();
-      await fixture.command("capture off");
+      await fixture.command("off");
 
       // Assert: the control takes effect without waiting for the FIFO reader.
       assert.ok(performance.now() - started < 1_000);
       const settings = JSON.parse(await readFile(
         join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
       ));
-      assert.equal(settings.capture_mode, "off");
+      assert.equal(settings.enabled, false);
       assert.ok(fixture.notifications.some(text => text.includes("file logging failed")));
     } finally {
       await released;
@@ -827,6 +827,52 @@ test("capture off still completes while the log filesystem is stalled",
       await fixture.cleanup();
     }
   });
+
+test("capture off completes while a background capture checkpoint is still running", async () => {
+  // Arrange: load the runtime while its initial background capture checkpoint remains blocked.
+  const fixture = await harness();
+  let releaseCheckpoint!: (value: CaptureCheckpointResult) => void;
+  let markCheckpointStarted!: () => void;
+  const checkpointStarted = new Promise<void>((resolve) => {
+    markCheckpointStarted = resolve;
+  });
+  const checkpoint = new Promise<CaptureCheckpointResult>((resolve) => {
+    releaseCheckpoint = resolve;
+  });
+  fixture.capture.checkpoint = async () => {
+    markCheckpointStarted();
+    return checkpoint;
+  };
+  let captureOff: Promise<void> | undefined;
+  try {
+    await Promise.all([fixture.command("status"), checkpointStarted]);
+
+    // Act: use the public command while capture work is still pending.
+    captureOff = fixture.command("capture off");
+    const outcome = await Promise.race([
+      captureOff.then(() => "completed" as const),
+      new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 100)),
+    ]);
+
+    // Assert: Pi's command handler is released and the setting is persisted immediately.
+    assert.equal(outcome, "completed");
+    const settings = JSON.parse(await readFile(
+      join(fixture.agentDir, "forgetful", "settings.json"), "utf8",
+    ));
+    assert.equal(settings.capture_mode, "off");
+    assert.ok(fixture.notifications.some((text) => text.includes("capture set to off")));
+  } finally {
+    releaseCheckpoint({
+      processed: 0,
+      processedJobIds: [],
+      paused: true,
+      errors: [],
+    });
+    await captureOff;
+    await fixture.emit("session_shutdown", {});
+    await fixture.cleanup();
+  }
+});
 
 test("file logging commands persist independently and status shows only on or off", async () => {
   // Arrange: terminal output remains quiet while file logging is changed.
