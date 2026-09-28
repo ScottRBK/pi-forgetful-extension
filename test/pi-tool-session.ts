@@ -9,7 +9,8 @@ import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  createAssistantMessageEventStream, type AssistantMessage, type ToolResultMessage,
+  createAssistantMessageEventStream, type AssistantMessage, type JsonObject,
+  type ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import {
   createForgetfulExtension, type ForgetfulExtensionDependencies,
@@ -54,8 +55,10 @@ export async function createToolSession(
       const call = typeof entry === "function" ? entry(results) : entry;
       const message: AssistantMessage = {
         role: "assistant", api: "faux", provider: "validation-test", model: model.id,
-        content: call ? [{ type: "toolCall", id: `call-${next}`, ...call }]
-          : [{ type: "text", text: "Validation checks finished." }],
+        content: call ? [{
+          type: "toolCall", id: `call-${next}`, name: call.name,
+          arguments: call.arguments as JsonObject,
+        }] : [{ type: "text", text: "Validation checks finished." }],
         stopReason: call ? "toolUse" : "stop", timestamp: Date.now(),
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },

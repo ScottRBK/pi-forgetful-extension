@@ -9,12 +9,12 @@ import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  createAssistantMessageEventStream, type AssistantMessage, type Context,
+  createAssistantMessageEventStream, type AssistantMessage, type Context, type JsonObject,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { DurableQueueStore } from "../src/queue.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import { decodeProviderContext, providerTools } from "./provider-context.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
 const sourceText = "Delivery requires a signed digital handover.\n";
@@ -68,7 +68,7 @@ async function fixture(t: TestContext) {
   const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"),
     modelsPath: null, refreshOnCreate: false });
   let inspectionId: string | undefined, extracted = false;
-  let resolution: Record<string, unknown> | undefined;
+  let resolution: JsonObject | undefined;
   let notifyHandoff!: (id: string) => void;
   const handoff = new Promise<string>((resolve) => { notifyHandoff = resolve; });
   const handoffs: string[] = [];
@@ -80,15 +80,16 @@ async function fixture(t: TestContext) {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
     streamSimple(model, context: Context) {
       const message = reply(model.id);
-      let name: string | undefined, args: Record<string, unknown> | undefined;
+      let name: string | undefined, args: JsonObject | undefined;
       if (model.id === "main" && resolution) {
         name = "forgetful_resolve";
         args = resolution;
         resolution = undefined;
       } else if (model.id === "memory") {
-        name = context.tools?.[0]?.name;
+        const tools = providerTools(context);
+        name = tools[0]?.name;
         if (name === "submit_capture_candidates") {
-          assert.deepEqual(context.tools?.map((tool) => tool.name),
+          assert.deepEqual(tools.map((tool) => tool.name),
             ["submit_capture_candidates", "inspect_source"]);
           const inspected = context.messages.find((item) =>
             item.role === "toolResult" && item.toolName === "inspect_source");
@@ -105,19 +106,23 @@ async function fixture(t: TestContext) {
             inspectionResults.push(result);
             assert.equal(result.result.status, "ok");
             assert.equal(result.result.content, sourceText);
-            inspectionId = result.evidenceEntry.id;
+            const observedId = result.evidenceEntry.id;
+            assert.equal(typeof observedId, "string");
+            inspectionId = observedId;
             extracted = true;
             args = { candidates: [{ id: "delivery", title: "Delivery handover",
               content: sourceText.trim(), context: "Observed delivery requirement",
               keywords: ["delivery"], tags: [], evidenceType: "observation",
-              sourceEntryIds: [inspectionId], sourceFiles: ["delivery.txt"] }] };
+              sourceEntryIds: [observedId], sourceFiles: ["delivery.txt"] }] };
           }
         } else if (name === "submit_capture_decision") {
+          assert.ok(inspectionId);
           args = { action: "escalate", conflictingMemoryId: old.id,
             reason: "Confirm the changed handover requirement", sourceEntryIds: [inspectionId],
             oldClaim: "Use a paper handover.", newClaim: sourceText.trim() };
         } else if (name === "submit_memory_revision") {
           const { input } = decodeProviderContext(context);
+          assert.ok(inspectionId);
           assert.ok(input.evidenceEntryIds.includes(inspectionId));
           args = { title: "Delivery handover", content: sourceText.trim(),
             context: "Confirmed delivery requirement", keywords: ["delivery"], tags: [],

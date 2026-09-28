@@ -1,5 +1,17 @@
 import assert from "node:assert/strict";
-import type { Context } from "@earendil-works/pi-ai";
+import {
+  getCurrentSystemPrompt, getCurrentTools, type Context, type Tool,
+} from "@earendil-works/pi-ai";
+
+/** Read tools from the normalized transcript passed to Pi v0.87+ providers. */
+export function providerTools(context: Pick<Context, "messages">): Tool[] {
+  return getCurrentTools(context.messages);
+}
+
+/** Read the prompt from the normalized transcript passed to Pi v0.87+ providers. */
+export function providerSystemPrompt(context: Pick<Context, "messages">): string {
+  return getCurrentSystemPrompt(context.messages);
+}
 
 /** Decode the public provider messages without treating historical JSON as the current task. */
 export function decodeProviderContext(context: Context): {

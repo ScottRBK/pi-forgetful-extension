@@ -14,7 +14,7 @@ import {
   createAssistantMessageEventStream, type AssistantMessage,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import { decodeProviderContext, providerTools } from "./provider-context.ts";
 
 for (const outcome of ["shutdown", "navigation"] as const) {
   test(`real Pi refuses a late foreground update during ${outcome} drain`,
@@ -101,7 +101,7 @@ for (const outcome of ["shutdown", "navigation"] as const) {
           maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         })),
         streamSimple(model, context) {
-          const submission = context.tools?.[0]?.name;
+          const submission = providerTools(context)[0]?.name;
           const capture = model.id === "memory" && submission === "submit_capture_candidates";
           const input = capture ? decodeProviderContext(context).input : {};
           const evidence = input.eligibleEvidence?.find(

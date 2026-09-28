@@ -387,8 +387,8 @@ export class KnowledgeReadService {
   private appendEntityLines(lines: string[], entities: Entity[]): void {
     if (entities.length > 0) lines.push("Entities:");
     for (const entity of entities) {
-      lines.push(`- Entity #${entity.id}: ${clean(entity.name)}`);
-      lines.push(`  Type: ${clean(entity.entity_type)}`);
+      lines.push(`- Entity #${entity.id}: ${clean(entity.name)}`,
+        `  Type: ${clean(entity.entity_type)}`);
       if (entity.notes) {
         lines.push(`  Notes: ${clean(entity.notes)}`);
       }

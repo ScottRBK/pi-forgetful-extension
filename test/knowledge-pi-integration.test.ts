@@ -9,7 +9,7 @@ import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  createAssistantMessageEventStream, type AssistantMessage, type Context,
+  createAssistantMessageEventStream, type AssistantMessage, type Context, type JsonObject,
 } from "@earendil-works/pi-ai";
 import type { ForgetfulClient, MemoryInput, Project } from "../src/contracts.ts";
 import { createForgetfulExtension } from "../src/extension.ts";
@@ -262,8 +262,11 @@ test("real Pi encodes knowledge and the model explicitly reuses IDs on an unchan
           const call = operation ? await operation() : undefined;
           const message: AssistantMessage = {
             role: "assistant", api: "faux", provider: "test", model: model.id,
-            content: call ? [{ type: "toolCall", id: `call-${index}`, ...call }] :
-              [{ type: "text", text: "Coverage: API documented; deployment details are missing." }],
+            content: call ? [{
+              type: "toolCall", id: `call-${index}`, name: call.name,
+              arguments: call.arguments as JsonObject,
+            }] : [{ type: "text", text:
+              "Coverage: API documented; deployment details are missing." }],
             stopReason: call ? "toolUse" : "stop", timestamp: Date.now(),
             usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },

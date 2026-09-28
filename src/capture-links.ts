@@ -164,6 +164,51 @@ export async function prepareLinkReview(
   return { status: "pending", memory, memories, automaticIds, unreviewed, resources };
 }
 
+function validateLinkDecisions(
+  decisions: LinkDecision[], review: CaptureLinkReview, edges: Map<string, boolean>,
+): void {
+  const selected = review.memories ?? [];
+  const ids = new Set<number>();
+  for (const decision of decisions) {
+    if (ids.has(decision.memoryId) ||
+        !selected.some((memory) => memory.id === decision.memoryId) ||
+        !decision.reason.trim() || hasSensitiveData(decision.reason)) {
+      throw new Error("Link judgment requires distinct supplied full records and a safe reason");
+    }
+    ids.add(decision.memoryId);
+    if (decision.action === "add" || decision.action === "reject") {
+      const key = [review.memory!.id, decision.memoryId].sort((a, b) => a - b).join(":");
+      const wanted = wantsEdge(decision);
+      if (edges.has(key) && edges.get(key) !== wanted)
+        throw new Error("Contradictory judgments for a bidirectional memory link");
+      edges.set(key, wanted);
+    }
+  }
+  if (ids.size !== selected.length) throw new Error("Every selected endpoint needs a judgment");
+}
+
+function validatePreservation(
+  preservation: PreservationDecision | undefined, review: CaptureLinkReview,
+): void {
+  const previous = review.previous;
+  if (!previous) {
+    if (preservation) throw new Error("Unexpected preservation judgment");
+    return;
+  }
+  if (!preservation) throw new Error("Replacement needs a preservation judgment");
+  for (const [ids, supplied] of [[preservation.documentIds,
+    [...previous.documents, ...(review.resources?.documents ?? [])]],
+    [preservation.codeArtifactIds,
+      [...previous.codeArtifacts, ...(review.resources?.codeArtifacts ?? [])]],
+    [preservation.entityIds, previous.entities]] as const) {
+    if (new Set(ids).size !== ids.length ||
+        ids.some((id) => !supplied.some((r) => r.id === id)))
+      throw new Error("Preservation may reference only supplied scoped records");
+  }
+  if (!preservation.reason.trim() || hasSensitiveData(preservation.reason))
+    throw new Error("Preservation needs a safe reason");
+}
+
 export function validateLinkReviews(
   value: unknown, inputs: Array<{ candidateId: string; review: CaptureLinkReview }>,
 ): Map<string, { decisions: LinkDecision[]; preservation?: PreservationDecision }> {
@@ -179,40 +224,8 @@ export function validateLinkReviews(
     const input = inputs.find((entry) => entry.candidateId === item.candidateId);
     if (!input || accepted.has(item.candidateId))
       throw new Error("Unknown or duplicate candidate ID");
-    const selected = input.review.memories ?? [];
-    const ids = new Set<number>();
-    for (const decision of item.decisions) {
-      if (ids.has(decision.memoryId) ||
-          !selected.some((memory) => memory.id === decision.memoryId) ||
-          !decision.reason.trim() || hasSensitiveData(decision.reason)) {
-        throw new Error("Link judgment requires distinct supplied full records and a safe reason");
-      }
-      ids.add(decision.memoryId);
-      if (decision.action === "add" || decision.action === "reject") {
-        const key = [input.review.memory!.id, decision.memoryId].sort((a, b) => a - b).join(":");
-        const wanted = wantsEdge(decision);
-        if (edges.has(key) && edges.get(key) !== wanted)
-          throw new Error("Contradictory judgments for a bidirectional memory link");
-        edges.set(key, wanted);
-      }
-
-    }
-    if (ids.size !== selected.length) throw new Error("Every selected endpoint needs a judgment");
-    if (input.review.previous) {
-      if (!item.preservation) throw new Error("Replacement needs a preservation judgment");
-      const previous = input.review.previous;
-      for (const [ids, supplied] of [[item.preservation.documentIds,
-        [...previous.documents, ...(input.review.resources?.documents ?? [])]],
-        [item.preservation.codeArtifactIds,
-          [...previous.codeArtifacts, ...(input.review.resources?.codeArtifacts ?? [])]],
-        [item.preservation.entityIds, previous.entities]] as const) {
-        if (new Set(ids).size !== ids.length ||
-            ids.some((id) => !supplied.some((r) => r.id === id)))
-          throw new Error("Preservation may reference only supplied scoped records");
-      }
-      if (!item.preservation.reason.trim() || hasSensitiveData(item.preservation.reason))
-        throw new Error("Preservation needs a safe reason");
-    } else if (item.preservation) throw new Error("Unexpected preservation judgment");
+    validateLinkDecisions(item.decisions, input.review, edges);
+    validatePreservation(item.preservation, input.review);
     accepted.set(item.candidateId, { decisions: item.decisions, preservation: item.preservation });
   }
   if (accepted.size !== inputs.length) throw new Error("Every candidate needs a link review");

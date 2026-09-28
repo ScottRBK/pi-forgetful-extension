@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import { decodeProviderContext, providerTools } from "./provider-context.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
@@ -66,7 +66,7 @@ test("real Pi capture rechecks trust synchronously after final endpoint authoriz
         input: ["text"], contextWindow: 32000, maxTokens: 2048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
       streamSimple(model, context) {
-        const name = model.id === "memory" ? context.tools?.[0]?.name : undefined;
+        const name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
         let args: unknown;
         if (name) {
           const { input } = decodeProviderContext(context);

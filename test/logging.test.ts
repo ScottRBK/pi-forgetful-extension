@@ -213,7 +213,7 @@ test("oversized Unicode events become marked valid JSONL within the exact byte l
   }
   for (const line of text.trimEnd().split("\n")) {
     assert.ok(Buffer.byteLength(line + "\n") <= 256);
-    assert.ok(!line.includes("�"));
+    assert.ok(!line.includes("\uFFFD"));
   }
 });
 
@@ -238,7 +238,7 @@ test("rotation retains only the newest three files and respects UTF8 file byte l
     const file = join(directory, name);
     const bytes = await readFile(file);
     assert.ok(bytes.length <= 300);
-    assert.ok(!bytes.toString("utf8").includes("�"));
+    assert.ok(!bytes.toString("utf8").includes("\uFFFD"));
     retained.push(...await events(file));
   }
   assert.deepEqual(retained.map(row => row.event).sort(), ["event-7", "event-8", "event-9"]);

@@ -217,11 +217,19 @@ function hasValue(values: string[], value: string): boolean {
 }
 
 function instructionId(plan: KnowledgeWritePlan): string {
-  const { expectedClaim: _deprecated, ...instruction } = plan;
+  const instruction = Object.fromEntries(
+    Object.entries(plan).filter(([key]) => key !== "expectedClaim"),
+  );
   const json = JSON.stringify(instruction, (_key, value: unknown) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return value;
     const object = value as Record<string, unknown>;
-    return Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
+    // Persisted receipt hashes use UTF-16 key order, independent of the host locale.
+    const keys = Object.keys(object).sort((left, right) => {
+      if (left < right) return -1;
+      if (left > right) return 1;
+      return 0;
+    });
+    return Object.fromEntries(keys.map((key) => [key, object[key]]));
   });
   return createHash("sha256").update(json).digest("hex");
 }
@@ -313,14 +321,8 @@ export class KnowledgeWriter {
     if (!plan.operationId.trim()) {
       throw new Error("Missing knowledge operation ID");
     }
-    const groups = [plan.entities, plan.documents, plan.codeArtifacts, plan.relationships];
-    for (const resources of groups) {
-      const keys = new Set<string>();
-      for (const resource of resources ?? []) {
-        if (keys.has(resource.key)) throw new Error(`Duplicate knowledge key: ${resource.key}`);
-        keys.add(resource.key);
-      }
-    }
+    for (const resources of [plan.entities, plan.documents, plan.codeArtifacts, plan.relationships])
+      this.validateResourceKeys(resources ?? []);
     for (const resource of plan.entities ?? []) {
       if (resource.existingId === undefined &&
           (!resource.input.project_ids.length ||
@@ -335,17 +337,28 @@ export class KnowledgeWriter {
     }
   }
 
+  private validateResourceKeys(resources: { key: string }[]): void {
+    const keys = new Set<string>();
+    for (const resource of resources) {
+      if (keys.has(resource.key)) throw new Error(`Duplicate knowledge key: ${resource.key}`);
+      keys.add(resource.key);
+    }
+  }
+
   private async createOnce<T extends { id: number }>(
-    kind: string,
-    key: string,
+    operation: {
+      kind: string;
+      key: string;
+      create: () => Promise<T>;
+      authorize?: () => Promise<void>;
+    },
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
-    create: () => Promise<T>,
-    authorize?: () => Promise<void>,
   ): Promise<T> {
+    const { kind, key, create, authorize } = operation;
     const attempt = JSON.stringify([plan.operationId, kind, key]);
     if (state.pendingCreates?.includes(attempt)) {
       throw new Error(
@@ -362,7 +375,10 @@ export class KnowledgeWriter {
     } catch (error) {
       // No API call was made: this attempt is safe to retry after authorization changes.
       state.pendingCreates = state.pendingCreates.filter((item) => item !== attempt);
-      try { await save(); } finally { throw error; }
+      try { await save(); } catch {
+        // A failed checkpoint must not replace the original authorization diagnostic.
+      }
+      throw error;
     }
     // Leave the attempt pending on failure. Preserve the original error without repair.
     const created = await create();
@@ -387,8 +403,9 @@ export class KnowledgeWriter {
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce("entity", resource.key, plan, state, save, signal, beforeWrite,
-      () => this.client.createEntity(resource.input, signal));
+    return this.createOnce({ kind: "entity", key: resource.key,
+      create: () => this.client.createEntity(resource.input, signal),
+    }, plan, state, save, signal, beforeWrite);
   }
 
   private async writeEntities(
@@ -422,8 +439,9 @@ export class KnowledgeWriter {
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce("document", resource.key, plan, state, save, signal, beforeWrite,
-      () => this.client.createDocument(resource.input, signal));
+    return this.createOnce({ kind: "document", key: resource.key,
+      create: () => this.client.createDocument(resource.input, signal),
+    }, plan, state, save, signal, beforeWrite);
   }
 
   private async writeDocuments(
@@ -459,8 +477,9 @@ export class KnowledgeWriter {
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce("code artifact", resource.key, plan, state, save, signal, beforeWrite,
-      () => this.client.createCodeArtifact(resource.input, signal));
+    return this.createOnce({ kind: "code artifact", key: resource.key,
+      create: () => this.client.createCodeArtifact(resource.input, signal),
+    }, plan, state, save, signal, beforeWrite);
   }
 
   private async writeCodeArtifacts(
@@ -596,17 +615,18 @@ export class KnowledgeWriter {
       await authorize();
       const relationships = await this.client.getRelationships(sourceId, signal);
       const selected = relationships.find((item) => item.id === resource.existingId);
-      if (!selected || selected.source_entity_id !== sourceId ||
+      if (selected?.source_entity_id !== sourceId ||
           selected.target_entity_id !== targetId) {
         throw new Error("Selected relationship does not connect the requested entities");
       }
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce("relationship", resource.key, plan, state, save, signal,
-      beforeWrite, () => this.client.createRelationship({
+    return this.createOnce({ kind: "relationship", key: resource.key, authorize,
+      create: () => this.client.createRelationship({
         ...resource.input, source_entity_id: sourceId, target_entity_id: targetId,
-      }, signal), authorize);
+      }, signal),
+    }, plan, state, save, signal, beforeWrite);
   }
 
   private async writeRelationships(

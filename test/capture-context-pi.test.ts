@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
+import { providerTools } from "./provider-context.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
 for (const scenario of ["skip", "queued skip", "branched skip", "pinned settlement"] as const) {
@@ -50,7 +51,7 @@ for (const scenario of ["skip", "queued skip", "branched skip", "pinned settleme
         input: ["text"], contextWindow: 64_000, maxTokens: 2048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
       streamSimple(model, context) {
-        const capture = context.tools?.[0]?.name === "submit_capture_candidates";
+        const capture = providerTools(context)[0]?.name === "submit_capture_candidates";
         if (capture) receive(structuredClone(context));
         const message: AssistantMessage = {
           role: "assistant", api: "faux", provider: "context-test", model: model.id,

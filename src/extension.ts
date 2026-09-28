@@ -2987,10 +2987,10 @@ export function createForgetfulExtension(
             "recall-unavailable", "deadline-exceeded", "aborted", "circuit-open",
           ].includes(result.reason ?? "");
           if (unavailable) {
+            const detail = result.toolError ? ` ${result.toolError}` : "";
             const message = result.toolErrorFromForgetful
               ? result.toolError
-              : "Forgetful recall is unavailable." +
-                (result.toolError ? ` ${result.toolError}` : "");
+              : "Forgetful recall is unavailable." + detail;
             throw new Error(message || "Forgetful recall is unavailable.");
           }
           checkSession();

@@ -1275,16 +1275,9 @@ async function createCodeArtifact(
   );
 }
 
-async function replacementMemory(
-  client: ForgetfulClient,
-  knowledge: KnowledgeClient,
-  request: Record<string, unknown>,
-  context: KnowledgeToolContext,
-  projectId: number,
-  signal: AbortSignal | undefined,
-  beforeWrite: (() => Promise<void>) | undefined,
-  checkWriteState: () => void,
-): Promise<Memory> {
+async function replacementMemory(write: KnowledgeWriteContext): Promise<Memory> {
+  const { client, knowledge, request, context, projectId, signal, beforeWrite,
+    checkWriteState } = write;
   const replacementId = request.replacement_memory_id as number | undefined;
   if (replacementId !== undefined) {
     const replacement = await memoryInProject(client, replacementId, projectId, signal, true);
@@ -1363,7 +1356,7 @@ async function updateMemory(write: KnowledgeWriteContext): Promise<KnowledgeTool
 }
 
 async function supersedeMemory(write: KnowledgeWriteContext): Promise<KnowledgeToolResult> {
-  const { client, knowledge, request, context, projectId, signal, beforeWrite } = write;
+  const { client, request, projectId, signal, beforeWrite } = write;
   const oldMemory = await memoryInProject(
     client, request.memory_id as number, projectId, signal, true,
   );
@@ -1375,10 +1368,7 @@ async function supersedeMemory(write: KnowledgeWriteContext): Promise<KnowledgeT
     }
     throw new Error("The selected memory is already obsolete or was superseded differently.");
   }
-  const replacement = await replacementMemory(
-    client, knowledge, request, context, projectId, signal, beforeWrite,
-    write.checkWriteState,
-  );
+  const replacement = await replacementMemory(write);
   if (replacement.id === oldMemory.id) throw new Error("A memory cannot supersede itself.");
   await beforeMutation(beforeWrite, signal);
   const currentOld = await memoryInProject(client, oldMemory.id, projectId, signal, true);

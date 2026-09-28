@@ -25,7 +25,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import { decodeProviderContext, providerTools } from "./provider-context.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
 async function captureJobSettled(agentDir: string): Promise<boolean> {
@@ -154,11 +154,12 @@ test(
               };
             }
           }
+          const tools = providerTools(context);
           const captureDecision = model.id === "memory" &&
-            context.tools?.some((tool) => tool.name === "submit_capture_candidates");
+            tools.some((tool) => tool.name === "submit_capture_candidates");
           const overlapDecision = model.id === "memory" &&
             Boolean(input.candidate) &&
-            context.tools?.some((tool) => tool.name === "submit_capture_decision");
+            tools.some((tool) => tool.name === "submit_capture_decision");
           const message: AssistantMessage = {
             role: "assistant",
             api: "faux",

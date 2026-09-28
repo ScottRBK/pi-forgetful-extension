@@ -22,7 +22,7 @@ import type {
 import { DurableQueueStore } from "../src/queue.ts";
 import { FileLogger } from "../src/logging.ts";
 import { PiMemoryModel, type ModelRegistryPort } from "../src/model.ts";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, JsonObject } from "@earendil-works/pi-ai";
 import { decodeProviderContext } from "./provider-context.ts";
 
 for (const level of ["debug", "info", "off"] as const) {
@@ -477,7 +477,7 @@ function providerText(text: string): AssistantMessage {
 function providerTool(
   id: string,
   name: string,
-  args: Record<string, unknown>,
+  args: JsonObject,
 ): AssistantMessage {
   return providerResponse(
     [{ type: "toolCall", id, name, arguments: args }],

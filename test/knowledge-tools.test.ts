@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import type { JsonObject } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 
 import type {
@@ -25,13 +26,13 @@ const knowledgeReadTool = {
   parameters: KNOWLEDGE_READ_PARAMETERS,
 };
 
-function piRead(args: Record<string, unknown>) {
+function piRead(args: JsonObject) {
   return validateToolArguments(knowledgeReadTool, {
     type: "toolCall", id: "t", name: knowledgeReadTool.name, arguments: args,
   });
 }
 
-function piThenRuntime(args: Record<string, unknown>) {
+function piThenRuntime(args: JsonObject) {
   return validateKnowledgeReadRequest(piRead(args));
 }
 

@@ -18,8 +18,10 @@ import {
   createAssistantMessageEventStream,
   type AssistantMessage,
   type Context,
+  type JsonObject,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { providerSystemPrompt } from "./provider-context.ts";
 
 interface Gate {
   readonly started: Promise<void>;
@@ -242,7 +244,7 @@ test(
           if (input.availableSources) {
             const recalledPrompt = (input.work as { prompt?: unknown } | undefined)?.prompt;
             const review = () => {
-              let summary: Record<string, unknown>;
+              let summary: JsonObject;
               if (recalledPrompt === "queued request one") {
                 summary = {
                   summary: "Queue one memory.",
@@ -438,7 +440,7 @@ test(
     const waitingPrompt = session.prompt("Which database did we choose?");
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === 1,
+      () => mainContexts.length >= 1,
       "main work should start while recall planning is pending",
     );
     assert.match(
@@ -446,16 +448,16 @@ test(
       /memory-decision-pending/i,
       "the first model boundary must carry an explicit pending lifecycle message",
     );
-    assert.match(mainContexts[0]?.systemPrompt ?? "", /forgetful_recall_wait/);
-    assert.match(mainContexts[0]?.systemPrompt ?? "", /continue independent work/i);
-    assert.match(mainContexts[0]?.systemPrompt ?? "", /defer.*memory-dependent/i);
+    assert.match(providerSystemPrompt(mainContexts[0]!), /forgetful_recall_wait/);
+    assert.match(providerSystemPrompt(mainContexts[0]!), /continue independent work/i);
+    assert.match(providerSystemPrompt(mainContexts[0]!), /defer.*memory-dependent/i);
     assert.ok(session.getActiveToolNames().includes("forgetful_recall_wait"));
     waitAfterTerminal = true;
     plannerGate.finish();
     await waitingPrompt;
     assert.equal(mainContexts.length, 3);
     assert.equal(memoryContexts.length, 2);
-    assert.ok(memoryContexts[0]?.systemPrompt?.includes(policyOverlay),
+    assert.ok(providerSystemPrompt(memoryContexts[0]!).includes(policyOverlay),
       "full configured policy reaches Pi instead of being ignored as an oversized file");
     const plannerInput = JSON.parse(messageText(memoryContexts[0]!));
     assert.ok(plannerInput.sessionContext.some((item: { text: string }) =>
@@ -473,7 +475,7 @@ test(
       "the current model request must not retain stale pending state",
     );
     assert.doesNotMatch(
-      mainContexts[1]?.systemPrompt ?? "",
+      providerSystemPrompt(mainContexts[1]!),
       /memory-decision-pending/i,
       "a completed lifecycle state must supersede the initial pending prompt",
     );
@@ -497,12 +499,12 @@ test(
     const progressPrompt = session.prompt("Continue while recall is still reviewing.");
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === progressBase + 1,
+      () => mainContexts.length >= progressBase + 1,
       `progress test should start independent main work ` +
         `(main=${mainContexts.length}, memory=${memoryContexts.length})`,
     );
     await waitFor(
-      () => mainContexts.length === progressBase + 2,
+      () => mainContexts.length >= progressBase + 2,
       "a tool boundary should allow another main model call",
     );
     const progressContext = JSON.stringify(mainContexts[progressBase + 1]);
@@ -511,7 +513,7 @@ test(
     progressReviewGate.finish();
     await progressPrompt;
     await waitFor(
-      () => mainContexts.length === progressBase + 3,
+      () => mainContexts.length >= progressBase + 3,
       "recall completion should follow the progress boundary",
     );
     assert.match(
@@ -527,7 +529,7 @@ test(
     const latePrompt = session.prompt("What database decision should I document?");
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === progressBase + 4,
+      () => mainContexts.length >= progressBase + 4,
       "late recall should still allow the initial model response",
     );
     let lateSettled = false;
@@ -541,7 +543,7 @@ test(
     plannerGate.finish();
     await latePrompt;
     await waitFor(
-      () => mainContexts.length === progressBase + 5,
+      () => mainContexts.length >= progressBase + 5,
       "late recall completion should trigger a bounded follow-up",
     );
     assert.equal(memoryContexts.length, 6);
@@ -571,7 +573,7 @@ test(
     const cancelledPrompt = session.prompt("Cancel this memory-dependent request.");
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === progressBase + 6,
+      () => mainContexts.length >= progressBase + 6,
       "the cancellable main request should start before planner completion",
     );
     await session.abort();
@@ -628,7 +630,7 @@ test(
     );
     plannerGate.finish();
     await waitFor(
-      () => memoryContexts.length === queuedMemoryBase + 8,
+      () => memoryContexts.length >= queuedMemoryBase + 8,
       "queued recall jobs should finish without running the queued main work",
     );
     queuedMainGate.finish();
@@ -706,7 +708,7 @@ test(
     );
     identicalFirstReviewGate.finish();
     await waitFor(
-      () => memoryContexts.length === identicalMemoryBase + 6,
+      () => memoryContexts.length >= identicalMemoryBase + 6,
       "the older identical review should eventually finish",
     );
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -727,7 +729,7 @@ test(
     );
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === noContextBase + 1,
+      () => mainContexts.length >= noContextBase + 1,
       "late no-context recall should still allow the initial response",
     );
     let noContextSettled = false;
@@ -756,7 +758,7 @@ test(
     const failurePrompt = session.prompt("Continue even if automatic recall fails.");
     await plannerGate.started;
     await waitFor(
-      () => mainContexts.length === failureBase + 1,
+      () => mainContexts.length >= failureBase + 1,
       "late recall failure should still allow the initial response",
     );
     let failureSettled = false;

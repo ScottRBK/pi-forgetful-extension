@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { CaptureService } from "../src/capture.ts";
+import { CaptureService, type CaptureCandidate } from "../src/capture.ts";
 import type { CaptureSnapshot } from "../src/contracts.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { DurableQueueStore } from "../src/queue.ts";
@@ -88,7 +88,10 @@ for (const committed of [true, false]) {
       assert.deepEqual(created[0]?.source_files, ["delivery.txt"]);
       assert.equal(created[0]?.source_repo, "test/delivery");
       assert.equal(created[0]?.encoding_version ?? undefined, committed ? head : undefined);
-      assert.ok(created[0]?.context.includes(observationId!));
+      assert.equal(created[0]?.context,
+        committed ? "Documented delivery requirement" : "Uncommitted delivery note");
+      const savedCandidate = job?.extractedCandidates?.[0] as CaptureCandidate | undefined;
+      assert.deepEqual(savedCandidate?.sourceEntryIds, [observationId]);
       assert.equal(await readFile(path, "utf8"), original);
     });
 }

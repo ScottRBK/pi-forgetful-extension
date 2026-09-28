@@ -1044,11 +1044,12 @@ export class RecallService {
       // Recall is failure-open: convert search failures to an empty result.
       if (!request.signal?.aborted) this.recordFailure();
       const responseError = isForgetfulResponseError(error);
+      const message = error instanceof Error ? error.message : "Request failed.";
       return {
         ...this.empty(request.scope, failureReason(deadline, request.signal)),
         toolError: responseError
           ? error.message
-          : sanitizeText(error instanceof Error ? error.message : "Request failed.").slice(0, 1800),
+          : sanitizeText(message).slice(0, 1800),
         toolErrorFromForgetful: responseError,
         diagnostic: deadline.diagnostic(stage, error),
       };
@@ -1215,14 +1216,18 @@ export class RecallService {
         if (isAbort(error)) throw error;
         return { memories, failed: true, diagnostic: exceptionDiagnostic("memory search", error),
           // Display diagnostics remain bounded; the model receives the actual service failure.
-          failure: sanitizeValue(error instanceof Error ? {
-            name: error.name, message: error.message,
-            ...("status" in error ? { status: error.status } : {}),
-            ...("body" in error ? { body: error.body } : {}),
-          } : error) };
+          failure: this.searchFailure(error) };
       }
     }
     return { memories, failed: false };
+  }
+
+  private searchFailure(error: unknown): unknown {
+    return sanitizeValue(error instanceof Error ? {
+      name: error.name, message: error.message,
+      ...("status" in error ? { status: error.status } : {}),
+      ...("body" in error ? { body: error.body } : {}),
+    } : error);
   }
 
   private searchRequest(

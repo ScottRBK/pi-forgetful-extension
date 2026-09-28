@@ -119,6 +119,14 @@ interface CaptureNeighborhood {
   truncated?: boolean;
 }
 
+interface CaptureBatchInput {
+  candidate: CaptureCandidate;
+  destinationProjectId: number;
+  overlaps: Memory[];
+  evidenceEntries: EvidenceEntry[];
+  neighborhood: CaptureNeighborhood;
+}
+
 export interface CaptureDecision {
   action: CaptureAction;
   reason?: string;
@@ -987,18 +995,9 @@ function resourceKey(
   return resourceString(item.key ?? item.id, "resource key");
 }
 
-function entityResource(
-  item: Record<string, unknown>,
-  index: number,
-  sourceIds: string[],
-  snapshot: CaptureSnapshot,
-  kind: CaptureCandidate["evidenceType"],
-): CandidateValidation<CaptureEntityResource> {
-  const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
-  if (!evidence.valid) return evidence;
-  const input = resourceInput(item);
-  const name = resourceString(input.name, "entity name", ENTITY_NAME_MAX);
-  if (!name.valid) return name;
+function entityClassification(
+  input: Record<string, unknown>,
+): CandidateValidation<Pick<EntityInput, "entity_type" | "custom_type">> {
   const entityType = input.entity_type;
   if (
     (entityType !== "Organization" &&
@@ -1017,6 +1016,24 @@ function entityResource(
   if (entityType === "Other" && !customType) {
     return invalidCandidate("entity custom_type is required for type Other");
   }
+  return validCandidate({ entity_type: entityType,
+    ...(customType ? { custom_type: customType.value } : {}) });
+}
+
+function entityResource(
+  item: Record<string, unknown>,
+  index: number,
+  sourceIds: string[],
+  snapshot: CaptureSnapshot,
+  kind: CaptureCandidate["evidenceType"],
+): CandidateValidation<CaptureEntityResource> {
+  const evidence = resourceEvidence(item, sourceIds, snapshot, kind);
+  if (!evidence.valid) return evidence;
+  const input = resourceInput(item);
+  const name = resourceString(input.name, "entity name", ENTITY_NAME_MAX);
+  if (!name.valid) return name;
+  const classification = entityClassification(input);
+  if (!classification.valid) return classification;
   const notes = input.notes === undefined
     ? undefined
     : resourceString(input.notes, "entity notes", ENTITY_NOTES_MAX);
@@ -1029,11 +1046,10 @@ function entityResource(
   if (!key.valid) return key;
   const entity: EntityInput = {
     name: name.value,
-    entity_type: entityType,
+    ...classification.value,
     tags: tags.value,
     aka: aka.value,
     project_ids: [],
-    ...(customType ? { custom_type: customType.value } : {}),
     ...(notes ? { notes: notes.value } : {}),
   };
   return validCandidate({
@@ -1182,6 +1198,26 @@ type RichResources = Pick<
   "entities" | "documents" | "codeArtifacts" | "relationships"
 >;
 
+function parseResourceList(
+  raw: unknown, label: string, maxItems: number,
+  parse: (item: Record<string, unknown>, index: number) => CandidateValidation<unknown>,
+): CandidateValidation<unknown[]> {
+  if (raw === undefined) return validCandidate([]);
+  if (!Array.isArray(raw)) return invalidCandidate(`${label} must be an array`);
+  if (raw.length > maxItems) {
+    return invalidCandidate(`${label} must contain at most ${maxItems} items`);
+  }
+  const values: unknown[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const value = record(entry);
+    if (!value) return invalidCandidate(`${label}[${index}] must be an object`);
+    const result = parse(value, index);
+    if (!result.valid) return invalidCandidate(`${label}[${index}]: ${result.reason}`);
+    values.push(result.value);
+  }
+  return validCandidate(values);
+}
+
 function richResources(
   item: Record<string, unknown>,
   sourceIds: string[],
@@ -1201,23 +1237,10 @@ function richResources(
   ] as const;
   const parsed: Record<string, unknown[]> = {};
   for (const [label, raw, maxItems, parse] of definitions) {
-    if (raw === undefined) {
-      parsed[label] = [];
-      continue;
-    }
-    if (!Array.isArray(raw)) return invalidCandidate(`${label} must be an array`);
-    if (raw.length > maxItems) {
-      return invalidCandidate(`${label} must contain at most ${maxItems} items`);
-    }
-    const values: unknown[] = [];
-    for (const [index, entry] of raw.entries()) {
-      const value = record(entry);
-      if (!value) return invalidCandidate(`${label}[${index}] must be an object`);
-      const result = parse(value, index, sourceIds, snapshot, kind);
-      if (!result.valid) return invalidCandidate(`${label}[${index}]: ${result.reason}`);
-      values.push(result.value);
-    }
-    parsed[label] = values;
+    const result = parseResourceList(raw, label, maxItems,
+      (value, index) => parse(value, index, sourceIds, snapshot, kind));
+    if (!result.valid) return result;
+    parsed[label] = result.value;
   }
   const entities = parsed.entities as CaptureEntityResource[];
   const relationships = parsed.relationships as CaptureRelationshipResource[];
@@ -1478,11 +1501,41 @@ function decisionPartial(response: Record<string, unknown>): boolean {
   return response.partial === true;
 }
 
+function applyEnrichmentDecision(
+  response: Record<string, unknown>, decision: CaptureDecision,
+): void {
+  if (response.enrich !== undefined) {
+    if (typeof response.enrich !== "boolean") throw new InvalidCaptureOutput("Invalid enrich flag");
+    decision.enrich = response.enrich;
+  }
+  if (response.entityMemoryKeys !== undefined) {
+    if (!Array.isArray(response.entityMemoryKeys) ||
+        response.entityMemoryKeys.length > MAX_RICH_ENTITIES ||
+        response.entityMemoryKeys.some((key) => typeof key !== "string" || !key.trim()))
+      throw new InvalidCaptureOutput("Invalid entity link keys");
+    decision.entityMemoryKeys = response.entityMemoryKeys as string[];
+  }
+  if (response.reuse !== undefined) {
+    if (!Value.Check(RESOURCE_REUSE, response.reuse))
+      throw new InvalidCaptureOutput("Invalid resource reuse arguments");
+    decision.reuse = response.reuse as CaptureResourceReuse;
+  }
+}
+
+function applyEquivalentCandidate(
+  response: Record<string, unknown>, decision: CaptureDecision,
+): void {
+  if (response.equivalentCandidateId !== undefined) {
+    if (typeof response.equivalentCandidateId !== "string" ||
+        !response.equivalentCandidateId.trim())
+      throw new InvalidCaptureOutput("Invalid equivalent candidate reference");
+    decision.equivalentCandidateId = response.equivalentCandidateId;
+  }
+}
+
 function parseDecision(value: unknown): CaptureDecision {
   // Overlap decisions are tool-only. Text that happens to contain JSON is not a fallback.
-  const response = record(
-    value && typeof value === "object" && !Array.isArray(value) ? value : undefined,
-  );
+  const response = typeof value === "string" ? undefined : record(value);
   if (!response)
     throw new InvalidCaptureOutput(
       "overlap model did not return a decision object",
@@ -1502,22 +1555,7 @@ function parseDecision(value: unknown): CaptureDecision {
   const sourceEntryIds = decisionEvidenceIds(response);
   const partial = decisionPartial(response);
   const decision: CaptureDecision = { action };
-  if (response.enrich !== undefined) {
-    if (typeof response.enrich !== "boolean") throw new InvalidCaptureOutput("Invalid enrich flag");
-    decision.enrich = response.enrich;
-  }
-  if (response.entityMemoryKeys !== undefined) {
-    if (!Array.isArray(response.entityMemoryKeys) ||
-        response.entityMemoryKeys.length > MAX_RICH_ENTITIES ||
-        response.entityMemoryKeys.some((key) => typeof key !== "string" || !key.trim()))
-      throw new InvalidCaptureOutput("Invalid entity link keys");
-    decision.entityMemoryKeys = response.entityMemoryKeys as string[];
-  }
-  if (response.reuse !== undefined) {
-    if (!Value.Check(RESOURCE_REUSE, response.reuse))
-      throw new InvalidCaptureOutput("Invalid resource reuse arguments");
-    decision.reuse = response.reuse as CaptureResourceReuse;
-  }
+  applyEnrichmentDecision(response, decision);
   const reason = decisionText(response, "reason");
   const oldClaim = decisionText(response, "oldClaim");
   const newClaim = decisionText(response, "newClaim");
@@ -1538,12 +1576,7 @@ function parseDecision(value: unknown): CaptureDecision {
   if (newClaim) decision.newClaim = newClaim;
   if (sourceEntryIds) decision.sourceEntryIds = sourceEntryIds;
   if (partial) decision.partial = true;
-  if (response.equivalentCandidateId !== undefined) {
-    if (typeof response.equivalentCandidateId !== "string" ||
-        !response.equivalentCandidateId.trim())
-      throw new InvalidCaptureOutput("Invalid equivalent candidate reference");
-    decision.equivalentCandidateId = response.equivalentCandidateId;
-  }
+  applyEquivalentCandidate(response, decision);
   return decision;
 }
 
@@ -1821,9 +1854,9 @@ export class CaptureService {
     snapshot: CaptureSnapshot,
     purpose: "capture" | "overlap" | "overlapBatch",
   ): string {
+    const protocol = purpose === "overlapBatch" ? OVERLAP_BATCH_PROTOCOL : OVERLAP_SINGLE_PROTOCOL;
     const core = purpose === "capture" ? CAPTURE_POLICY_CORE :
-      `${purpose === "overlapBatch" ? OVERLAP_BATCH_PROTOCOL : OVERLAP_SINGLE_PROTOCOL} ` +
-      OVERLAP_JUDGMENT_RULES;
+      `${protocol} ${OVERLAP_JUDGMENT_RULES}`;
     return `${core}\nTrusted capture overlay:\n${snapshot.policy || this.policy}`;
   }
 
@@ -1971,7 +2004,7 @@ export class CaptureService {
       ...(previousOutcome?.creation ? { creation: previousOutcome.creation } : {}),
       ...(previousOutcome?.autoLinkedMemoryIds
         ? { autoLinkedMemoryIds: previousOutcome.autoLinkedMemoryIds } : {}),
-      ...(record(outcome) ?? {}) };
+      ...record(outcome) };
     const updated = await this.queue.checkpoint(job.id, candidateId, clone(outcome));
     const value = record(outcome);
     const previous = record(job.candidateOutcomes[candidateId]);
@@ -1999,12 +2032,9 @@ export class CaptureService {
     return [destination];
   }
 
-  private validateDecision(
-    decision: CaptureDecision,
-    candidate: CaptureCandidate,
-    overlaps: Memory[],
-    batch = false,
-    neighborhood?: CaptureNeighborhood,
+  private validateDecisionResources(
+    decision: CaptureDecision, candidate: CaptureCandidate, batch: boolean,
+    neighborhood: CaptureNeighborhood | undefined,
   ): void {
     for (const kind of ["entities", "documents", "codeArtifacts", "relationships"] as const) {
       const selected = decision.reuse?.[kind] ?? [];
@@ -2025,6 +2055,16 @@ export class CaptureService {
     if (decision.relationshipKeys?.some((key) =>
       !candidate.relationships?.some((r) => r.key === key)))
       throw new InvalidCaptureOutput("Relationship selection is outside candidate evidence");
+  }
+
+  private validateDecision(
+    decision: CaptureDecision,
+    candidate: CaptureCandidate,
+    overlaps: Memory[],
+    batch = false,
+    neighborhood?: CaptureNeighborhood,
+  ): void {
+    this.validateDecisionResources(decision, candidate, batch, neighborhood);
     const overlapIds = new Set(overlaps.map((memory) => memory.id));
     if (decision.action === "supersede" || decision.action === "escalate") {
       const ids = decisionConflictIds(decision);
@@ -2398,34 +2438,45 @@ export class CaptureService {
     };
   }
 
-  private async existingNeighborhood(
+  private async neighborhoodEntity(
+    job: QueueJob, id: number, destination: number,
+  ): Promise<Entity | undefined> {
+    if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
+    const entity = await this.client.knowledge!.getEntity(id);
+    if (entity.project_ids.length !== 1 || entity.project_ids[0] !== destination ||
+        hasSensitiveData(JSON.stringify(entity))) return undefined;
+    return entity;
+  }
+
+  private async neighborhoodEntities(
     job: QueueJob, candidate: CaptureCandidate, destination: number,
-  ) {
+  ): Promise<{ entities: Entity[]; truncated: boolean }> {
     const entities: Entity[] = [];
-    const documents: Document[] = [];
-    const codeArtifacts: CodeArtifact[] = [];
-    const relationships: EntityRelationship[] = [];
     let truncated = false;
-    if (!this.client.knowledge) return { entities, documents, codeArtifacts, relationships };
     for (const proposed of candidate.entities ?? []) {
       if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
-      const matches = await this.client.knowledge.searchEntities(
+      const matches = await this.client.knowledge!.searchEntities(
         proposed.input.name, MAX_RICH_ENTITIES);
       for (const match of matches) {
         if (entities.some((entity) => entity.id === match.id)) continue;
         if (entities.length >= MAX_RICH_ENTITIES) { truncated = true; break; }
-        if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
-        const entity = await this.client.knowledge.getEntity(match.id);
-        if (entity.project_ids.length !== 1 || entity.project_ids[0] !== destination ||
-            hasSensitiveData(JSON.stringify(entity))) continue;
-        entities.push(entity);
+        const entity = await this.neighborhoodEntity(job, match.id, destination);
+        if (entity) entities.push(entity);
       }
     }
+    return { entities, truncated };
+  }
+
+  private async neighborhoodRelationships(
+    job: QueueJob, entities: Entity[],
+  ): Promise<{ relationships: EntityRelationship[]; truncated: boolean }> {
+    const relationships: EntityRelationship[] = [];
+    let truncated = false;
     const ids = new Set(entities.map((entity) => entity.id));
     const seen = new Set<number>();
     for (const entity of entities) {
       if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
-      const edges = await this.client.knowledge.getRelationships(entity.id);
+      const edges = await this.client.knowledge!.getRelationships(entity.id);
       for (const edge of edges) {
         if (relationships.length >= MAX_RICH_RELATIONSHIPS) { truncated = true; break; }
         if (seen.has(edge.id) || !ids.has(edge.source_entity_id) ||
@@ -2435,6 +2486,19 @@ export class CaptureService {
         relationships.push(edge);
       }
     }
+    return { relationships, truncated };
+  }
+
+  private async existingNeighborhood(
+    job: QueueJob, candidate: CaptureCandidate, destination: number,
+  ): Promise<CaptureNeighborhood> {
+    const documents: Document[] = [];
+    const codeArtifacts: CodeArtifact[] = [];
+    if (!this.client.knowledge)
+      return { entities: [], documents, codeArtifacts, relationships: [] };
+    const foundEntities = await this.neighborhoodEntities(job, candidate, destination);
+    const foundRelationships = await this.neighborhoodRelationships(job, foundEntities.entities);
+    let truncated = foundEntities.truncated || foundRelationships.truncated;
     if (candidate.documents?.length) {
       const selected = await this.client.knowledge.listDocuments(destination);
       truncated ||= selected.length > MAX_RICH_DOCUMENTS;
@@ -2453,16 +2517,31 @@ export class CaptureService {
           codeArtifacts.push(artifact);
       }
     }
-    return { entities, documents, codeArtifacts, relationships, truncated };
+    return { entities: foundEntities.entities, documents, codeArtifacts,
+      relationships: foundRelationships.relationships, truncated };
+  }
+
+  private validateEquivalentCandidate(
+    decision: CaptureDecision, input: CaptureBatchInput, candidates: CaptureCandidate[],
+    current: QueueJob, inputs: CaptureBatchInput[],
+  ): void {
+    if (!decision.equivalentCandidateId) return;
+    const index = candidates.findIndex((item) => item.id === input.candidate.id);
+    const earlier = candidates.slice(0, index).find((item) =>
+      item.id === decision.equivalentCandidateId);
+    const destination = earlier && (inputs.find((item) => item.candidate.id === earlier.id)
+      ?.destinationProjectId ?? record(current.candidateOutcomes[earlier.id])
+      ?.destinationProjectId);
+    if (decision.action !== "skip" || decision.memoryId !== undefined || !decision.reason ||
+        !earlier || destination !== input.destinationProjectId)
+      throw new Error("Reuse requires an earlier same-destination candidate and a reason");
   }
 
   private async decideOverlapBatch(
     job: QueueJob, candidates: CaptureCandidate[],
   ): Promise<QueueJob> {
     let current = job;
-    const inputs: Array<{ candidate: CaptureCandidate; destinationProjectId: number;
-      overlaps: Memory[]; evidenceEntries: EvidenceEntry[];
-      neighborhood: CaptureNeighborhood }> = [];
+    const inputs: CaptureBatchInput[] = [];
     for (const candidate of candidates) {
       const outcome = record(current.candidateOutcomes[candidate.id]);
       if (isFinalOutcome(outcome) || !["extracted", "overlaps"].includes(String(outcome?.stage)))
@@ -2504,17 +2583,7 @@ export class CaptureService {
           const decision = parseDecision(raw);
           this.validateDecision(decision, input.candidate, input.overlaps,
             true, input.neighborhood);
-          if (decision.equivalentCandidateId) {
-            const index = candidates.findIndex((item) => item.id === input.candidate.id);
-            const earlier = candidates.slice(0, index).find((item) =>
-              item.id === decision.equivalentCandidateId);
-            const destination = earlier && (inputs.find((item) => item.candidate.id === earlier.id)
-              ?.destinationProjectId ?? record(current.candidateOutcomes[earlier.id])
-              ?.destinationProjectId);
-            if (decision.action !== "skip" || decision.memoryId !== undefined || !decision.reason ||
-                !earlier || destination !== input.destinationProjectId)
-              throw new Error("Reuse requires an earlier same-destination candidate and a reason");
-          }
+          this.validateEquivalentCandidate(decision, input, candidates, current, inputs);
           accepted.set(input.candidate.id, decision);
           rejected.delete(input.candidate.id);
         } catch (error) {
@@ -2803,6 +2872,20 @@ export class CaptureService {
     );
   }
 
+  private async equivalentMemory(
+    job: QueueJob, candidateId: string, destination: number,
+  ): Promise<Memory> {
+    const earlier = record(job.candidateOutcomes[candidateId]);
+    const id = projectId(earlier?.memoryId ?? earlier?.replacementId);
+    if (!id || earlier?.destinationProjectId !== destination)
+      throw new Error("Selected sibling has no completed memory receipt in this destination");
+    await this.ensureWriteAllowed(job.snapshot.mode);
+    const memory = await this.client.get(id);
+    if (memory.project_ids.length !== 1 || memory.project_ids[0] !== destination)
+      throw new Error("Equivalent sibling memory is outside the destination project");
+    return memory;
+  }
+
   private async applyDecision(
     job: QueueJob,
     candidate: CaptureCandidate,
@@ -2811,15 +2894,8 @@ export class CaptureService {
     decision: CaptureDecision,
   ): Promise<QueueJob> {
     if (decision.equivalentCandidateId) {
-      const earlier = record(job.candidateOutcomes[decision.equivalentCandidateId]);
-      const id = projectId(earlier?.memoryId ?? earlier?.replacementId);
-      if (!id || earlier?.destinationProjectId !== destination)
-        throw new Error("Selected sibling has no completed memory receipt in this destination");
-      await this.ensureWriteAllowed(job.snapshot.mode);
-      const memory = await this.client.get(id);
-      if (memory.project_ids.length !== 1 || memory.project_ids[0] !== destination)
-        throw new Error("Equivalent sibling memory is outside the destination project");
-      decision = { ...decision, memoryId: id };
+      const memory = await this.equivalentMemory(job, decision.equivalentCandidateId, destination);
+      decision = { ...decision, memoryId: memory.id };
       overlaps = [memory];
     }
     if (decision.action === "skip") {
@@ -3148,6 +3224,36 @@ export class CaptureService {
     return current;
   }
 
+  private async recordCandidateFailure(
+    currentJob: QueueJob, candidate: CaptureCandidate, error: unknown,
+  ): Promise<void> {
+    this.emit("info", error instanceof CapturePause ? "paused" : "error", {
+      ...this.correlation(currentJob, candidate.id),
+    });
+    this.emit("debug", "error_detail", {
+      ...this.correlation(currentJob, candidate.id), error: scrubError(error),
+    });
+    if (error instanceof CapturePause) {
+      await this.queue.checkpoint(currentJob.id, {
+        status: "paused",
+        lastError: error.message,
+      });
+      return;
+    }
+    const message = scrubError(error);
+    const latest = await this.queue.getJob(currentJob.id);
+    const status: QueueJobStatus =
+      latest && latest.attempts >= 3 ? "failed" : "pending";
+    await this.checkpointOutcome(latest ?? currentJob, candidate.id, {
+      ...record(latest?.candidateOutcomes[candidate.id]),
+      executionFailure: error instanceof Error ? error.message : String(error),
+    });
+    await this.queue.checkpoint(currentJob.id, {
+      status,
+      lastError: message,
+    });
+  }
+
   private async processCandidates(
     job: QueueJob,
     candidates: CaptureCandidate[],
@@ -3164,38 +3270,58 @@ export class CaptureService {
           currentJob.candidateOutcomes[candidate.id],
         );
       } catch (error) {
-        this.emit("info", error instanceof CapturePause ? "paused" : "error", {
-          ...this.correlation(currentJob, candidate.id),
-        });
-        this.emit("debug", "error_detail", {
-          ...this.correlation(currentJob, candidate.id), error: scrubError(error),
-        });
-        if (error instanceof CapturePause) {
-          await this.queue.checkpoint(currentJob.id, {
-            status: "paused",
-            lastError: error.message,
-          });
-          return { job: currentJob, stopped: true };
-        }
-        const message = scrubError(error);
-        const latest = await this.queue.getJob(currentJob.id);
-        const status: QueueJobStatus =
-          latest && latest.attempts >= 3 ? "failed" : "pending";
-        await this.checkpointOutcome(latest ?? currentJob, candidate.id, {
-          ...record(latest?.candidateOutcomes[candidate.id]),
-          executionFailure: error instanceof Error ? error.message : String(error),
-        });
-        await this.queue.checkpoint(currentJob.id, {
-          status,
-          lastError: message,
-        });
+        await this.recordCandidateFailure(currentJob, candidate, error);
         return { job: currentJob, stopped: true };
       }
     }
     return { job: currentJob, stopped: false };
   }
 
-  private async reviewLinks(job: QueueJob, candidates: CaptureCandidate[]): Promise<QueueJob> {
+  private async refreshLinkReview(
+    current: QueueJob, candidates: CaptureCandidate[], outcome: Record<string, unknown>,
+    mode: CaptureMode, prior: CaptureLinkReview | undefined,
+  ): Promise<CaptureLinkReview> {
+    let review: CaptureLinkReview;
+    try {
+      const destination = outcome.destinationProjectId as number;
+      const previous = outcome.oldMemory && this.client.knowledge?.unlinkMemories
+        ? await preparePreviousConnections(this.client, outcome.oldMemory as Memory,
+          outcome.memoryId as number, destination,
+          async () => this.ensureWriteAllowed(mode)) : undefined;
+      const oldLinks = previous?.memory.linked_memory_ids ?? [];
+      // Supply newly saved siblings as possible connections, never automatic link choices.
+      // prepareLinkReview reads their full records and enforces the same scope/item limits.
+      const siblingIds = candidates.flatMap((item) => {
+        const id = record(current.candidateOutcomes[item.id])?.memoryId;
+        return projectId(id) ? [id as number] : [];
+      });
+      const leads = [...siblingIds, ...oldLinks].map((id) => ({ id }) as Memory)
+        .concat((outcome.overlaps ?? []) as Memory[])
+        .filter((memory) => memory.id !== previous?.memory.id);
+      review = await prepareLinkReview(this.client, outcome.memoryId as number,
+        destination, leads, outcome.autoLinkedMemoryIds as number[] | undefined,
+        async () => this.ensureWriteAllowed(mode), Boolean(previous));
+      if (prior) review = { ...review, executionResults: prior.executionResults,
+        previousResults: prior.previousResults, verifiedIds: prior.verifiedIds,
+        failures: prior.failures,
+        preservationVerified: prior.preservationVerified };
+      if (previous) {
+        // The predecessor remains historical; its superseded_by field records this transition.
+        review.memories = review.memories?.filter((memory) => memory.id !== previous.memory.id);
+        review.previous = previous;
+      }
+    } catch (error) {
+      if (!prior || error instanceof CapturePause) throw error;
+      review = { ...prior, status: "pending", failures: [...(prior.failures ?? []),
+        { operation: "refresh records (previous records below are historical)",
+          error: error instanceof Error ? error.message : String(error) }] };
+    }
+    return review;
+  }
+
+  private async prepareLinkReviews(
+    job: QueueJob, candidates: CaptureCandidate[],
+  ): Promise<{ job: QueueJob; inputs: Array<{ candidateId: string; review: CaptureLinkReview }> }> {
     let current = job;
     const inputs: Array<{ candidateId: string; review: CaptureLinkReview }> = [];
     for (const candidate of candidates) {
@@ -3205,41 +3331,8 @@ export class CaptureService {
       let review = outcome.linkReview as CaptureLinkReview | undefined;
       if (!review || (review.status === "pending" &&
           (review.executionResults?.length || review.failures?.length))) {
-        const prior = review;
-        try {
-          const destination = outcome.destinationProjectId as number;
-          const previous = outcome.oldMemory && this.client.knowledge?.unlinkMemories
-            ? await preparePreviousConnections(this.client, outcome.oldMemory as Memory,
-              outcome.memoryId as number, destination,
-              async () => this.ensureWriteAllowed(job.snapshot.mode)) : undefined;
-          const oldLinks = previous?.memory.linked_memory_ids ?? [];
-          // Supply newly saved siblings as possible connections, never automatic link choices.
-          // prepareLinkReview reads their full records and enforces the same scope/item limits.
-          const siblingIds = candidates.flatMap((item) => {
-            const id = record(current.candidateOutcomes[item.id])?.memoryId;
-            return projectId(id) ? [id as number] : [];
-          });
-          const leads = [...siblingIds, ...oldLinks].map((id) => ({ id }) as Memory)
-            .concat((outcome.overlaps ?? []) as Memory[])
-            .filter((memory) => memory.id !== previous?.memory.id);
-          review = await prepareLinkReview(this.client, outcome.memoryId as number,
-            destination, leads, outcome.autoLinkedMemoryIds as number[] | undefined,
-            async () => this.ensureWriteAllowed(job.snapshot.mode), Boolean(previous));
-          if (prior) review = { ...review, executionResults: prior.executionResults,
-            previousResults: prior.previousResults, verifiedIds: prior.verifiedIds,
-            failures: prior.failures,
-            preservationVerified: prior.preservationVerified };
-          if (previous) {
-            // The predecessor remains historical; its superseded_by field records this transition.
-            review.memories = review.memories?.filter((memory) => memory.id !== previous.memory.id);
-            review.previous = previous;
-          }
-        } catch (error) {
-          if (!prior || error instanceof CapturePause) throw error;
-          review = { ...prior, status: "pending", failures: [...(prior.failures ?? []),
-            { operation: "refresh records (previous records below are historical)",
-              error: error instanceof Error ? error.message : String(error) }] };
-        }
+        review = await this.refreshLinkReview(current, candidates, outcome, job.snapshot.mode,
+          review);
         current = await this.checkpointOutcome(current, candidate.id, { ...outcome,
           linkReview: review });
       }
@@ -3251,106 +3344,125 @@ export class CaptureService {
       }
       if (review.status === "pending") inputs.push({ candidateId: candidate.id, review });
     }
-    if (inputs.length) {
-      await this.ensureWriteAllowed(job.snapshot.mode);
-      await this.ensureModelCallAllowed(current);
-      current = await this.queue.checkpoint(current.id, { callCount: current.callCount + 1 });
-      const rejections = boundedSubmissionRejections(current.submissionRejections ?? []);
-      const submission: ModelSubmissionTool = {
-        name: "submit_capture_links", description: "Review each supplied stored memory connection.",
-        parameters: CAPTURE_LINK_PARAMETERS,
-        onRejection: (reason) => appendSubmissionRejection(rejections, reason),
-        validate: (value) => { validateLinkReviews(value, inputs); return value; },
-      };
-      let response: unknown;
-      try {
-        response = await this.model.complete({ purpose: "overlap", submission,
-          diagnosticContext: this.correlation(current),
-          policy: `${CAPTURE_LINK_POLICY}\nTrusted capture overlay: ${current.snapshot.policy}`,
-          conversation: captureConversation(current.snapshot),
-          input: { ...captureWorkMetadata(current.snapshot),
-            candidates: inputs.map(({ candidateId, review }) => ({ candidateId,
-            memory: review.memory, memories: review.memories, resources: review.resources,
-            executionResults: [...(review.previousResults ?? []),
-              ...(review.executionResults ?? [])],
-            executionFailures: review.failures ?? [],
-            completedWrites: {
-              memoryId: record(current.candidateOutcomes[candidateId])?.memoryId,
-              knowledge: record(current.candidateOutcomes[candidateId])?.knowledgeState,
-            },
-            eligibleMemoryIds: review.memories!.map((memory) => memory.id),
-            automaticIds: review.automaticIds?.filter((id) =>
-              review.memories!.some((memory) => memory.id === id)),
-            ...(review.previous ? { previous: review.previous } : {}),
-            evidenceEntries: sourceEvidence(candidates.find((c) => c.id === candidateId)!,
-              current.snapshot) })) },
-        });
-      } finally {
-        if (rejections.length) current = await this.queue.checkpoint(current.id,
-          { submissionRejections: rejections });
-      }
-      const decisions = validateLinkReviews(response, inputs);
-      current = await this.queue.checkpoint(current.id, { candidateOutcomes: Object.fromEntries(
-        inputs.map(({ candidateId, review }) => [candidateId, {
-          ...record(current.candidateOutcomes[candidateId]),
-          linkReview: { ...review, status: "planned", ...decisions.get(candidateId),
-            previousResults: [...(review.previousResults ?? []),
-              ...(review.executionResults ?? [])],
-            executionResults: [], verifiedIds: [], preservationVerified: false },
-        }]),
-      ) });
+    return { job: current, inputs };
+  }
+
+  private async planLinkReviews(
+    job: QueueJob, candidates: CaptureCandidate[],
+    inputs: Array<{ candidateId: string; review: CaptureLinkReview }>,
+  ): Promise<QueueJob> {
+    let current = job;
+    if (!inputs.length) return current;
+    await this.ensureWriteAllowed(job.snapshot.mode);
+    await this.ensureModelCallAllowed(current);
+    current = await this.queue.checkpoint(current.id, { callCount: current.callCount + 1 });
+    const rejections = boundedSubmissionRejections(current.submissionRejections ?? []);
+    const submission: ModelSubmissionTool = {
+      name: "submit_capture_links", description: "Review each supplied stored memory connection.",
+      parameters: CAPTURE_LINK_PARAMETERS,
+      onRejection: (reason) => appendSubmissionRejection(rejections, reason),
+      validate: (value) => { validateLinkReviews(value, inputs); return value; },
+    };
+    let response: unknown;
+    try {
+      response = await this.model.complete({ purpose: "overlap", submission,
+        diagnosticContext: this.correlation(current),
+        policy: `${CAPTURE_LINK_POLICY}\nTrusted capture overlay: ${current.snapshot.policy}`,
+        conversation: captureConversation(current.snapshot),
+        input: { ...captureWorkMetadata(current.snapshot),
+          candidates: inputs.map(({ candidateId, review }) => ({ candidateId,
+          memory: review.memory, memories: review.memories, resources: review.resources,
+          executionResults: [...(review.previousResults ?? []),
+            ...(review.executionResults ?? [])],
+          executionFailures: review.failures ?? [],
+          completedWrites: {
+            memoryId: record(current.candidateOutcomes[candidateId])?.memoryId,
+            knowledge: record(current.candidateOutcomes[candidateId])?.knowledgeState,
+          },
+          eligibleMemoryIds: review.memories!.map((memory) => memory.id),
+          automaticIds: review.automaticIds?.filter((id) =>
+            review.memories!.some((memory) => memory.id === id)),
+          ...(review.previous ? { previous: review.previous } : {}),
+          evidenceEntries: sourceEvidence(candidates.find((c) => c.id === candidateId)!,
+            current.snapshot) })) },
+      });
+    } finally {
+      if (rejections.length) current = await this.queue.checkpoint(current.id,
+        { submissionRejections: rejections });
     }
-    for (const candidate of candidates) {
-      const outcome = record(current.candidateOutcomes[candidate.id]);
-      if (outcome?.stage !== "links-pending") continue;
-      let review = outcome.linkReview as CaptureLinkReview;
-      let operation = "connections";
-      try {
-        if (review.status === "planned") {
-          review = await applyLinkReview(this.client, outcome.destinationProjectId as number,
-            review,
-            async (linkReview) => {
-              current = await this.checkpointOutcome(current, candidate.id,
-                { ...outcome, linkReview });
-            }, async () => this.ensureWriteAllowed(job.snapshot.mode),
-            () => this.assertWriteAllowedNow());
-        }
-        if (review.previous) {
-          await this.ensureWriteAllowed(job.snapshot.mode);
-          const old = await this.client.get(review.previous.memory.id);
-          if (review.preservationVerified && old.is_obsolete &&
-              old.superseded_by === outcome.replacementId) {
-            current = await this.finishSupersession(current, candidate,
-              outcome.destinationProjectId as number, outcome.oldMemory as Memory,
-              outcome.replacementId as number, outcome.reason as string,
-              outcome.decision as CaptureDecision);
-            continue;
-          }
-          operation = "selected references";
-          review = await preserveConnections(this.client, review,
-            async () => this.ensureWriteAllowed(job.snapshot.mode), async (linkReview) => {
-              current = await this.checkpointOutcome(current, candidate.id,
-                { ...outcome, linkReview });
-            }, () => this.assertWriteAllowedNow());
-          operation = "supersede";
+    const decisions = validateLinkReviews(response, inputs);
+    current = await this.queue.checkpoint(current.id, { candidateOutcomes: Object.fromEntries(
+      inputs.map(({ candidateId, review }) => [candidateId, {
+        ...record(current.candidateOutcomes[candidateId]),
+        linkReview: { ...review, status: "planned", ...decisions.get(candidateId),
+          previousResults: [...(review.previousResults ?? []),
+            ...(review.executionResults ?? [])],
+          executionResults: [], verifiedIds: [], preservationVerified: false },
+      }]),
+    ) });
+    return current;
+  }
+
+  private async executeLinkReview(job: QueueJob, candidate: CaptureCandidate): Promise<QueueJob> {
+    let current = job;
+    const outcome = record(current.candidateOutcomes[candidate.id]);
+    if (outcome?.stage !== "links-pending") return current;
+    let review = outcome.linkReview as CaptureLinkReview;
+    let operation = "connections";
+    try {
+      if (review.status === "planned") {
+        review = await applyLinkReview(this.client, outcome.destinationProjectId as number,
+          review,
+          async (linkReview) => {
+            current = await this.checkpointOutcome(current, candidate.id,
+              { ...outcome, linkReview });
+          }, async () => this.ensureWriteAllowed(job.snapshot.mode),
+          () => this.assertWriteAllowedNow());
+      }
+      if (review.previous) {
+        await this.ensureWriteAllowed(job.snapshot.mode);
+        const old = await this.client.get(review.previous.memory.id);
+        if (review.preservationVerified && old.is_obsolete &&
+            old.superseded_by === outcome.replacementId) {
           current = await this.finishSupersession(current, candidate,
             outcome.destinationProjectId as number, outcome.oldMemory as Memory,
             outcome.replacementId as number, outcome.reason as string,
             outcome.decision as CaptureDecision);
-        } else if (["complete", "partial", "unsupported"].includes(review.status)) {
-          current = await this.checkpointOutcome(current, candidate.id, { ...outcome,
-            stage: outcome.writeFinalStage ?? "created", linkReview: review });
+          return current;
         }
-      } catch (error) {
-        const latest = await this.queue.getJob(current.id);
-        const saved = record(latest?.candidateOutcomes[candidate.id]);
-        await this.checkpointOutcome(latest ?? current, candidate.id, { ...saved,
-          linkReview: { ...(saved?.linkReview as CaptureLinkReview), status: "pending",
-            failures: [...((saved?.linkReview as CaptureLinkReview)?.failures ?? []),
-              { operation, error: error instanceof Error ? error.message : String(error) }],
-            reason: error instanceof Error ? error.message : String(error) } });
-        throw error;
+        operation = "selected references";
+        await preserveConnections(this.client, review,
+          async () => this.ensureWriteAllowed(job.snapshot.mode), async (linkReview) => {
+            current = await this.checkpointOutcome(current, candidate.id,
+              { ...outcome, linkReview });
+          }, () => this.assertWriteAllowedNow());
+        operation = "supersede";
+        current = await this.finishSupersession(current, candidate,
+          outcome.destinationProjectId as number, outcome.oldMemory as Memory,
+          outcome.replacementId as number, outcome.reason as string,
+          outcome.decision as CaptureDecision);
+      } else if (["complete", "partial", "unsupported"].includes(review.status)) {
+        current = await this.checkpointOutcome(current, candidate.id, { ...outcome,
+          stage: outcome.writeFinalStage ?? "created", linkReview: review });
       }
+    } catch (error) {
+      const latest = await this.queue.getJob(current.id);
+      const saved = record(latest?.candidateOutcomes[candidate.id]);
+      await this.checkpointOutcome(latest ?? current, candidate.id, { ...saved,
+        linkReview: { ...(saved?.linkReview as CaptureLinkReview), status: "pending",
+          failures: [...((saved?.linkReview as CaptureLinkReview)?.failures ?? []),
+            { operation, error: error instanceof Error ? error.message : String(error) }],
+          reason: error instanceof Error ? error.message : String(error) } });
+      throw error;
+    }
+    return current;
+  }
+
+  private async reviewLinks(job: QueueJob, candidates: CaptureCandidate[]): Promise<QueueJob> {
+    const prepared = await this.prepareLinkReviews(job, candidates);
+    let current = await this.planLinkReviews(prepared.job, candidates, prepared.inputs);
+    for (const candidate of candidates) {
+      current = await this.executeLinkReview(current, candidate);
     }
     return current;
   }
@@ -3436,9 +3548,9 @@ export class CaptureService {
       result.errors.push(scrubError(error));
       const latest = await this.queue.getJob(job.id);
       if (latest) {
+        const retryStatus = latest.attempts >= 3 ? "failed" : "pending";
         await this.queue.checkpoint(job.id, {
-          status: error instanceof CapturePause ? "paused"
-            : latest.attempts >= 3 ? "failed" : "pending",
+          status: error instanceof CapturePause ? "paused" : retryStatus,
           lastError: scrubError(error),
         });
       }
@@ -3971,6 +4083,18 @@ export class CaptureService {
     return { documents, codeArtifacts, entities, memories, files, unavailable };
   }
 
+  private validateRevisionText(item: CaptureCandidate & { sourceFiles: string[] }): void {
+    for (const field of ["title", "content", "context", "sourceRepo", "sourceUrl",
+      "encodingVersion"] as const) {
+      if (item[field] !== undefined && !item[field]!.trim())
+        throw new InvalidCaptureOutput(`Revision ${field} must be non-empty`);
+    }
+    for (const field of ["keywords", "tags", "sourceEntryIds", "sourceFiles"] as const) {
+      if (item[field].some((text) => !text.trim()))
+        throw new InvalidCaptureOutput(`Revision ${field} must contain non-empty strings`);
+    }
+  }
+
   private async planConflictReplacement(
     conflict: PendingConflict,
     candidate: CaptureCandidate,
@@ -4022,15 +4146,7 @@ export class CaptureService {
         throw new InvalidCaptureOutput("Update must select the supplied prior replacement ID");
       if (item.memoryIds.includes(item.replacementMemoryId!))
         throw new InvalidCaptureOutput("A replacement cannot link to itself");
-      for (const field of ["title", "content", "context", "sourceRepo", "sourceUrl",
-        "encodingVersion"] as const) {
-        if (item[field] !== undefined && !item[field]!.trim())
-          throw new InvalidCaptureOutput(`Revision ${field} must be non-empty`);
-      }
-      for (const field of ["keywords", "tags", "sourceEntryIds", "sourceFiles"] as const) {
-        if (item[field].some((text) => !text.trim()))
-          throw new InvalidCaptureOutput(`Revision ${field} must contain non-empty strings`);
-      }
+      this.validateRevisionText(item);
       if (item.sourceEntryIds.some((id) => !evidence.evidenceEntryIds.includes(id)))
         throw new InvalidCaptureOutput("Revision must cite selected evidence IDs");
       if (replacementMemoryContext(item.context).length > MEMORY_CONTEXT_MAX)
@@ -4189,6 +4305,23 @@ export class CaptureService {
     }
   }
 
+  private async linkResolutionEntity(
+    conflict: PendingConflict, replacementId: number, id: number,
+  ): Promise<void> {
+    await this.ensureWriteAllowed("auto");
+    const linked = this.client.getMemoryEntityIds
+      ? await this.client.getMemoryEntityIds(replacementId) : [];
+    const entity = await this.client.knowledge!.getEntity(id);
+    if (entity.project_ids.length !== 1 ||
+        entity.project_ids[0] !== conflict.destinationProjectId)
+      throw new Error("Selected entity is outside the permitted destination");
+    await this.authorizeResolutionMemory(replacementId, conflict.destinationProjectId);
+    if (!linked.includes(id)) {
+      this.assertWriteAllowedNow();
+      await this.client.knowledge!.linkEntityMemory(id, replacementId);
+    }
+  }
+
   private async executeResolutionLinks(
     conflict: PendingConflict, replacementId: number,
   ): Promise<void> {
@@ -4213,18 +4346,7 @@ export class CaptureService {
     }
     for (const id of receipt.entityIds) {
       if (receipt.completedEntityIds?.includes(id)) continue;
-      await this.ensureWriteAllowed("auto");
-      const linked = this.client.getMemoryEntityIds
-        ? await this.client.getMemoryEntityIds(replacementId) : [];
-      const entity = await knowledge!.getEntity(id);
-      if (entity.project_ids.length !== 1 ||
-          entity.project_ids[0] !== conflict.destinationProjectId)
-        throw new Error("Selected entity is outside the permitted destination");
-      await this.authorizeResolutionMemory(replacementId, conflict.destinationProjectId);
-      if (!linked.includes(id)) {
-        this.assertWriteAllowedNow();
-        await knowledge!.linkEntityMemory(id, replacementId);
-      }
+      await this.linkResolutionEntity(conflict, replacementId, id);
       receipt = { ...receipt, completedEntityIds: [...(receipt.completedEntityIds ?? []), id] };
       await this.queue.updateConflict(conflict.id, { replacement: receipt });
     }
@@ -4252,7 +4374,7 @@ export class CaptureService {
       await this.ensureWriteAllowed("auto");
       const current = await this.client.get(conflict.oldMemoryId!);
       this.validateConflictMemory(conflict, current);
-      if (!prior || prior.requestKey !== requestKey) {
+      if (prior?.requestKey !== requestKey) {
         const replacement = await this.planConflictReplacement(conflict, target.candidate, evidence,
           target.fakeJob.snapshot.context, current, requestPayload, conversation);
         conflict = await this.queue.updateConflict(conflict.id, { replacement });

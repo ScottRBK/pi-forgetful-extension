@@ -11,10 +11,10 @@ import {
   createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  createAssistantMessageEventStream, type AssistantMessage,
+  createAssistantMessageEventStream, type AssistantMessage, type JsonObject,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import { decodeProviderContext, providerTools } from "./provider-context.ts";
 
 test("public Pi shutdown drains capture before the queue directory can be removed",
   { timeout: 15_000 }, async (t) => {
@@ -73,7 +73,7 @@ test("public Pi shutdown drains capture before the queue directory can be remove
         maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       })),
       streamSimple(model, context) {
-        const submission = context.tools?.[0]?.name;
+        const submission = providerTools(context)[0]?.name;
         const capture = model.id === "memory" && submission === "submit_capture_candidates";
         const input = capture ? decodeProviderContext(context).input : {};
         const evidence = input.eligibleEvidence?.find(
@@ -266,9 +266,9 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           input: ["text"], contextWindow: 32_000, maxTokens: 2048,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
         streamSimple(model, context) {
-          let name = model.id === "memory" ? context.tools?.[0]?.name : undefined;
+          let name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
           const input = model.id === "memory" ? decodeProviderContext(context).input : {};
-          let decision: Record<string, unknown> = {
+          let decision: JsonObject = {
             search: false, queries: [], queryIntent: "No recall needed", entities: [],
           };
           if (name === "submit_capture_candidates") {
@@ -290,6 +290,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           } else if (model.id === "main" && resolveOnNextMain) {
             resolveOnNextMain = false;
             name = "forgetful_resolve";
+            assert.ok(conflictId);
             decision = { conflict_id: conflictId, action: "supersede", reason: "Confirmed change" };
           }
           const message: AssistantMessage = {

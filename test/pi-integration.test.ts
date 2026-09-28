@@ -23,7 +23,9 @@ import {
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import type { CaptureSnapshot, EvidenceEntry } from "../src/contracts.ts";
-import { decodeProviderContext } from "./provider-context.ts";
+import {
+  decodeProviderContext, providerSystemPrompt, providerTools,
+} from "./provider-context.ts";
 
 type CaptureProviderInput = Pick<CaptureSnapshot,
   "processedThroughEntryId" | "conversationCoverage"> & {
@@ -292,7 +294,9 @@ test(
           queryIntent: "Recall database decisions",
           entities: [],
         };
-        const submissionName = model.id === "memory" ? context.tools?.[0]?.name : undefined;
+        const submissionName = model.id === "memory"
+          ? providerTools(context)[0]?.name
+          : undefined;
         if (model.id === "memory") {
           const { input, conversation } = decodeProviderContext(context);
           if (submissionName === "submit_recall_review") {
@@ -621,7 +625,7 @@ test(
     );
     assert.match(JSON.stringify(mainContexts[0]), /retrieval underway/);
     assert.doesNotMatch(JSON.stringify(mainContexts[0]), /SQLite was chosen/);
-    assert.ok(!mainContexts[0]?.systemPrompt?.includes(memory.content));
+    assert.ok(!providerSystemPrompt(mainContexts[0]!).includes(memory.content));
     assert.match(JSON.stringify(mainContexts[1]), /SQLite was chosen for durable state/);
     assert.doesNotMatch(JSON.stringify(mainContexts[1]), /retrieval underway/);
     assert.doesNotMatch(JSON.stringify(mainContexts[1]), /memory-decision-pending/);
@@ -712,7 +716,7 @@ test(
           message.role === "toolResult" && message.toolName === "submit_recall_review"));
         assert.match(JSON.stringify(corrections), /REJECTED_PI_REVIEW/);
         const otherMemoryCalls = memoryContexts.filter((context) =>
-          !context.tools?.some((tool) => tool.name === "submit_recall_review"));
+          !providerTools(context).some((tool) => tool.name === "submit_recall_review"));
         assert.doesNotMatch(JSON.stringify(otherMemoryCalls), /REJECTED_PI_REVIEW/);
       },
     );
@@ -783,12 +787,12 @@ test(
           JSON.stringify(context.messages).includes('\\"candidate\\":'),
         );
         assert.ok(
-          overlap?.systemPrompt?.includes(
+          overlap && providerSystemPrompt(overlap).includes(
             "action create, skip, supersede, or escalate",
           ),
         );
         assert.ok(
-          !overlap?.systemPrompt?.includes("{candidates: [...]}"),
+          overlap && !providerSystemPrompt(overlap).includes("{candidates: [...]}"),
           "overlap must not receive the incompatible extraction response contract",
         );
       },
@@ -851,7 +855,7 @@ test(
                 processedThroughEntryId: input.processedThroughEntryId,
               })),
               memoryContexts: memoryContexts.slice(-8).map((context) => ({
-                systemPrompt: context.systemPrompt?.slice(0, 80),
+                systemPrompt: providerSystemPrompt(context).slice(0, 80),
                 last: context.messages.at(-1),
               })),
               notifications: notifications.slice(beforeNotifications),

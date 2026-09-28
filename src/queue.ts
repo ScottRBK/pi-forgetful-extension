@@ -267,14 +267,16 @@ function normaliseState(value: unknown): QueueState {
   return {
     version: record.version,
     jobs: record.jobs as StoredQueueJob[],
-    conflicts: Array.isArray(record.conflicts)
-      ? (record.conflicts as PendingConflict[])
-      : [],
-    watermarks:
-      record.watermarks && typeof record.watermarks === "object"
-        ? (record.watermarks as Record<string, QueueWatermark>)
-        : {},
+    conflicts: record.conflicts,
+    watermarks: record.watermarks,
   };
+}
+
+function validateInspectionEntry(input: EvidenceEntry, reserved: Set<string>): void {
+  if (!input || typeof input.id !== "string" || !input.id.startsWith("inspection:") ||
+      input.id === "inspection:" || reserved.has(input.id) || input.role !== "toolResult" ||
+      typeof input.text !== "string" || !input.toolName)
+    throw new Error("Invalid inspection evidence or original session entry ID");
 }
 
 function isProcessAlive(pid: unknown): boolean {
@@ -464,10 +466,7 @@ export class DurableQueueStore {
     const entries = job.inspectionDigest
       ? [...(await this.readSnapshot(job.inspectionDigest)).entries] : [];
     for (const input of additions) {
-      if (!input || typeof input.id !== "string" || !input.id.startsWith("inspection:") ||
-          input.id === "inspection:" || reserved.has(input.id) || input.role !== "toolResult" ||
-          typeof input.text !== "string" || !input.toolName)
-        throw new Error("Invalid inspection evidence or original session entry ID");
+      validateInspectionEntry(input, reserved);
       const entry = sanitizeValue(jsonSnapshot(input)) as EvidenceEntry;
       const existing = entries.find((item) => item.id === entry.id);
       if (existing && JSON.stringify(existing) !== JSON.stringify(entry))

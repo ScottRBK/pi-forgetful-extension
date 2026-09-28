@@ -148,6 +148,26 @@ function deltaStartIndex(
   return 0;
 }
 
+function toolEvidence(
+  id: string, message: MessageRecord,
+  includeToolEvidence: SnapshotOptions["includeToolEvidence"],
+): EvidenceEntry | undefined {
+  if (typeof message.toolName !== "string" || isMemoryOperation(message.toolName)) return undefined;
+  const text = safeText(contentText(message.content)) || (message.isError === true
+    ? "[Tool returned an error without text content; see the original conversation entry.]" : "");
+  if (!text || (includeToolEvidence && !includeToolEvidence(message.toolName, text)))
+    return undefined;
+  return {
+    id,
+    role: "toolResult",
+    text,
+    toolName: message.toolName,
+    ...(typeof message.isError === "boolean" ? { isError: message.isError } : {}),
+    ...(typeof message.toolCallId === "string" ? { toolCallId: message.toolCallId } : {}),
+    ...(message.details !== undefined ? { details: sanitizeValue(message.details) } : {}),
+  };
+}
+
 function evidenceForEntry(
   entry: SessionEntry,
   includeToolEvidence:
@@ -167,22 +187,7 @@ function evidenceForEntry(
     const text = safeText(contentText(message.content));
     return text ? { id: entry.id, role: "assistant", text } : undefined;
   }
-  if (message.role === "toolResult" && typeof message.toolName === "string") {
-    if (isMemoryOperation(message.toolName)) return undefined;
-    const text = safeText(contentText(message.content)) || (message.isError === true
-      ? "[Tool returned an error without text content; see the original conversation entry.]" : "");
-    if (!text || (includeToolEvidence && !includeToolEvidence(message.toolName, text)))
-      return undefined;
-    return {
-      id: entry.id,
-      role: "toolResult",
-      text,
-      toolName: message.toolName,
-      ...(typeof message.isError === "boolean" ? { isError: message.isError } : {}),
-      ...(typeof message.toolCallId === "string" ? { toolCallId: message.toolCallId } : {}),
-      ...(message.details !== undefined ? { details: sanitizeValue(message.details) } : {}),
-    };
-  }
+  if (message.role === "toolResult") return toolEvidence(entry.id, message, includeToolEvidence);
   return undefined;
 }
 

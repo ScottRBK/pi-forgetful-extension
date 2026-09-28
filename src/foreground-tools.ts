@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { validateToolArguments } from "@earendil-works/pi-ai";
+import { validateToolArguments, type JsonObject } from "@earendil-works/pi-ai";
 import type { TSchema } from "typebox";
 import { sanitizeText } from "./privacy.ts";
 
@@ -16,7 +16,7 @@ export function registerForegroundTool<T extends TSchema>(
       try {
         return validateToolArguments({ ...definition, parameters }, {
           type: "toolCall", id: "validation", name: definition.name,
-          arguments: args as Record<string, unknown>,
+          arguments: args as JsonObject,
         });
       } catch (error) {
         const message = error instanceof Error

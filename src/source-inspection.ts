@@ -296,7 +296,7 @@ export class SourceInspector {
     try {
       const head = (await this.git(cwd, ["rev-parse", "--verify", "HEAD"], signal)).trim();
       const tree = await this.git(cwd, ["ls-tree", "-z", head, "--", path], signal);
-      const blob = tree.match(/^100(?:644|755) blob ([a-f0-9]+)\t/);
+      const blob = /^100(?:644|755) blob ([a-f0-9]+)\t/.exec(tree);
       // Hash raw bytes with Git's blob framing, never working-tree filters or the status cache.
       const hash = createHash(head.length === 64 ? "sha256" : "sha1")
         .update(`blob ${bytes.length}\0`).update(bytes).digest("hex");

@@ -10,7 +10,7 @@ import {
   createAgentSession, createReadTool, DefaultResourceLoader, ModelRegistry, ModelRuntime,
   SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, JsonValue } from "@earendil-works/pi-ai";
 import { CaptureService } from "../src/capture.ts";
 import { loadForgetfulConfig, type ModelSelection } from "../src/config.ts";
 import { createForgetfulExtension } from "../src/extension.ts";
@@ -70,11 +70,14 @@ const scenarios = [
 ] as const;
 type Scenario = typeof scenarios[number];
 
-function errorRecord(error: unknown): unknown {
+function errorRecord(error: unknown): JsonValue {
   if (!(error instanceof Error)) return String(error);
-  return { name: error.name, message: error.message, stack: error.stack,
-    ...Object.fromEntries(Object.entries(error)),
-    ...(error.cause === undefined ? {} : { cause: errorRecord(error.cause) }) };
+  return {
+    name: error.name,
+    message: error.message,
+    ...(error.stack === undefined ? {} : { stack: error.stack }),
+    ...(error.cause === undefined ? {} : { cause: errorRecord(error.cause) }),
+  };
 }
 
 function assistant(text: string): AssistantMessage {

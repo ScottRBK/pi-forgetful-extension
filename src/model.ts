@@ -595,6 +595,19 @@ export class PiMemoryModel implements MemoryModelClient {
     }
   }
 
+  private validateSubmission(submission: ModelSubmissionTool, tool: Tool, call: ToolCall): unknown {
+    validateToolCall([tool], call);
+    // Pi may coerce values. Both schema and domain checks apply to the original input.
+    const schema = submission.parameters as TSchema;
+    const schemaError = Value.Check(schema, call.arguments) ? undefined :
+      new Error(JSON.stringify([...Value.Errors(schema, call.arguments)]));
+    // Keep actionable domain diagnostics. A corrected return value (or mutation) cannot
+    // override the schema result captured from the original arguments before validation.
+    const result = submission.validate(call.arguments);
+    if (schemaError) throw schemaError;
+    return result;
+  }
+
   private async completeWithSubmission(
     model: Model<any>,
     context: Context,
@@ -616,7 +629,9 @@ export class PiMemoryModel implements MemoryModelClient {
       submission.onRejection?.(safeReason, input);
     };
     let rejected = 0;
-    for (let attempt = 1; rejected < MAX_SUBMISSION_ATTEMPTS; attempt++) {
+    let attempt = 0;
+    while (rejected < MAX_SUBMISSION_ATTEMPTS) {
+      attempt++;
       await prepare();
       const response = await this.completeAttempt(
         model, context, options, request, deadline, attempt,
@@ -644,16 +659,7 @@ export class PiMemoryModel implements MemoryModelClient {
 
       const call = calls[0]!;
       try {
-        validateToolCall([tool], call);
-        // Pi may coerce values. Both schema and domain checks apply to the original input.
-        const schema = submission.parameters as TSchema;
-        const schemaError = Value.Check(schema, call.arguments) ? undefined :
-          new Error(JSON.stringify([...Value.Errors(schema, call.arguments)]));
-        // Keep actionable domain diagnostics. A corrected return value (or mutation) cannot
-        // override the schema result captured from the original arguments before validation.
-        const result = submission.validate(call.arguments);
-        if (schemaError) throw schemaError;
-        return result;
+        return this.validateSubmission(submission, tool, call);
       } catch (error) {
         const reason = rejectionText(error);
         // Recovery may retain independently valid batch items. Wrong-tool arguments must never

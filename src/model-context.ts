@@ -79,6 +79,30 @@ function entriesFor(messages: Message[]): SessionMessageEntry[] {
   }));
 }
 
+function recentCutIndex(messages: Message[], keepRecentTokens: number): number {
+  const entries = entriesFor(messages);
+  if (!entries.length) throw new Error("Memory context has no records to compact");
+  // Pi's cutter cannot select a cut after a final tool result. Account for that tail
+  // first so a large result retains its calling assistant rather than all old history.
+  let end = entries.length;
+  let tailTokens = 0;
+  while (end > 0 && entries[end - 1]!.message.role === "toolResult") {
+    tailTokens += estimateTokens(entries[--end]!.message);
+  }
+  if (!end) throw new Error("Memory context has tool results without a calling message");
+  return findCutPoint(entries, 0, end,
+    Math.max(0, keepRecentTokens - tailTokens)).firstKeptEntryIndex;
+}
+
+function assertImageSupport(context: Context, model: Model<any>): void {
+  if (context.messages.some(message => Array.isArray(message.content) &&
+    message.content.some(part => part.type === "image")) &&
+    !model.input?.includes("image")) {
+    throw new Error(`Memory model ${model.provider}/${model.id} does not support ` +
+      "image evidence. Select an image-capable model; no images were omitted.");
+  }
+}
+
 function summaryEvidence(message: Message, index: number): UserMessage {
   // Historical user envelopes already contain the original role, IDs and full content.
   // Wrap private assistant/tool turns too: Pi's tool-result serializer clips at 2,000 chars
@@ -89,14 +113,18 @@ function summaryEvidence(message: Message, index: number): UserMessage {
 
 /** Context state lives for one task. Original source evidence stays with the caller. */
 export class MemoryTaskContext {
-  private readonly settings: Required<CompactionSettings> | undefined;
+  private readonly settings: typeof DEFAULT_COMPACTION_SETTINGS | undefined;
 
   constructor(
     private readonly model: Model<any>,
     private readonly task: Message,
     settings?: CompactionSettings,
   ) {
-    this.settings = settings ? { ...DEFAULT_COMPACTION_SETTINGS, ...settings } : undefined;
+    this.settings = settings ? {
+      enabled: settings.enabled ?? DEFAULT_COMPACTION_SETTINGS.enabled,
+      reserveTokens: settings.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+      keepRecentTokens: settings.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
+    } : undefined;
   }
 
   async prepare(
@@ -105,12 +133,7 @@ export class MemoryTaskContext {
     sessionId: string | undefined,
     complete: SummaryCompletion,
   ): Promise<void> {
-    if (context.messages.some(message => Array.isArray(message.content) &&
-      message.content.some(part => part.type === "image")) &&
-      !this.model.input?.includes("image")) {
-      throw new Error(`Memory model ${this.model.provider}/${this.model.id} does not support ` +
-        "image evidence. Select an image-capable model; no images were omitted.");
-    }
+    assertImageSupport(context, this.model);
     const settings = this.settings;
     // Older callers have no Pi settings source. Production supplies persisted Pi settings;
     // ExtensionContext does not expose unsaved host SettingsManager overrides.
@@ -128,19 +151,8 @@ export class MemoryTaskContext {
     while (shouldCompact(size, this.model.contextWindow, settings) ||
         size + this.model.maxTokens > this.model.contextWindow) {
       if (signal.aborted) throw new Error("Memory model request aborted");
-      const entries = entriesFor(context.messages);
-      if (!entries.length) throw new Error("Memory context has no records to compact");
-      // Pi's cutter cannot select a cut after a final tool result. Account for that tail
-      // first so a large result retains its calling assistant rather than all old history.
-      let end = entries.length;
-      let tailTokens = 0;
-      while (end > 0 && entries[end - 1]!.message.role === "toolResult") {
-        tailTokens += estimateTokens(entries[--end]!.message);
-      }
-      if (!end) throw new Error("Memory context has tool results without a calling message");
-      const cut = findCutPoint(entries, 0, end,
-        Math.max(0, settings.keepRecentTokens - tailTokens));
-      const prefix = context.messages.slice(0, cut.firstKeptEntryIndex);
+      const firstKeptEntryIndex = recentCutIndex(context.messages, settings.keepRecentTokens);
+      const prefix = context.messages.slice(0, firstKeptEntryIndex);
       const records = prefix.filter((message) => message !== this.task);
       if (!records.length) {
         // A proactive threshold is not a hard limit. Policy/tools can cross it while all
@@ -156,7 +168,7 @@ export class MemoryTaskContext {
       // A task can fall inside the old prefix after investigation. Keep it verbatim and
       // outside summarization, alongside the unchanged policy and advertised tool schemas.
       if (prefix.includes(this.task)) messages.push(this.task);
-      messages.push(...context.messages.slice(cut.firstKeptEntryIndex));
+      messages.push(...context.messages.slice(firstKeptEntryIndex));
       const nextSize = contextTokens({ ...context, messages });
       if (nextSize >= size) {
         throw new Error("Memory compaction did not reduce context; no records were clipped");
@@ -172,7 +184,7 @@ export class MemoryTaskContext {
     sessionId: string | undefined,
     complete: SummaryCompletion,
   ): Promise<string> {
-    const records = messages.map(summaryEvidence);
+    const records = messages.map((message, index) => summaryEvidence(message, index));
     let offset = 0;
     let previousSummary: string | undefined;
     while (offset < records.length) {
