@@ -1695,6 +1695,7 @@ export function createForgetfulExtension(
         return dependencies.createRecall(client, model, config);
       return new RecallService(client, model, {
         deadlineMs: config.instance.timeoutMs,
+        concurrency: config.recallConcurrency,
       });
     };
 

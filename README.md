@@ -90,6 +90,7 @@ directory. The effective settings can also be represented as:
   "token_env": "FORGETFUL_TOKEN",
   "timeout_ms": 10000,
   "recall_model_timeout_ms": 5000,
+  "recall_concurrency": 2,
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto",
@@ -424,6 +425,22 @@ warning. Scope preference is independent of capture destination.
 overall deadline still applies when the model deadline is longer. Each capture and overlap task
 has a separate fixed three-minute model budget. Select a memory model that fits these limits.
 Restart or reload the extension after editing settings directly.
+
+`recall_concurrency` controls overlapping initial searches and read calls requested together by
+one recall reviewer. It defaults to **2**, accepts integers **1–8**, and is configured only in the
+user settings file. Set **1** for sequential execution or **8** for the maximum. Invalid values,
+including zero, produce a warning and fall back to 2; there is no unlimited mode. Each freed slot
+starts the next waiting request. Results retain request order, and individual failures do not hide
+successful sibling results or other failures' service details. After each read batch, the reviewer
+receives a complete source-ID snapshot so out-of-order replies cannot hide already-read evidence.
+Cancellation and deadlines stop in-flight HTTP requests and prevent waiting calls from starting.
+
+This is a per-recall concurrency limit, not a total query allowance or a service-wide connection
+limit. Initial planning still allows at most two queries; the reviewer can request more reads
+within the existing deadline. Calls depending on earlier results still require another model turn.
+Capture reads remain sequential. Existing supporting entity/document lookups are unchanged and
+are not governed by this setting. More concurrency does not guarantee lower latency; Forgetful's
+worker capacity and other sessions still matter.
 
 The selected model in Pi supplies the output allowance, including `maxTokens` overrides in Pi's
 `models.json`. The extension passes that allowance to Pi's model registry on initial requests and

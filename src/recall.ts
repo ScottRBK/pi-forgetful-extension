@@ -1,4 +1,6 @@
 import { Type } from "typebox";
+import { DEFAULT_RECALL_CONCURRENCY, isRecallConcurrency } from "./config.ts";
+import { mapConcurrent } from "./concurrency.ts";
 import {
   executeKnowledgeRead, KNOWLEDGE_READ_PARAMETERS, type KnowledgeReadRequest,
 } from "./knowledge-tools.ts";
@@ -75,6 +77,8 @@ const REVIEW_POLICY = [
   "files or websites. Follow useful leads; stop when further reading will not help this request.",
   "Only returned content supports claims. Metadata and titles are navigation leads. Read results",
   "include updated availableSources; preserve obsolete status and incomplete page coverage.",
+  "After each read batch, the latest user message supplies the current availableSources.",
+  "Use that complete snapshot instead of older per-read snapshots, which may finish out of order.",
   "Put selection and rejection explanations in reason, not summary.",
   "If nothing is useful, submit summary as the empty string and all ID arrays empty.",
   "A statement that nothing relevant was found is NOT a useful fact: it belongs in reason.",
@@ -171,6 +175,7 @@ export interface RecallPlan {
 }
 
 export interface RecallServiceOptions {
+  concurrency?: number;
   deadlineMs?: number;
   circuitFailureThreshold?: number;
   circuitCooldownMs?: number;
@@ -648,6 +653,7 @@ export class RecallService {
   private readonly cooldownMs: number;
   private readonly now: () => number;
   private readonly knowledge?: KnowledgeReadService;
+  private readonly concurrency: number;
   private failures = 0;
   private openedAt: number | undefined;
 
@@ -657,6 +663,10 @@ export class RecallService {
     options: RecallServiceOptions = {},
   ) {
     this.defaultDeadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    this.concurrency = options.concurrency ?? DEFAULT_RECALL_CONCURRENCY;
+    if (!isRecallConcurrency(this.concurrency)) {
+      throw new TypeError("Recall concurrency must be an integer from 1 to 8");
+    }
     this.failureThreshold =
       options.circuitFailureThreshold ?? DEFAULT_CIRCUIT_FAILURE_THRESHOLD;
     this.cooldownMs = options.circuitCooldownMs ?? DEFAULT_CIRCUIT_COOLDOWN_MS;
@@ -811,6 +821,8 @@ export class RecallService {
           ...(search.failure !== undefined ? { searchFailure: search.failure } : {}),
         },
         readTools: [this.recallReadTool(request, resolution, candidates)],
+        readConcurrency: this.concurrency,
+        readBatchContext: () => ({ availableSources: reviewSources(candidates) }),
         submission: recallReviewSubmission(
           candidates,
           reviewRejections,
@@ -1194,32 +1206,36 @@ export class RecallService {
     resolution: ScopeResolution,
     deadline: DeadlineSignal,
   ): Promise<SearchOutcome> {
-    const memories: Memory[] = [];
-    for (const query of plan.queries.slice(0, MAX_SEARCHES)) {
-      this.ensureLive(deadline);
-      try {
-        const found = await raceAbort(
-          this.client.search(
-            this.searchRequest(
-              query,
-              plan,
-              request.context,
-              scope,
-              resolution,
-            ),
+    const outcomes = await mapConcurrent(
+      plan.queries.slice(0, MAX_SEARCHES), this.concurrency,
+      async (query): Promise<SearchOutcome> => {
+        this.ensureLive(deadline);
+        try {
+          const memories = await raceAbort(this.client.search(
+            this.searchRequest(query, plan, request.context, scope, resolution),
             deadline.signal,
-          ),
-          deadline.signal,
-        );
-        memories.push(...found);
-      } catch (error) {
-        if (isAbort(error)) throw error;
-        return { memories, failed: true, diagnostic: exceptionDiagnostic("memory search", error),
-          // Display diagnostics remain bounded; the model receives the actual service failure.
-          failure: this.searchFailure(error) };
-      }
-    }
-    return { memories, failed: false };
+          ), deadline.signal);
+          return { memories, failed: false };
+        } catch (error) {
+          if (isAbort(error)) throw error;
+          return { memories: [], failed: true,
+            diagnostic: exceptionDiagnostic("memory search", error),
+            failure: this.searchFailure(error) };
+        }
+      },
+    );
+    const failures = outcomes.filter((outcome) => outcome.failed);
+    return {
+      // Completion order must not change candidate order or hide a successful sibling search.
+      memories: outcomes.flatMap((outcome) => outcome.memories),
+      failed: failures.length > 0,
+      ...(failures.length ? {
+        diagnostic: failures.map((outcome) => outcome.diagnostic).join("; "),
+        // Keep the existing single-error shape, and preserve every failure for a failed batch.
+        failure: failures.length === 1 ? failures[0]!.failure :
+          failures.map((outcome) => outcome.failure),
+      } : {}),
+    };
   }
 
   private searchFailure(error: unknown): unknown {

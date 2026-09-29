@@ -8,6 +8,22 @@ import type { FileLogLevel } from "./logging.ts";
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
 export const DEFAULT_FORGETFUL_TIMEOUT_MS = 10_000;
 export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
+export const DEFAULT_RECALL_CONCURRENCY = 2;
+export const MAX_RECALL_CONCURRENCY = 8;
+
+export function isRecallConcurrency(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) &&
+    value >= 1 && value <= MAX_RECALL_CONCURRENCY;
+}
+
+function resolveRecallConcurrency(value: unknown, warnings: string[]): number {
+  if (isRecallConcurrency(value)) return value;
+  if (value !== undefined) warnings.push(
+    `Invalid recall_concurrency; choose an integer from 1 to ${MAX_RECALL_CONCURRENCY}. ` +
+    `Using ${DEFAULT_RECALL_CONCURRENCY}.`,
+  );
+  return DEFAULT_RECALL_CONCURRENCY;
+}
 
 export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";
@@ -57,6 +73,7 @@ export interface ForgetfulConfig {
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
   recallModelTimeoutMs: number;
+  recallConcurrency: number;
   model?: ModelSelection;
   prompts: PromptOverlays;
   warnings: string[];
@@ -89,6 +106,7 @@ export interface PersistedUserSettings {
   verbosity?: unknown;
   logging?: unknown;
   recall_model_timeout_ms?: unknown;
+  recall_concurrency?: unknown;
   model?: unknown;
 }
 
@@ -342,6 +360,7 @@ export async function loadForgetfulConfig(
       user.recall_model_timeout_ms,
       DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
     ),
+    recallConcurrency: resolveRecallConcurrency(user.recall_concurrency, warnings),
     instance: {
       baseUrl: rawBaseUrl.replace(/\/$/, ""),
       token,
@@ -394,6 +413,7 @@ export async function updateUserSettings(
       | "verbosity"
       | "logging"
       | "recall_model_timeout_ms"
+      | "recall_concurrency"
       | "model"
     >
   >,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -30,6 +30,7 @@ test("fresh projects use global scope and the default service endpoint", async (
   assert.equal(config.model, undefined);
   assert.equal(config.instance.timeoutMs, 10_000);
   assert.equal(config.recallModelTimeoutMs, 5_000);
+  assert.equal(config.recallConcurrency, 2);
   assert.equal(config.verbosity, "warning");
 });
 
@@ -205,6 +206,48 @@ test("writing a scope creates only the project-local settings file", async () =>
   await assert.rejects(
     readFile(join(agentDir, "forgetful", "settings.json"), "utf8"),
   );
+});
+
+test("user recall concurrency accepts 1 to 8 and ignores project overrides", async (t) => {
+  // Arrange: concurrency is a user-controlled service load limit, separate from project scope.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const settings = join(root, "settings.json");
+  await mkdir(join(root, ".pi", "forgetful"), { recursive: true });
+  await writeFile(join(root, ".pi", "forgetful", "settings.json"),
+    JSON.stringify({ recall_concurrency: 8 }));
+
+  for (const limit of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    await writeFile(settings, JSON.stringify({ recall_concurrency: limit }));
+
+    // Act.
+    const config = await loadForgetfulConfig({
+      cwd: root, trusted: true, userSettingsPath: settings,
+    });
+
+    // Assert.
+    assert.equal(config.recallConcurrency, limit);
+    assert.deepEqual(config.warnings, []);
+  }
+});
+
+test("invalid recall concurrency warns and falls back to two", async (t) => {
+  // Arrange: zero is not an unlimited mode, and the hard maximum cannot be bypassed.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const settings = join(root, "settings.json");
+  for (const value of [0, -1, 9, 1.5, "2", null, true, {}, 1e20]) {
+    await writeFile(settings, JSON.stringify({ recall_concurrency: value }));
+
+    // Act.
+    const config = await loadForgetfulConfig({
+      cwd: root, trusted: true, userSettingsPath: settings,
+    });
+
+    // Assert.
+    assert.equal(config.recallConcurrency, 2, JSON.stringify(value));
+    assert.match(config.warnings.join("\n"), /recall_concurrency.*1.*8.*2/);
+  }
 });
 
 test("recall model timeout is independently configurable from the overall timeout", async () => {

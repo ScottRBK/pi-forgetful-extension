@@ -217,6 +217,10 @@ export interface ModelRequest {
   submission?: ModelSubmissionTool;
   /** Task-specific read capabilities. Private models never inherit the main agent's tools. */
   readTools?: ModelReadTool[];
+  /** Concurrent reads in one tool-call batch: 1–8, default 1. Recall opts in; capture stays serial. */
+  readConcurrency?: number;
+  /** Task-owned state refreshed after all results in a read batch, before the next model turn. */
+  readBatchContext?: () => unknown;
   /** Diagnostic correlation only; never included in the model input. */
   diagnosticContext?: {
     jobId?: string;

@@ -22,11 +22,13 @@ import {
 } from "./contracts.ts";
 import {
   DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
+  isRecallConcurrency,
   type ModelSelection,
 } from "./config.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import type { DiagnosticLogger } from "./logging.ts";
 import { evidenceMessage, MemoryTaskContext } from "./model-context.ts";
+import { mapConcurrent } from "./concurrency.ts";
 
 export interface ModelRegistryPort {
   find(provider: string, modelId: string): Model<any> | undefined;
@@ -454,6 +456,9 @@ export class PiMemoryModel implements MemoryModelClient {
   private async completeRequest(request: ModelRequest): Promise<unknown> {
     if (request.signal?.aborted)
       throw new Error("Memory model request aborted");
+    if (!isRecallConcurrency(request.readConcurrency ?? 1)) {
+      throw new TypeError("Memory model readConcurrency must be an integer from 1 to 8");
+    }
     const model = this.registry.find(
       this.selection.provider,
       this.selection.id,
@@ -642,10 +647,15 @@ export class PiMemoryModel implements MemoryModelClient {
       if (calls.length > 0 && calls.every((call) =>
         reads.some((read) => read.name === call.name))) {
         context.messages.push(sanitizedAssistantForHistory(response));
-        for (const call of calls) {
+        const results = await mapConcurrent(calls, request.readConcurrency ?? 1, (call) => {
           const read = reads.find((item) => item.name === call.name)!;
-          context.messages.push(await this.executeRead(read, call, request, deadline));
-        }
+          return this.executeRead(read, call, request, deadline);
+        });
+        ensureCompletionFinished(response, request, deadline.timedOut, true);
+        context.messages.push(...results);
+        if (request.readBatchContext) context.messages.push({
+          role: "user", content: serializeInput(request.readBatchContext()), timestamp: Date.now(),
+        });
         continue;
       }
       if (calls.length !== 1) {

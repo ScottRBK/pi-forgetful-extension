@@ -13,12 +13,14 @@ import { PiMemoryModel, type PiMemoryModelOptions } from "../src/model.ts";
 type WireRequest = {
   messages: Array<{ role: string; tool_call_id?: string;
     content?: string | Array<{ type: string; text?: string;
-      image_url?: { url: string } }> | null }>;
+      image_url?: { url: string } }> | null;
+    tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> }>;
   tools?: Array<{ function: { name: string } }>;
   max_tokens?: number;
   max_completion_tokens?: number;
 };
-type Reply = string | { name: string; arguments: unknown } | { status: number; body: string };
+type ToolReply = { name: string; arguments: unknown };
+type Reply = string | ToolReply | ToolReply[] | { status: number; body: string };
 
 function messageText(message: WireRequest["messages"][number]): string {
   return typeof message.content === "string" ? message.content :
@@ -48,10 +50,12 @@ async function fixture(
     }
     const base = { id: `completion-${index}`, object: "chat.completion.chunk",
       created: 1, model: selection };
-    const delta = typeof reply === "string" ? { content: reply } : { tool_calls: [{
-      index: 0, id: `call-${index}`, type: "function",
-      function: { name: reply.name, arguments: JSON.stringify(reply.arguments) },
-    }] };
+    const delta = typeof reply === "string" ? { content: reply } : {
+      tool_calls: (Array.isArray(reply) ? reply : [reply]).map((call, callIndex) => ({
+        index: callIndex, id: Array.isArray(reply) ? `call-${index}-${callIndex}` : `call-${index}`,
+        type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      })),
+    };
     const chunks = [
       { ...base, choices: [{ index: 0, delta: { role: "assistant", ...delta },
         finish_reason: null }] },
@@ -310,6 +314,60 @@ test("read continuations compact complete outcomes and keep the task and correct
       ["submit_result", "inspect_source"]);
   }
 });
+
+for (const readConcurrency of [1, 2]) {
+  test(`compaction keeps fresh reads and their source snapshot at concurrency ${readConcurrency}`, {
+    timeout: 10_000,
+  }, async (t) => {
+    // Arrange: the history fits initially; a new read batch forces compaction before review.
+    let taskCalls = 0;
+    const bodies = [1, 2].map(id => `${"Complete read evidence. ".repeat(240)}READ_BODY_END_${id}`);
+    const snapshot = { availableSources: { memoryIds: [2] } };
+    const { model, requests } = await fixture(t, (request) => {
+      if (!request.tools?.length) return "Summary of older historical evidence.";
+      if (++taskCalls === 1) return [1, 2].map(id => ({
+        name: "inspect_source", arguments: { id },
+      }));
+      return accepted;
+    }, { compactionSettings: settings }, "small");
+
+    // Act: one read fails; both complete outcomes and the snapshot belong to the retained tail.
+    const result = await model.complete({ purpose: "recall-review", policy: "CURRENT_POLICY",
+      input: { task: "CURRENT_TASK" }, conversation: longConversation().slice(0, 7), submission,
+      readConcurrency, readBatchContext: () => snapshot,
+      readTools: [{ name: "inspect_source", description: "Read source evidence.",
+        parameters: Type.Object({ id: Type.Integer() }, { additionalProperties: false }),
+        execute: async (input) => {
+          const { id } = input as { id: number };
+          if (id === 1) throw new Error(`HTTP 503: ${bodies[0]}`);
+          return { id, body: bodies[1] };
+        } }],
+    });
+
+    // Assert: compaction summarises only older records, not evidence awaiting its first review.
+    assert.deepEqual(result, { answer: "Recorded." });
+    assert.equal(taskCalls, 2);
+    assert.ok(requests[0]!.tools?.length, "the initial history must fit without compaction");
+    const summaries = requests.filter(request => !request.tools?.length);
+    assert.ok(summaries.length > 0, "compaction must run after the read batch");
+    const review = requests.at(-1)!;
+    const results = review.messages.filter(message => message.role === "tool");
+    assert.equal(results.length, 2, "both fresh results must reach the reviewer verbatim");
+    assert.equal(messageText(results[0]!), `HTTP 503: ${bodies[0]}`);
+    assert.deepEqual(JSON.parse(messageText(results[1]!)), { id: 2, body: bodies[1] });
+    const calls = review.messages.flatMap(message => message.tool_calls ?? []);
+    assert.deepEqual(calls.map(call => call.id), results.map(message => message.tool_call_id));
+    assert.deepEqual(calls.map(call => JSON.parse(call.function.arguments)),
+      [{ id: 1 }, { id: 2 }]);
+    assert.equal(review.messages.at(-1)!.role, "user");
+    assert.deepEqual(JSON.parse(messageText(review.messages.at(-1)!)), snapshot);
+    assert.match(review.messages.map(messageText).join("\n"), /CURRENT_TASK/);
+    assert.match(review.messages.map(messageText).join("\n"), /CURRENT_POLICY/);
+    for (const summary of summaries) {
+      assert.doesNotMatch(summary.messages.map(messageText).join("\n"), /READ_BODY_END_/);
+    }
+  });
+}
 
 test("cancelling compaction aborts the task before any submission request", async (t) => {
   // Arrange: abort only once the real provider receives the summary request.

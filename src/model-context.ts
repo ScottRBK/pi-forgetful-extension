@@ -82,10 +82,15 @@ function entriesFor(messages: Message[]): SessionMessageEntry[] {
 function recentCutIndex(messages: Message[], keepRecentTokens: number): number {
   const entries = entriesFor(messages);
   if (!entries.length) throw new Error("Memory context has no records to compact");
-  // Pi's cutter cannot select a cut after a final tool result. Account for that tail
-  // first so a large result retains its calling assistant rather than all old history.
+  // A post-read state snapshot belongs to the unread tool batch, not a new user turn.
+  // Reserve it with the results so Pi cannot cut at the snapshot and summarise fresh evidence.
   let end = entries.length;
   let tailTokens = 0;
+  if (end > 1 && entries[end - 1]!.message.role === "user" &&
+      entries[end - 2]!.message.role === "toolResult") {
+    tailTokens += estimateTokens(entries[--end]!.message);
+  }
+  // Pi cannot cut at a tool result. Account for this tail to retain its calling assistant.
   while (end > 0 && entries[end - 1]!.message.role === "toolResult") {
     tailTokens += estimateTokens(entries[--end]!.message);
   }

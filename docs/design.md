@@ -165,7 +165,9 @@ smaller failure surface.
    this user-controlled scope for an individual operation.
 4. Search a warm Forgetful HTTP service. When the plan selects retrieval, the next model boundary
    renders retrieval-underway state if the result is not ready; this passive update does not steer
-   or trigger a model turn.
+   or trigger a model turn. Initial searches overlap up to the user `recall_concurrency` limit
+   (default 2, integer 1–8). Preserve query order when merging successful results and expose
+   every failed search's actual error to the reviewer.
 5. Ask the same memory model to review selected memory and rich results against the question and
    session context. Do not shorten the selected records, session entries, or policy by character
    count before sending them to the model. It submits a summary, selected source IDs and a brief
@@ -176,7 +178,13 @@ smaller failure surface.
    redacted rejected arguments but never enters main-agent context or Pi session history.
    Inject only the summary and validated references, never raw results or appended
    attachments. Nothing relevant means no injection. Failed, timed-out, or exhausted review
-   injects nothing, without a raw fallback.
+   injects nothing, without a raw fallback. Read calls requested together by the reviewer use
+   the same concurrency limit and retain tool-call order in history. The task supplies a fresh
+   `availableSources` snapshot after the batch so earlier per-read snapshots cannot supersede
+   delivered evidence. A freed slot starts the next waiting read; caller cancellation and the
+   shared deadline stop waiting reads from starting and abort in-flight HTTP requests. Capture
+   reads remain sequential. The limit is per recall, not a global service connection limit or a
+   total-query cap; supporting knowledge expansion keeps its existing bounds.
 6. Render exactly one current terminal state: bounded reviewed context, explicit no-context, or
    explicit failure. If completion was not consumed by the current boundary, send one hidden
    generic background-completion wake using Pi's steer seam; it steers an active run or triggers
