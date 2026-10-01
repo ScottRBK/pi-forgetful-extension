@@ -600,7 +600,9 @@ test(
       knowledgeState: unknown;
     };
     assert.equal(outcome.stage, "execution-stopped");
-    assert.deepEqual(outcome.knowledgeState, previous.knowledgeState);
+    assert.ok(previous.knowledgeState, "pending work must preserve uncertain-write receipts");
+    assert.equal(outcome.knowledgeState, undefined,
+      "completed work must release bulky receipts rather than retain cleanup data");
     assert.equal(job.callCount, 3, "Extraction, overlap and one explicit retry review");
 
     const entities = await client.knowledge.searchEntities("Gateway", 10);

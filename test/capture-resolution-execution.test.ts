@@ -70,7 +70,8 @@ async function fixture(
     return response ?? fetch(url, init);
   } });
   const model = new PiMemoryModel({
-    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
+    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as any,
     complete: async (_model, context) => {
       state.calls++;
       state.inputs.push(decodeProviderContext(context).input);

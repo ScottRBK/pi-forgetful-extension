@@ -39,6 +39,20 @@ function snapshot(finalEntryId = "assistant-1"): CaptureSnapshot {
   };
 }
 
+function orderedSnapshot(ids: string[]): CaptureSnapshot {
+  const finalEntryId = ids.at(-1) ?? "assistant-1";
+  const input = snapshot(finalEntryId);
+  input.entries = ids.map((id, index) => ({
+    id,
+    role: index % 2 === 0 ? "user" : "assistant",
+    text: `Message ${index + 1}`,
+  }));
+  input.conversation = input.entries.map((entry) => ({ id: entry.id, role: entry.role,
+    text: entry.text }));
+  input.conversationCoverage = "complete";
+  return input;
+}
+
 function pendingConflict(id: string): PendingConflict {
   const timestamp = new Date().toISOString();
   return {
@@ -393,28 +407,56 @@ test("DurableQueueStore rejects an unsupported or malformed queue version", asyn
   await assert.rejects(() => queue.listJobs(), /Invalid queue state/);
 });
 
-test("retry exhaustion scrubs the fixed transcript from a terminal queue record", async () => {
-  const directory = await mkdtemp(
-    join(tmpdir(), "pi-forgetful-queue-terminal-"),
-  );
-  const queue = new DurableQueueStore({
-    directory,
-    instanceId: "instance-a",
-    maxAttempts: 1,
-  });
-  await queue.enqueue(snapshot());
-  const claimed = await queue.claimNext({ instanceId: "instance-a" });
-  assert(claimed);
-  await queue.checkpoint(claimed.id, {
-    status: "pending",
-    lastError: "temporary failure",
-  });
-  assert.equal(await queue.claimNext({ instanceId: "instance-a" }), undefined);
-  const terminal = (await queue.listJobs({ instanceId: "instance-a" }))[0];
+for (const failure of ["checkpoint", "claim exhaustion", "stale recovery"] as const) {
+  test(`${failure} deletes failed work and conflicts but preserves restart dedupe`, async (t) => {
+    // Arrange: use real sidecars and all three conflict states on a three-attempt job.
+    const directory = await mkdtemp(join(tmpdir(), "queue-failed-cleanup-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    let now = new Date("2026-10-01T10:00:00Z");
+    const options = { directory, instanceId: "instance-a", now: () => now };
+    const queue = new DurableQueueStore(options);
+    const original = snapshot();
+    const queued = await queue.enqueue(original);
+    await queue.checkpoint(queued.jobId, { inspectionEntries: [
+      { id: "inspection:source", role: "toolResult", toolName: "read", text: "source evidence" },
+    ] });
+    const conflictIds = ["pending", "resolved", "rejected"] as const;
+    for (const status of conflictIds) {
+      await queue.addConflict({ ...pendingConflict(status), jobId: queued.jobId, status });
+    }
+    const watermark = await queue.currentWatermark(original.context);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      assert.equal((await queue.claimNext())?.attempts, attempt);
+      if (attempt < 3) await queue.checkpoint(queued.jobId, { status: "pending" });
+    }
 
-  assert.equal(terminal?.status, "failed");
-  assert.deepEqual(terminal?.snapshot.entries, []);
-});
+    // Act: finish the third failure, or recover its abandoned claim without a fourth attempt.
+    if (failure === "checkpoint") {
+      await queue.checkpoint(queued.jobId, { status: "failed", lastError: "third failure" });
+    } else {
+      if (failure === "claim exhaustion") {
+        await queue.checkpoint(queued.jobId, { status: "pending" });
+      } else {
+        now = new Date("2026-10-01T10:10:00Z");
+      }
+      assert.equal(await new DurableQueueStore(options).claimNext(), undefined);
+    }
+    assert.deepEqual(await readdir(directory), ["queue.json"]);
+    for (const id of conflictIds) assert.equal(await queue.getConflict(id), undefined);
+    const restarted = new DurableQueueStore(options);
+
+    // Assert: no job, conflict or sidecar survives, but the considered work remains deduplicated.
+    assert.equal(await restarted.getJob(queued.jobId), undefined);
+    assert.deepEqual(await restarted.listJobMetadata(), []);
+    for (const id of conflictIds) assert.equal(await restarted.getConflict(id), undefined);
+    assert.deepEqual(await restarted.pendingConflicts(), []);
+    assert.deepEqual(await restarted.currentWatermark(original.context), watermark);
+    assert.deepEqual(await restarted.enqueue(original), {
+      queued: false, jobId: queued.jobId, reason: "duplicate",
+    });
+    assert.deepEqual(await readdir(directory), ["queue.json"]);
+  });
+}
 
 test("terminal cleanup retains outstanding work and pending-conflict evidence", async (t) => {
   // Arrange: two independent jobs, one with a conflict that outlives its capture run.
@@ -580,7 +622,7 @@ test("the index ceiling rejects metadata without advancing work or losing accept
     t.after(() => rm(directory, { recursive: true, force: true }));
     const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
     const tooLarge = snapshot("oversized-metadata");
-    tooLarge.policy = "x".repeat(6 * 1024 * 1024);
+    tooLarge.policy = "x".repeat(51 * 1024 * 1024);
 
     // Act: refuse the oversized index transaction, then accept a normal job.
     await assert.rejects(queue.enqueue(tooLarge), /storage limit/);
@@ -672,7 +714,7 @@ test("a relocated queue remains self-contained without its original directory", 
   assert.equal(recovered?.attempts, 0);
 });
 
-for (const status of ["complete", "failed"] as const) {
+for (const status of ["complete"] as const) {
   test(`${status} conflict context and inspection evidence survive restart`, async (t) => {
     // Arrange: the worker has a durable conflict referring to its original conversation.
     const directory = await mkdtemp(join(tmpdir(), "queue-conflict-context-"));
@@ -737,7 +779,7 @@ for (const damage of ["missing", "corrupt"] as const) {
   });
 }
 
-for (const status of ["complete", "failed"] as const) {
+for (const status of ["complete"] as const) {
   test(`${status} conflict rejects a missing index reference without deleting retained evidence`,
     async (t) => {
       // Arrange: a retained conversation and completed operations must survive index damage.
@@ -767,3 +809,311 @@ for (const status of ["complete", "failed"] as const) {
       assert.deepEqual((await readdir(directory)).sort(), names);
     });
 }
+
+for (const version of [1, 2] as const) {
+  for (const recovery of ["duplicate enqueue", "claim"] as const) {
+    test(`legacy v${version} failed jobs are released during ${recovery}`, async (t) => {
+      // Arrange: emulate old persisted failed history, including a missing snapshot reference.
+      const directory = await mkdtemp(join(tmpdir(), "queue-legacy-failed-"));
+      t.after(() => rm(directory, { recursive: true, force: true }));
+      const options = { directory, instanceId: "instance-a" };
+      const queue = new DurableQueueStore(options);
+      const original = snapshot();
+      const queued = await queue.enqueue(original);
+      await queue.checkpoint(queued.jobId, { inspectionEntries: [
+        { id: "inspection:old", role: "toolResult", toolName: "read", text: "old evidence" },
+      ] });
+      await queue.addConflict({ ...pendingConflict("legacy"), jobId: queued.jobId });
+      await queue.addConflict(pendingConflict("unrelated"));
+      const watermark = await queue.currentWatermark(original.context);
+      const index = JSON.parse(await readFile(queue.filePath, "utf8"));
+      index.version = version;
+      index.jobs[0].status = "failed";
+      index.jobs[0].attempts = 3;
+      delete index.jobs[0].snapshotDigest;
+      if (version === 1) index.jobs[0].snapshot = original;
+      await writeFile(queue.filePath, JSON.stringify(index));
+
+      // Act: ordinary durable recovery must release legacy data without a cleanup command.
+      const restarted = new DurableQueueStore(options);
+      if (recovery === "claim") assert.equal(await restarted.claimNext(), undefined);
+      else assert.equal((await restarted.enqueue(original)).queued, false);
+      const reopened = new DurableQueueStore(options);
+
+      // Assert: unrelated conflicts and independent watermark history survive reclamation.
+      assert.deepEqual(await reopened.listJobs(), []);
+      assert.equal(await reopened.getConflict("legacy"), undefined);
+      assert.equal((await reopened.getConflict("unrelated"))?.status, "pending");
+      assert.deepEqual(await reopened.currentWatermark(original.context), watermark);
+      assert.equal((await reopened.enqueue(original)).queued, false);
+      assert.deepEqual(await readdir(directory), ["queue.json"]);
+    });
+  }
+}
+
+test("default queue index accepts more than 5 MiB and rejects more than 50 MiB", async (t) => {
+  // Arrange: retry artifacts live in the index, independently of transcript sidecars.
+  const directory = await mkdtemp(join(tmpdir(), "queue-capacity-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const options = { directory, instanceId: "instance-a" };
+  const queue = new DurableQueueStore(options);
+  const queued = await queue.enqueue(snapshot());
+  const artifacts = ["overlap evidence ".repeat(400_000)];
+
+  // Act: persist an index beyond the former limit and resume through the public store.
+  await queue.checkpoint(queued.jobId, { extractedCandidates: artifacts });
+  const restarted = new DurableQueueStore(options);
+
+  // Assert: the larger index survives restart; exceeding 50 MiB leaves accepted state intact.
+  assert.ok((await stat(queue.filePath)).size > 5 * 1024 * 1024);
+  assert.deepEqual((await restarted.getJob(queued.jobId))?.extractedCandidates, artifacts);
+  await assert.rejects(restarted.checkpoint(queued.jobId, {
+    extractedCandidates: ["large artifact ".repeat(3_500_000)],
+  }), /bounded storage limit/);
+  assert.deepEqual((await restarted.getJob(queued.jobId))?.extractedCandidates, artifacts);
+});
+
+test("completion keeps small diagnostic outcomes and leaves pending retry artifacts intact",
+  async (t) => {
+    // Arrange: two jobs contain the same bulky retry artifacts; one still needs conflict evidence.
+    const directory = await mkdtemp(join(tmpdir(), "queue-complete-metadata-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const options = { directory, instanceId: "instance-a" };
+    const queue = new DurableQueueStore(options);
+    const completedId = (await queue.enqueue(snapshot("completed"))).jobId;
+    const pendingId = (await queue.enqueue(snapshot("pending"))).jobId;
+    const content = "detailed stored knowledge ".repeat(10_000);
+    const patch = {
+      extractedCandidates: [{ id: "fact", title: "Database choice", content,
+        sourceEntryIds: ["user-1"], documents: [{ content }], codeArtifacts: [{ content }] }],
+      candidateOutcomes: { fact: {
+        stage: "created", destinationProjectId: 7, memoryId: 42,
+        decision: { action: "create", reason: content }, reason: "Stored database choice",
+        overlaps: [{ id: 12, content }],
+        linkReview: { status: "partial", reason: "One unrelated memory was unavailable",
+          unreviewed: [{ memoryId: 90, reason: "Outside destination" }],
+          memory: { content }, memories: [{ content }], previous: { memory: { content } },
+          resources: { documents: [{ content }], codeArtifacts: [{ content }] } },
+        knowledgeState: { documents: [{ content }] }, creation: { result: { content } },
+      } },
+    };
+    for (const id of [completedId, pendingId]) await queue.checkpoint(id, patch);
+    await queue.addConflict({ ...pendingConflict("retain-context"), jobId: completedId });
+    const before = await queue.getJob(pendingId);
+
+    // Act: complete one job and reopen the durable store.
+    const completed = await queue.complete(completedId);
+    const restarted = new DurableQueueStore(options);
+    const metadata = (await restarted.listJobMetadata()).find((job) => job.id === completedId)!;
+
+    // Assert: UI fields remain useful while bulky artifacts no longer occupy completed metadata.
+    assert.ok(Buffer.byteLength(JSON.stringify(metadata)) < 4_000);
+    assert.deepEqual(metadata.extractedCandidates, [{
+      id: "fact", title: "Database choice", content: content.slice(0, 2_000),
+    }]);
+    assert.deepEqual(metadata.candidateOutcomes.fact, {
+      stage: "created", action: "create", destinationProjectId: 7, memoryId: 42,
+      sourceEntryIds: ["user-1"], reason: "Stored database choice",
+      linkReview: { status: "partial", reason: "One unrelated memory was unavailable",
+        unreviewed: [{ memoryId: 90, reason: "Outside destination" }] },
+    });
+    assert.deepEqual(completed.candidateOutcomes, metadata.candidateOutcomes);
+    assert.deepEqual(await restarted.getJob(pendingId), before);
+    assert.deepEqual((await restarted.getJob(completedId))?.snapshot.entries,
+      snapshot("completed").entries);
+  });
+
+test("inactive successful summary cache expires without clearing enqueue dedupe", async (t) => {
+  // Arrange: one completed compacted capture publishes a reusable summary for its branch.
+  const directory = await mkdtemp(join(tmpdir(), "queue-summary-retention-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let now = new Date("2026-10-01T10:00:00Z");
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a", retentionMs: 1000,
+    now: () => now });
+  const original = orderedSnapshot(["entry-1", "entry-2", "entry-3"]);
+  const queued = await queue.enqueue(original);
+  await queue.checkpoint(queued.jobId, { compactedConversation: { summary: "Cached summary",
+    summarizedThroughEntryId: "entry-2", retainedConversation: original.conversation!.slice(2) } });
+  await queue.complete(queued.jobId);
+  const withSummary = await queue.getWatermark("session-1", "branch-1");
+  assert.ok(withSummary.historyDigest);
+
+  // Act: mutate a different branch after retention so this branch is inactive.
+  now = new Date("2026-10-01T10:00:02Z");
+  await queue.enqueue({ ...snapshot("other-branch"), context: { ...original.context,
+    branchId: "branch-2" } });
+  const retained = await queue.getWatermark("session-1", "branch-1");
+  const duplicate = await queue.enqueue(original);
+  const later = orderedSnapshot(["entry-1", "entry-2", "entry-3", "entry-4"]);
+  const accepted = await queue.enqueue(later);
+  const laterJob = (await queue.getJob(accepted.jobId))!;
+
+  // Assert: only the reusable summary expires; the dedupe receipt and future work stay intact.
+  assert.equal(retained.historyDigest, undefined);
+  assert.deepEqual(duplicate, { queued: false, jobId: queued.jobId, reason: "duplicate" });
+  assert.equal(accepted.queued, true);
+  assert.doesNotMatch(JSON.stringify(laterJob.snapshot.conversation), /Cached summary/);
+  assert.ok(laterJob.snapshot.entries.some((entry) => entry.id === "entry-1"));
+});
+
+test("damaged reusable summary cache falls back but damaged source evidence still errors",
+  async (t) => {
+    // Arrange: create a successful summary cache, then damage only that cache sidecar.
+    const directory = await mkdtemp(join(tmpdir(), "queue-summary-damage-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    const original = orderedSnapshot(["entry-1", "entry-2", "entry-3"]);
+    const completed = await queue.enqueue(original);
+    await queue.checkpoint(completed.jobId, { compactedConversation: { summary: "Reusable",
+      summarizedThroughEntryId: "entry-2",
+      retainedConversation: original.conversation!.slice(2) } });
+    await queue.complete(completed.jobId);
+    const digest = (await queue.getWatermark("session-1", "branch-1")).historyDigest!;
+    const cacheName = (await readdir(directory)).find((name) => name.includes(digest))!;
+    await writeFile(join(directory, cacheName), "{not json");
+
+    // Act: enqueueing new work accepts the original pinned history and reports the cache error.
+    const next = orderedSnapshot(["entry-1", "entry-2", "entry-3", "entry-4"]);
+    const accepted = await queue.enqueue(next);
+    const job = (await queue.getJob(accepted.jobId))!;
+    const cleared = await queue.getWatermark("session-1", "branch-1");
+
+    // Assert: reusable cache damage is recoverable, but source evidence damage is still fatal.
+    assert.equal(accepted.queued, true);
+    assert.match(accepted.historyError ?? "", /summary cache/i);
+    assert.equal(cleared.historyDigest, undefined);
+    assert.ok(job.snapshot.entries.some((entry) => entry.id === "entry-1"));
+    const sourceName = (await readdir(directory))
+      .find((name) => name.startsWith("snapshot-") && !name.includes(digest))!;
+    await rm(join(directory, sourceName));
+    await assert.rejects(queue.getJob(accepted.jobId), { code: "ENOENT" });
+  });
+
+test("completed capture cursor advances only on success and never rolls back on an older retry",
+  async (t) => {
+    // Arrange: enqueue has its own receipt, independent of completed and summarized progress.
+    const directory = await mkdtemp(join(tmpdir(), "queue-completed-cursor-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    const old = await queue.enqueue(orderedSnapshot(["entry-1", "entry-2"]));
+    const newer = await queue.enqueue(orderedSnapshot(["entry-1", "entry-2", "entry-3"]));
+    const pending = await queue.getWatermark("session-1", "branch-1");
+    assert.equal(pending.lastEntryId, "entry-3");
+    assert.equal(pending.capturedThroughEntryId, undefined);
+
+    // Act: successful newer work completes before an older retry.
+    await queue.complete(newer.jobId);
+    const completed = await queue.getWatermark("session-1", "branch-1");
+    await queue.complete(old.jobId);
+    const reopened = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    const afterRetry = await reopened.getWatermark("session-1", "branch-1");
+
+    // Assert: no false progress from enqueue, failure or out-of-order completion.
+    assert.equal(completed.capturedThroughEntryId, "entry-3");
+    assert.equal(afterRetry.capturedThroughEntryId, "entry-3");
+    assert.equal(afterRetry.historyThroughEntryId, undefined);
+    const failing = await reopened.enqueue(orderedSnapshot([
+      "entry-1", "entry-2", "entry-3", "entry-4",
+    ]));
+    await reopened.checkpoint(failing.jobId, { status: "failed" });
+    const afterFailure = await reopened.getWatermark("session-1", "branch-1");
+    assert.equal(afterFailure.capturedThroughEntryId, "entry-3");
+    assert.equal(afterFailure.lastEntryId, "entry-4");
+  });
+
+for (const protectedBy of ["pending job", "pending conflict"] as const) {
+  test(`summary retention protects a branch with a ${protectedBy}`, async (t) => {
+    // Arrange: completed summarized work and an outstanding consumer on the same branch.
+    const directory = await mkdtemp(join(tmpdir(), "queue-summary-active-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    let now = new Date("2026-10-01T10:00:00Z");
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a", retentionMs: 1000,
+      now: () => now });
+    const first = orderedSnapshot(["entry-1", "entry-2", "entry-3"]);
+    const queued = await queue.enqueue(first);
+    await queue.checkpoint(queued.jobId, { compactedConversation: { summary: "Active summary",
+      summarizedThroughEntryId: "entry-2", retainedConversation: first.conversation!.slice(2) } });
+    if (protectedBy === "pending conflict") {
+      await queue.addConflict({ ...pendingConflict("active-summary"), jobId: queued.jobId });
+    }
+    await queue.complete(queued.jobId);
+    const active = protectedBy === "pending job"
+      ? await queue.enqueue(orderedSnapshot(["entry-1", "entry-2", "entry-3", "entry-4"]))
+      : undefined;
+    const cached = await queue.getWatermark("session-1", "branch-1");
+    assert.ok(cached.historyDigest);
+
+    // Act: expiry runs while this branch still has work or conflict evidence to retain.
+    now = new Date("2026-10-01T10:00:02Z");
+    await queue.advanceWatermark({ sessionId: "other-session", branchId: "other-branch",
+      entryIds: [] });
+    const protectedCursor = await queue.getWatermark("session-1", "branch-1");
+
+    // Assert: active cache survives; after the consumer finishes it can expire normally.
+    assert.equal(protectedCursor.historyDigest, cached.historyDigest);
+    const name = (await readdir(directory)).find((name) =>
+      name.endsWith(`${cached.historyDigest}.json`));
+    assert.ok(name);
+    assert.match(await readFile(join(directory, name), "utf8"), /Active summary/);
+    if (active) await queue.complete(active.jobId);
+    else await queue.updateConflict("active-summary", { status: "resolved" });
+    now = new Date("2026-10-01T10:00:04Z");
+    await queue.advanceWatermark({ sessionId: "other-session", branchId: "other-branch",
+      entryIds: [] });
+    assert.equal((await queue.getWatermark("session-1", "branch-1")).historyDigest, undefined);
+    await assert.rejects(readFile(join(directory, name)), { code: "ENOENT" });
+    assert.equal((await queue.enqueue(first)).queued, false);
+  });
+}
+
+test("branch recovery follows the last queued source boundary, never sibling or session state",
+  async (t) => {
+    // Arrange: each scope has its own persisted receipt; Pi's leaf moves after every turn.
+    const directory = await mkdtemp(join(tmpdir(), "queue-branch-resume-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    await queue.enqueue({ ...orderedSnapshot(["root", "shared", "left"]),
+      context: { ...snapshot().context, branchId: "session-1:root" } });
+    await queue.enqueue({ ...orderedSnapshot(["root", "shared", "right"]),
+      context: { ...snapshot().context, branchId: "session-1:shared" } });
+    await queue.enqueue({ ...orderedSnapshot(["root", "shared", "foreign"]),
+      context: { ...snapshot().context, sessionId: "other-session", branchId: "foreign-branch" } });
+    const reopened = new DurableQueueStore({ directory, instanceId: "instance-a" });
+
+    // Act and assert: continuations retain identity; divergent histories get a fresh identity.
+    assert.equal(await reopened.resolveBranchId("session-1",
+      ["root", "shared", "left", "next"], "session-1:next"), "session-1:root");
+    assert.equal(await reopened.resolveBranchId("session-1",
+      ["root", "shared", "right", "next-right"], "session-1:next-right"), "session-1:shared");
+    assert.equal(await reopened.resolveBranchId("session-1",
+      ["root", "shared", "fresh-fork"], "session-1:fresh-fork"), "session-1:fresh-fork");
+    assert.equal(await reopened.resolveBranchId("session-1",
+      ["root", "shared", "foreign"], "session-1:foreign"), "session-1:foreign");
+    assert.equal(await reopened.resolveBranchId("missing-session",
+      ["root", "shared", "left"], "missing-session:left"), "missing-session:left");
+  });
+
+test("revisiting the same fork point cannot reuse an incompatible fallback branch ID",
+  async (t) => {
+    // Arrange: one path already used the ID derived from the fork point, then advanced beyond it.
+    const directory = await mkdtemp(join(tmpdir(), "queue-fork-identity-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+    const forkBranchId = "session-1:fork";
+    await queue.enqueue({ ...orderedSnapshot(["root", "fork", "first-child"]),
+      context: { ...snapshot().context, branchId: forkBranchId } });
+
+    // Act: returning to the same fork point starts another path with the same fallback spelling.
+    const secondBranchId = await queue.resolveBranchId("session-1", ["root", "fork"], forkBranchId);
+
+    // Assert: the new path gets a distinct identity, preserving the anchor suffix for conflicts.
+    assert.notEqual(secondBranchId, forkBranchId);
+    assert.ok(secondBranchId.endsWith(":fork"));
+    const second = await queue.enqueue({ ...orderedSnapshot(["root", "fork", "second-child"]),
+      context: { ...snapshot().context, branchId: secondBranchId } });
+    await queue.complete(second.jobId);
+    assert.equal(await queue.resolveBranchId("session-1",
+      ["root", "fork", "second-child", "next"], "session-1:next"), secondBranchId);
+    assert.equal(await queue.resolveBranchId("session-1", ["root", "fork", "first-child"],
+      "session-1:first-child"), forkBranchId);
+  });

@@ -91,6 +91,7 @@ directory. The effective settings can also be represented as:
   "timeout_ms": 10000,
   "recall_model_timeout_ms": 5000,
   "recall_concurrency": 2,
+  "context_limit_tokens": 100000,
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto",
@@ -202,7 +203,7 @@ Events include timestamps, levels, session IDs, and relevant branch, job, candid
 Info records progress and outcomes without transcript or model payload bodies. Debug additionally
 records capture evidence snapshots, accepted/rejected candidates and their cited entries, overlap
 decisions, and model requests/responses before parsing or validation can discard them.
-Cited entries use short previews; durable capture snapshots retain the full conversation separately.
+Cited entries use short previews; active capture snapshots retain original source evidence.
 Large content fields may also use previews with their own `truncated` marker.
 
 Capture debug events can contain the full active conversation, including earlier discussion.
@@ -352,11 +353,13 @@ recovery, and outputs against an isolated Forgetful server.
 
 ### Capture
 
-After a successful settled run, the extension pins the whole active conversation, preserving roles,
-tool arguments, results, errors and original entry IDs. A watermark tracks processed work but does
-not cut away earlier context. Skipped work stays visible but cannot be cited as capture evidence.
-A live worker extracts zero to three
-candidates through the private `submit_capture_candidates` tool. It validates evidence and
+After a successful settled run, the extension pins the active session and branch, preserving roles,
+tool arguments, results, errors and original entry IDs. Older history can be replaced by a summary
+from a successful capture; recent messages remain intact. Summaries are context, not source
+evidence. Original unprocessed evidence survives compaction and retries. A separate watermark
+prevents replay.
+Skipped work stays visible but cannot be cited as capture evidence. A live worker extracts zero
+to three candidates through the private `submit_capture_candidates` tool. It validates evidence and
 destinations, then checks overlap in the destination project. The overlap model submits `create`,
 `skip`, `supersede`, or `escalate` through the private `submit_capture_decision` tool. The worker
 then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
@@ -370,11 +373,33 @@ modified files retain their working-tree status. Inspection supports UTF-8 text;
 requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenance.
 This is not ongoing source curation.
 
-Full conversations are stored in private immutable files beside the durable queue index. The index
-keeps its 5 MiB bound; snapshots no longer share that bound. They survive restart and are released
-when no outstanding job or pending conflict needs them. Legacy snapshots are marked incomplete,
-not silently upgraded to whole conversations. Missing or altered snapshots fail explicitly.
-Transient recall text that Pi did not save cannot be reconstructed from the journal.
+Capture history is stored in private immutable files beside the durable queue index, bounded at
+50 MiB. Snapshots do not share that index bound. Private-model compaction persists a summary plus
+unchanged recent messages. Original native records, including images and tool arguments, are kept
+separately within the snapshot until capture finishes; they are not duplicated in the model view.
+Successful summaries are reused only for the same session and branch. Their source-ID cursor
+only moves forward, so an older retry cannot replace a newer summary. Inactive summary caches
+expire after seven days; active work and pending conflicts remain protected. Missing or corrupt
+reusable summaries fall back to the pinned session history and are reported in the existing logs.
+Original source evidence is not a cache: missing or altered source files still fail explicitly.
+Pending conflicts from successful jobs keep their source evidence until resolved.
+
+Progress is separate: the summary cursor marks compressed history, the completed capture cursor
+marks the furthest successful job, and enqueue receipts prevent replay even after failures.
+A newer successful job does not mark older pending jobs complete; each keeps its own checkpoint.
+Pi restarts recover the saved branch only when its latest handled entry is on the active journal
+path. A divergent path without that entry gets a new branch; summaries never cross sessions.
+
+Completed jobs retain only small UI outcome records, not search results or full review payloads.
+Each started attempt counts, including a resume after capture permissions were withdrawn.
+On the third failed or paused attempt, the job, snapshots, working data and all associated conflicts
+are discarded immediately, with a final outcome for the UI. Exhausted model-call budgets are
+failures, not resumable pauses. Its deduplication marker remains so work is not queued again.
+Failed work is abandoned; no manual queue cleanup is required. Existing failed jobs are cleaned on
+the next queue operation. Troubleshooting events belong in logs; detailed outcomes require debug
+logging, and logging can be disabled. Legacy snapshots remain marked incomplete. Missing or altered
+snapshots fail explicitly. Transient recall text that Pi did not save cannot be reconstructed from
+the journal.
 
 Conflict notices include the full sanitized reasons, claims and evidence for up to three selected
 conflicts. They do not shorten evidence before the main model decides how to resolve it.
@@ -442,14 +467,20 @@ Capture reads remain sequential. Existing supporting entity/document lookups are
 are not governed by this setting. More concurrency does not guarantee lower latency; Forgetful's
 worker capacity and other sessions still matter.
 
-The selected model in Pi supplies the output allowance, including `maxTokens` overrides in Pi's
-`models.json`. The extension passes that allowance to Pi's model registry on initial requests and
-correction attempts. It does not impose separate token or character caps on model input, policies,
-evidence, correction history, or complete responses. Selected record and entry counts, timeouts,
-transport safety, queue-index capacity, and diagnostic-log bounds still apply. Background tasks
-use Pi's compaction helpers and persisted compaction settings for the selected model window. The
-current task and tool instructions stay intact. Read turns, compaction and corrections share the
+Private recall, capture and conflict-resolution tasks use `context_limit_tokens` from the user
+settings, defaulting to 100000. This is a positive integer; invalid values warn and use the default.
+The effective budget is the smaller of this limit and the selected model's context window, counting
+system instructions, tool schemas, messages and the permitted reply. Before each provider call,
+including corrections and read continuations, the reply allowance is capped by the model's
+`maxTokens`, Pi's configured `reserveTokens` (default 16384), and the remaining context budget.
+That same allowance is used for the context check and provider request. This caps generation;
+it does not cut returned JSON or change the main Pi session's context limit.
+Selected record and entry counts, timeouts, transport safety, queue-index capacity, and log bounds
+still apply. Background tasks use Pi's compaction helpers and persisted compaction settings.
+The current task and tool instructions stay intact. Read turns, compaction and corrections share the
 existing deadline; an oversized indivisible record fails explicitly instead of being clipped.
+With compaction disabled, a fitting input can reduce the reply allowance. Input that leaves no
+room for a reply fails without sending a provider request.
 Pi does not expose unsaved host compaction overrides to extensions. Native images require an
 image-capable memory model; unsupported images are not silently omitted.
 

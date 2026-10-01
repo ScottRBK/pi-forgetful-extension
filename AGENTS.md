@@ -12,11 +12,17 @@ The intended experience requires no memory commands during normal work:
 - `forgetful_recall_wait` and foreground tool results use normal Pi tool-result persistence;
 - the main agent can search memories, inspect rich knowledge, initialise projects, and write
   evidenced repository knowledge through bounded tools;
-- successful settled work is captured from the full pinned conversation, with a durable snapshot
-  separate from the queue index; the watermark tracks work, not context truncation;
+- settled capture pins session/branch history, reusing a successful historical summary plus
+  recent messages; source evidence remains durable until success or three failed/paused attempts,
+  after which the job and associated conflicts are discarded with a final UI outcome;
+- snapshots remain separate from the 50 MiB queue index; watermarks prevent replay independently
+  of context summarisation, and completed jobs retain only small outcome records;
 - capture can inspect sources read-only; recall can explore only stored Forgetful knowledge;
-- private tasks use the selected model window and Pi compaction settings, with validated
-  submissions and bounded correction attempts;
+- private tasks use a configurable 100k-token context limit, capped by the selected model window,
+  with Pi compaction settings, reply generation capped to the model/reserve/remaining budget,
+  validated submissions and bounded correction attempts;
+- successful summary cursors move forward per session/branch; inactive summary caches expire,
+  and cache damage falls back to pinned history without masking original-source failures;
 - capture can create and link memories, entities, relationships, documents, and code artifacts;
   file uploads are excluded;
 - configured recall scope is authoritative and independent of each capture destination;

@@ -8,7 +8,9 @@ import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { Context, Message } from "@earendil-works/pi-ai";
 import { PiMemoryModel, type PiMemoryModelOptions } from "../src/model.ts";
+import * as memoryContext from "../src/model-context.ts";
 
 type WireRequest = {
   messages: Array<{ role: string; tool_call_id?: string;
@@ -84,17 +86,20 @@ async function fixture(
     api: "openai-completions", apiKey: "isolated-context-key",
     headers: { "x-configured-header": "configured" },
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    models: ["small", "large", "vision"].map((id) => ({
+    models: ["small", "large", "vision", "huge"].map((id) => ({
       id, name: id, reasoning: false,
       input: (id === "vision" ? ["text", "image"] : ["text"]) as ("text" | "image")[],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: id === "large" ? 64_000 : 8_000, maxTokens: 1_000,
+      contextWindow: id === "huge" ? 200_000 : id === "large" ? 64_000 : 8_000,
+      maxTokens: 1_000,
     })),
   });
-  const model = new PiMemoryModel(new ModelRegistry(runtime), {
+  const registry = new ModelRegistry(runtime);
+  const selected = registry.find("opencode", selection)!;
+  const model = new PiMemoryModel(registry, {
     provider: "opencode", id: selection,
   }, options);
-  return { model, requests, headers };
+  return { model, requests, headers, registry, selected };
 }
 
 const submission = {
@@ -105,6 +110,61 @@ const submission = {
 const accepted: Reply = { name: "submit_result", arguments: { answer: "Recorded." } };
 
 const settings = { enabled: true, reserveTokens: 1_200, keepRecentTokens: 1_200 };
+
+for (const purpose of ["classification", "recall-review", "capture", "overlap"] as const) {
+  test(`configured cap compacts ${purpose} below the actual model window`, async t => {
+    // Arrange: all evidence fits the provider window but exceeds the private 8000 token cap.
+    const { model, requests } = await fixture(t, request => request.tools?.length
+      ? accepted : "Summary preserving source IDs.", {
+      contextLimitTokens: 8_000, compactionSettings: settings,
+    });
+
+    // Act.
+    await model.complete({ purpose, policy: "CURRENT_POLICY", input: "CURRENT_TASK",
+      conversation: longConversation(), submission });
+
+    // Assert: private summaries are used even on the large selected model.
+    assert.ok(requests.length > 1);
+    assert.ok(!requests[0]!.tools?.length);
+    assert.match(JSON.stringify(requests.at(-1)), /CURRENT_TASK/);
+  });
+}
+
+test("callers without Pi settings still enforce the default 100000 token cap", async t => {
+  // Arrange: individually small records exceed the cap but fit this provider's 200k window.
+  const { model, requests } = await fixture(t, request => request.tools?.length
+    ? accepted : "Processed evidence summary.", {}, "huge");
+  const conversation = Array.from({ length: 150 }, (_, id) => ({
+    id, text: "Evidence details. ".repeat(200),
+  }));
+
+  // Act.
+  await model.complete({ purpose: "capture", policy: "Submit.", input: {},
+    conversation, submission });
+
+  // Assert.
+  assert.ok(requests.length > 1);
+  assert.ok(!requests[0]!.tools?.length);
+  assert.ok(requests.at(-1)!.tools?.length);
+});
+
+test("disabled compaction caps output when the input still fits", async t => {
+  // Arrange: message input fits; the selected model's full output allowance would not.
+  const { model, requests } = await fixture(t, () => accepted, {
+    contextLimitTokens: 8_000, compactionSettings: { ...settings, enabled: false },
+  });
+
+  // Act.
+  await model.complete({ purpose: "overlap", policy: "p".repeat(12_000),
+    input: "t".repeat(12_000), submission: { ...submission,
+      description: "s".repeat(4_000) } });
+
+  // Assert.
+  assert.equal(requests.length, 1);
+  const allowance = requests[0]!.max_tokens ?? requests[0]!.max_completion_tokens;
+  assert.ok(typeof allowance === "number");
+  assert.ok(allowance < 1_000);
+});
 const image = { type: "image", mimeType: "image/png",
   data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHhQ" +
     "AAAAASUVORK5CYII=" };
@@ -205,7 +265,7 @@ test("selected model compacts complete labelled evidence through Pi with auth an
     assert.equal(header["x-private-task"], "memory");
     assert.equal(header["x-opencode-session"], "context-session");
   }
-  assert.equal(requests[0]!.max_tokens ?? requests[0]!.max_completion_tokens, 960);
+  assert.equal(requests[0]!.max_tokens ?? requests[0]!.max_completion_tokens, 750);
   assert.equal(task.max_tokens ?? task.max_completion_tokens, 1_000);
   const attempts = events.filter((entry) => entry.event === "model.attempt");
   assert.equal(attempts.length, requests.length);
@@ -419,15 +479,15 @@ test("an oversized record fails without clipping or provider calls", async (t) =
   await assert.rejects(model.complete({ purpose: "capture", policy: "Submit.", input: {},
     conversation: [{ id: "oversized", text: "Long source record. ".repeat(10_000) }],
     submission }), (error: Error) => {
-    assert.match(String(error.cause), /indivisible record/);
-    assert.match(String(error.cause), /No records were clipped/);
+    assert.match(String(error.cause), /cannot fit/);
+    assert.match(String(error.cause), /No conversation record was clipped/);
     return true;
   });
 
   // Assert: failure detail reaches diagnostics, with no invented successful submission.
   assert.equal(requests.length, 0);
   const detail = events.find((entry) => entry.event === "model.error_detail");
-  assert.match(String(detail?.data?.cause), /indivisible record/);
+  assert.match(String(detail?.data?.cause), /cannot fit/);
 });
 
 test("failed summary calls are counted once and never retried implicitly", async (t) => {
@@ -609,3 +669,60 @@ test("Pi compaction receives native images before replacing their labelled recor
   assert.match(task.messages.map(messageText).join("\n"), /CURRENT_TASK/);
   assert.equal(task.tools?.[0]?.function.name, "submit_result");
 });
+
+test("compacted history exposes its summary and retained originals without the task", async t => {
+  // Arrange: use real Pi summarization requests against the external provider fixture.
+  const { registry, selected } = await fixture(t, () => "Earlier source summary.");
+  const history = longConversation().map((record, index) =>
+    memoryContext.evidenceMessage(record, `Historical record ${index + 1}`, index));
+  const task: Message = { role: "user", content: "PRIVATE_TASK", timestamp: 100 };
+  const context: Context = { systemPrompt: "PRIVATE_POLICY", messages: [...history, task] };
+  const state = new memoryContext.MemoryTaskContext(selected, task, settings, 8_000);
+
+  // Act.
+  assert.equal(state.getCompactedHistory(), undefined);
+  await state.prepare(context, new AbortController().signal, undefined,
+    (context, options) => registry.complete(selected, context, options));
+  const compacted = state.getCompactedHistory();
+
+  // Assert: retained records are the unchanged original objects, in order.
+  assert.ok(compacted);
+  assert.equal(compacted.summary, "Earlier source summary.");
+  assert.ok(compacted.retainedMessages.length > 0);
+  assert.ok(compacted.retainedMessages.length < history.length);
+  assert.deepEqual(compacted.retainedMessages,
+    history.slice(history.length - compacted.retainedMessages.length));
+  assert.ok(compacted.retainedMessages.every(message => history.includes(message)));
+  assert.ok(!compacted.retainedMessages.includes(task));
+  assert.ok(context.messages.includes(task));
+  assert.equal(context.systemPrompt, "PRIVATE_POLICY");
+});
+
+test("private history summarization carries a prior summary and preserves whole source records",
+  async t => {
+    // Arrange: previous derived context and new originals go through the public task boundary.
+    const { registry, selected, requests } = await fixture(t, () => "Updated source summary.");
+    const records = longConversation().map((record, index) =>
+      memoryContext.evidenceMessage(record, `Processed record ${index + 1}`, index));
+    const original = structuredClone(records);
+    const task: Message = { role: "user", content: "CURRENT_TASK", timestamp: 100 };
+    const context: Context = { messages: [
+      { role: "user", content: "PREVIOUS_SUMMARY", timestamp: 0 }, ...records, task,
+    ] };
+    const state = new memoryContext.MemoryTaskContext(selected, task, settings, 8_000);
+
+    // Act.
+    await state.prepare(context, new AbortController().signal, undefined,
+      (context, options) => registry.complete(selected, context, options));
+
+    // Assert: batching and retained tail together preserve every original record.
+    assert.equal(state.getCompactedHistory()?.summary, "Updated source summary.");
+    assert.ok(requests.length > 1);
+    assert.match(JSON.stringify(requests[0]), /PREVIOUS_SUMMARY/);
+    const received = JSON.stringify({ requests, retained: context.messages });
+    for (let index = 0; index < 18; index++) {
+      assert.ok(received.includes(`BEGIN_${index} `));
+      assert.ok(received.includes(` END_${index}`));
+    }
+    assert.deepEqual(records, original);
+  });

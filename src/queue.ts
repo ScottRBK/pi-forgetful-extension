@@ -15,12 +15,15 @@ import { basename, dirname, join } from "node:path";
 
 import type {
   CaptureSnapshot,
+  CompactedConversation,
   EvidenceEntry,
   MemoryInput,
   WorkContext,
 } from "./contracts.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
-import { sanitizeCaptureSnapshot } from "./snapshot.ts";
+import {
+  compactCaptureSnapshot, reuseCaptureHistory, sanitizeCaptureSnapshot,
+} from "./snapshot.ts";
 
 export type QueueJobStatus =
   | "pending"
@@ -38,10 +41,19 @@ export interface QueueIdentity {
 export interface QueueWatermark {
   sessionId: string;
   branchId: string;
+  /** Latest enqueue/skip boundary; dedupe is independent of successful capture progress. */
   lastEntryId?: string;
+  /** Furthest successful capture boundary, not a guarantee that older queued jobs finished. */
+  capturedThroughEntryId?: string;
   consideredEntryIds: string[];
   snapshotIds: string[];
   dedupeKeys: string[];
+  /** Successful historical summary in an immutable sidecar, never raw failed-job evidence. */
+  historyDigest?: string;
+  /** Summary cursor, separate from enqueue dedupe and capture watermarks. */
+  historyThroughEntryId?: string;
+  /** Original branch entry IDs used only to compare summary cursor order. */
+  historyEntryIds?: string[];
   updatedAt: string;
 }
 
@@ -64,7 +76,7 @@ export interface QueueJob {
 }
 
 export interface QueueJobMetadata extends Omit<QueueJob, "snapshot"> {
-  snapshot: Omit<CaptureSnapshot, "entries" | "conversation">;
+  snapshot: Omit<CaptureSnapshot, "entries" | "conversation" | "sourceConversation">;
 }
 
 export interface PendingConflict {
@@ -127,6 +139,7 @@ export interface QueueEnqueueResult {
   queued: boolean;
   jobId: string;
   reason?: string;
+  historyError?: string;
 }
 
 export interface WatermarkAdvance {
@@ -148,6 +161,7 @@ export interface QueueCheckpoint {
   startedAt?: string;
   /** Append-only source observations; inspection: IDs must never reuse session IDs. */
   inspectionEntries?: EvidenceEntry[];
+  compactedConversation?: CompactedConversation;
 }
 
 export interface DurableQueueStoreOptions {
@@ -169,7 +183,8 @@ interface StoredQueueJob extends QueueJob {
   inspectionDigest?: string;
 }
 
-type SnapshotPayload = Pick<CaptureSnapshot, "entries" | "conversation">;
+type SnapshotPayload = Pick<CaptureSnapshot,
+  "entries" | "conversation" | "sourceConversation" | "historySummary">;
 
 interface QueueState {
   version: 1 | 2;
@@ -194,7 +209,7 @@ const DEFAULT_STALE_LOCK_MS = 60_000;
 const DEFAULT_STALE_JOB_MS = 5 * 60_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60_000;
-const MAX_QUEUE_BYTES = 5 * 1024 * 1024;
+const MAX_QUEUE_BYTES = 50 * 1024 * 1024;
 const MAX_PENDING_CONFLICTS = 100;
 const processMutationTails = new Map<string, Promise<void>>();
 
@@ -238,6 +253,61 @@ function sanitizeOutcomeMap(
   );
 }
 
+function outcomeRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+function releaseCompletedArtifacts(job: StoredQueueJob): void {
+  if (job.status !== "complete") return;
+  const candidates = new Map((job.extractedCandidates ?? []).map((value) => {
+    const candidate = outcomeRecord(value);
+    return [candidate.id, candidate];
+  }));
+  job.candidateOutcomes = Object.fromEntries(Object.entries(job.candidateOutcomes)
+    .map(([id, value]) => {
+      const outcome = outcomeRecord(value);
+      const summary: Record<string, unknown> = {};
+      for (const key of ["stage", "action", "reason", "destinationProjectId", "memoryId",
+        "replacementId", "conflictId"]) {
+        const field = outcome[key];
+        if (typeof field === "string") summary[key] = scrubDiagnostic(field);
+        else if (typeof field === "number") summary[key] = field;
+      }
+      const action = outcomeRecord(outcome.decision).action;
+      if (summary.action === undefined && typeof action === "string")
+        summary.action = scrubDiagnostic(action);
+      const sourceIds = outcome.sourceEntryIds ?? candidates.get(id)?.sourceEntryIds;
+      if (Array.isArray(sourceIds)) summary.sourceEntryIds = sourceIds.slice(0, 8)
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.slice(0, 200));
+      if (outcome.linkReview) {
+        const review = outcomeRecord(outcome.linkReview);
+        summary.linkReview = {
+          ...(typeof review.status === "string" ? { status: review.status } : {}),
+          ...(typeof review.reason === "string" ? { reason: scrubDiagnostic(review.reason) } : {}),
+          ...(Array.isArray(review.unreviewed) ? { unreviewed: review.unreviewed.map((value) => {
+            const item = outcomeRecord(value);
+            return { memoryId: item.memoryId,
+              ...(typeof item.reason === "string"
+                ? { reason: scrubDiagnostic(item.reason) } : {}) };
+          }) } : {}),
+        };
+      }
+      return [id, summary];
+    }));
+  // Keep only the bounded preview already exposed by capture diagnostics.
+  if (job.extractedCandidates) job.extractedCandidates = job.extractedCandidates.slice(0, 4)
+    .map((value) => {
+      const candidate = outcomeRecord(value);
+      const preview: Record<string, unknown> = {};
+      for (const [key, limit] of [["id", 100], ["title", 200], ["content", 2_000]] as const) {
+        if (typeof candidate[key] === "string") preview[key] = candidate[key].slice(0, limit);
+      }
+      return preview;
+    });
+}
+
 function normaliseState(value: unknown): QueueState {
   if (!value || typeof value !== "object")
     throw new Error("Invalid queue state");
@@ -257,9 +327,9 @@ function normaliseState(value: unknown): QueueState {
     }
   } else {
     for (const job of record.jobs) {
-      const needsSnapshot = !["complete", "failed"].includes(job.status) ||
+      const needsSnapshot = job.status !== "failed" && (job.status !== "complete" ||
         record.conflicts.some((conflict) =>
-          conflict.status === "pending" && conflict.jobId === job.id);
+          conflict.status === "pending" && conflict.jobId === job.id));
       if (needsSnapshot && !job.snapshotDigest)
         throw new Error("Capture snapshot reference is missing");
     }
@@ -315,6 +385,58 @@ function shouldRetain(
 ): boolean {
   const parsed = Date.parse(timestamp);
   return !Number.isFinite(parsed) || now - parsed <= retentionMs;
+}
+
+function diagnosticError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return String(error);
+}
+
+function recordId(value: unknown): string | undefined {
+  // A derived summary stands at its original source boundary for ordering, not evidence.
+  if (value && typeof value === "object" && "type" in value &&
+      value.type === "capture_history_summary" && "throughEntryId" in value &&
+      typeof value.throughEntryId === "string") return value.throughEntryId;
+  return value && typeof value === "object" && "id" in value &&
+    typeof value.id === "string" ? value.id : undefined;
+}
+
+function orderedSourceEntryIds(snapshot: CaptureSnapshot): string[] | undefined {
+  const source = snapshot.sourceConversation ?? snapshot.conversation ?? snapshot.entries;
+  const ids = source.map(recordId).filter((id): id is string => Boolean(id));
+  return ids.length ? ids : undefined;
+}
+
+function summaryCursor(snapshot: CaptureSnapshot): {
+  throughEntryId: string;
+  entryIds: string[];
+} | undefined {
+  const history = snapshot.historySummary;
+  const entryIds = orderedSourceEntryIds(snapshot);
+  if (!history || !entryIds?.includes(history.throughEntryId)) return undefined;
+  return { throughEntryId: history.throughEntryId, entryIds };
+}
+
+function cursorComparison(
+  candidate: { throughEntryId: string; entryIds: string[] },
+  current: { throughEntryId?: string; entryIds?: string[] },
+): number | undefined {
+  if (!current.throughEntryId || !current.entryIds?.length) return undefined;
+  const candidateInCurrent = current.entryIds.indexOf(candidate.throughEntryId);
+  const currentInCurrent = current.entryIds.indexOf(current.throughEntryId);
+  if (candidateInCurrent >= 0 && currentInCurrent >= 0)
+    return Math.sign(candidateInCurrent - currentInCurrent);
+  const candidateInCandidate = candidate.entryIds.indexOf(candidate.throughEntryId);
+  const currentInCandidate = candidate.entryIds.indexOf(current.throughEntryId);
+  if (candidateInCandidate >= 0 && currentInCandidate >= 0)
+    return Math.sign(candidateInCandidate - currentInCandidate);
+  return undefined;
+}
+
+function clearHistoryCache(watermark: QueueWatermark): void {
+  delete watermark.historyDigest;
+  delete watermark.historyThroughEntryId;
+  delete watermark.historyEntryIds;
 }
 
 /**
@@ -399,7 +521,12 @@ export class DurableQueueStore {
         throw new Error("Capture snapshot digest mismatch");
       const payload = JSON.parse(encoded) as SnapshotPayload;
       if (!Array.isArray(payload.entries) ||
-          (payload.conversation !== undefined && !Array.isArray(payload.conversation)))
+          (payload.conversation !== undefined && !Array.isArray(payload.conversation)) ||
+          (payload.sourceConversation !== undefined &&
+            !Array.isArray(payload.sourceConversation)) ||
+          (payload.historySummary !== undefined &&
+            (typeof payload.historySummary?.throughEntryId !== "string" ||
+              typeof payload.historySummary?.text !== "string")))
         throw new Error("Invalid capture snapshot payload");
       return payload;
     } finally { await handle.close(); }
@@ -477,9 +604,10 @@ export class DurableQueueStore {
   }
 
   private async collectSnapshots(state: QueueState): Promise<void> {
-    const retained = new Set(state.jobs.flatMap((job) =>
-      [job.snapshotDigest, job.inspectionDigest].filter((value): value is string => Boolean(value))
-        .map((digest) => this.snapshotPath(digest))));
+    const digests = [...state.jobs.flatMap((job) => [job.snapshotDigest, job.inspectionDigest]),
+      ...Object.values(state.watermarks).map((watermark) => watermark.historyDigest)];
+    const retained = new Set(digests.filter((value): value is string => Boolean(value))
+      .map((digest) => this.snapshotPath(digest)));
     for (const name of await readdir(this.directory)) {
       if (!name.startsWith(this.snapshotPrefix)) continue;
       const suffix = name.slice(this.snapshotPrefix.length);
@@ -523,12 +651,16 @@ export class DurableQueueStore {
 
   private async writeState(state: QueueState): Promise<void> {
     await this.ensureDirectory();
+    this.pruneFailedJobs(state);
     for (const job of state.jobs) {
+      releaseCompletedArtifacts(job);
       this.releaseTerminalSnapshot(state, job);
       if (job.snapshotDigest || ((job.status === "complete" || job.status === "failed") &&
           !job.snapshot.entries.length && job.snapshot.conversation === undefined)) continue;
-      const { entries, conversation, ...metadata } = sanitizeCaptureSnapshot(job.snapshot);
-      job.snapshotDigest = await this.storeSnapshot({ entries, conversation });
+      const { entries, conversation, sourceConversation, historySummary, ...metadata } =
+        sanitizeCaptureSnapshot(job.snapshot);
+      job.snapshotDigest = await this.storeSnapshot({ entries, conversation,
+        sourceConversation, historySummary });
       job.snapshot = { ...metadata, entries: [] };
     }
     state.version = 2;
@@ -686,8 +818,9 @@ export class DurableQueueStore {
     try {
       return await this.withMutationFileLock(async () => {
         const state = await this.readState();
+        const pruned = this.pruneFailedJobs(state);
         const result = await operation(state);
-        if (result.changed !== false) await this.writeState(state);
+        if (pruned || result.changed !== false) await this.writeState(state);
         return result.value;
       });
     } finally {
@@ -697,8 +830,25 @@ export class DurableQueueStore {
     }
   }
 
+  private pruneFailedJobs(state: QueueState): boolean {
+    const failedIds = new Set(state.jobs.filter((job) => job.status === "failed")
+      .map((job) => job.id));
+    if (!failedIds.size) return false;
+    state.jobs = state.jobs.filter((job) => !failedIds.has(job.id));
+    state.conflicts = state.conflicts.filter((conflict) =>
+      !conflict.jobId || !failedIds.has(conflict.jobId));
+    return true;
+  }
+
   private prune(state: QueueState): void {
     const cutoff = this.now().getTime();
+    const liveBranches = new Set([
+      ...state.jobs.filter((job) =>
+        job.status === "pending" || job.status === "running" || job.status === "paused")
+        .map((job) => contextKey(job.snapshot.context.sessionId, job.snapshot.context.branchId)),
+      ...state.conflicts.filter((conflict) => conflict.status === "pending")
+        .map((conflict) => contextKey(conflict.sessionId, conflict.branchId)),
+    ]);
     state.jobs = state.jobs.filter(
       (job) =>
         job.status === "pending" ||
@@ -718,6 +868,13 @@ export class DurableQueueStore {
       watermark.consideredEntryIds = watermark.consideredEntryIds.slice(-2_000);
       watermark.snapshotIds = watermark.snapshotIds.slice(-200);
       watermark.dedupeKeys = watermark.dedupeKeys.slice(-2_000);
+      if (watermark.historyEntryIds)
+        watermark.historyEntryIds = watermark.historyEntryIds.slice(-2_000);
+      if (watermark.historyDigest &&
+          !liveBranches.has(contextKey(watermark.sessionId, watermark.branchId)) &&
+          !shouldRetain(watermark.updatedAt, cutoff, this.retentionMs)) {
+        clearHistoryCache(watermark);
+      }
     }
     const pending = state.conflicts.filter(
       (conflict) => conflict.status === "pending",
@@ -788,7 +945,7 @@ export class DurableQueueStore {
     };
     const key = dedupeKey(safeSnapshot);
     const id = jobIdFor(key);
-    return this.mutate<QueueEnqueueResult>((state) => {
+    return this.mutate<QueueEnqueueResult>(async (state) => {
       this.prune(state);
       const existing = state.jobs.find(
         (job) => job.id === id || job.dedupeKey === key,
@@ -810,12 +967,23 @@ export class DurableQueueStore {
           changed: false,
         };
       }
+      let historyError: string | undefined;
+      let history = undefined as SnapshotPayload["historySummary"] | undefined;
+      if (watermark?.historyDigest) {
+        try {
+          history = (await this.readSnapshot(watermark.historyDigest)).historySummary;
+        } catch (error) {
+          historyError = `Reusable summary cache unavailable: ${diagnosticError(error)}`;
+          clearHistoryCache(watermark);
+        }
+      }
+      const persistedSnapshot = reuseCaptureHistory(safeSnapshot, history);
       const timestamp = nowIso(this.now);
       const job: QueueJob = {
         id,
         dedupeKey: key,
         binding: identity,
-        snapshot: jsonSnapshot(safeSnapshot),
+        snapshot: jsonSnapshot(persistedSnapshot),
         status: "pending",
         attempts: 0,
         callCount: 0,
@@ -832,7 +1000,7 @@ export class DurableQueueStore {
         snapshotId: safeSnapshot.id,
         dedupeKey: key,
       });
-      return { value: { queued: true, jobId: id } };
+      return { value: { queued: true, jobId: id, historyError } };
     });
   }
 
@@ -882,6 +1050,30 @@ export class DurableQueueStore {
     );
   }
 
+  /** Resume only a persisted branch whose latest handled entry remains on the active path. */
+  async resolveBranchId(
+    sessionId: string, activeEntryIds: readonly string[], fallbackBranchId: string,
+  ): Promise<string> {
+    const state = await this.readState();
+    const positions = new Map(activeEntryIds.map((id, index) => [id, index]));
+    let branchId = fallbackBranchId;
+    let furthest = -1;
+    for (const watermark of Object.values(state.watermarks)) {
+      if (watermark.sessionId !== sessionId || !watermark.lastEntryId) continue;
+      const position = positions.get(watermark.lastEntryId);
+      if (position !== undefined && position > furthest) {
+        branchId = watermark.branchId;
+        furthest = position;
+      }
+    }
+    if (furthest < 0 && state.watermarks[contextKey(sessionId, fallbackBranchId)]) {
+      // Repeated visits to one fork point must not alias a previously divergent branch.
+      // Preserve the final anchor suffix used by conflict delivery's active-path check.
+      return `${randomUUID()}:${fallbackBranchId}`;
+    }
+    return branchId;
+  }
+
   async currentWatermark(
     context: Pick<WorkContext, "sessionId" | "branchId">,
   ): Promise<QueueWatermark> {
@@ -913,7 +1105,7 @@ export class DurableQueueStore {
     return this.mutate((state) => ({ changed: false,
       value: state.jobs.filter((job) => !identity || identityMatches(job, identity))
         .map(({ snapshotDigest, inspectionDigest, snapshot, ...metadata }) => {
-          const { entries, conversation, ...snapshotMetadata } = snapshot;
+          const { entries, conversation, sourceConversation, ...snapshotMetadata } = snapshot;
           return { ...metadata, snapshot: snapshotMetadata };
         }),
     }));
@@ -929,9 +1121,13 @@ export class DurableQueueStore {
   async claimNext(
     identity: QueueIdentity = this.defaultIdentity(),
     branch?: { sessionId: string; branchId: string },
+    onDiscarded?: (outcomes: Array<{ jobId: string; error: string }>) => void,
   ): Promise<QueueJob | undefined> {
-    return this.mutate(async (state) => {
+    const result = await this.mutate<{
+      job?: QueueJob; discarded: Array<{ jobId: string; error: string }>;
+    }>(async (state) => {
       const currentTime = this.now().getTime();
+      const discarded: Array<{ jobId: string; error: string }> = [];
       let changed = false;
       for (const job of state.jobs) {
         if (!identityMatches(job, identity)) continue;
@@ -944,15 +1140,20 @@ export class DurableQueueStore {
         }
         if (job.status !== "pending" && job.status !== "paused") continue;
         if (job.attempts >= this.maxAttempts) {
-          this.failExhaustedJob(job);
+          job.status = "failed";
+          discarded.push({ jobId: job.id,
+            error: job.lastError ?? "Capture attempts exhausted after interrupted processing" });
           changed = true;
           continue;
         }
         this.claimJob(job);
-        return { value: await this.hydrateJob(job) };
+        return { value: { job: await this.hydrateJob(job), discarded } };
       }
-      return { value: undefined, changed };
+      return { value: { discarded }, changed };
     });
+    // Report only after failed jobs and source files were removed durably.
+    if (result.discarded.length) onDiscarded?.(result.discarded);
+    return result.job;
   }
 
   private matchesBranch(
@@ -978,14 +1179,6 @@ export class DurableQueueStore {
       Number.isFinite(started) &&
       currentTime - started < this.staleJobMs
     );
-  }
-
-  private failExhaustedJob(job: StoredQueueJob): void {
-    job.status = "failed";
-    job.lastError = "retry limit reached";
-    const { conversation: _conversation, ...metadata } = job.snapshot;
-    job.snapshot = { ...metadata, entries: [] };
-    job.updatedAt = nowIso(this.now);
   }
 
   private claimJob(job: QueueJob): void {
@@ -1015,6 +1208,52 @@ export class DurableQueueStore {
       const job = state.jobs.find((item) => item.id === jobId);
       if (!job) throw new Error(`Unknown capture job: ${jobId}`);
       if (patch.inspectionEntries) await this.appendInspections(job, patch.inspectionEntries);
+      if (patch.compactedConversation) {
+        const compacted = compactCaptureSnapshot((await this.hydrateJob(job)).snapshot,
+          patch.compactedConversation);
+        const { entries, conversation, sourceConversation, historySummary, ...metadata } =
+          compacted;
+        // Inspections have their own immutable sidecar; do not duplicate them in the base payload.
+        const sourceEntries = entries.filter((entry) => !entry.id.startsWith("inspection:"));
+        job.snapshotDigest = await this.storeSnapshot({ entries: sourceEntries,
+          conversation, sourceConversation, historySummary });
+        job.snapshot = { ...metadata, entries: [] };
+      }
+      if (patch.status === "complete") {
+        const completedSnapshot = (await this.hydrateJob(job)).snapshot;
+        const key = contextKey(job.snapshot.context.sessionId, job.snapshot.context.branchId);
+        const watermark = state.watermarks[key];
+        const sourceIds = orderedSourceEntryIds(completedSnapshot);
+        if (watermark && sourceIds?.includes(completedSnapshot.finalEntryId)) {
+          const comparison = cursorComparison({ throughEntryId: completedSnapshot.finalEntryId,
+            entryIds: sourceIds }, { throughEntryId: watermark.capturedThroughEntryId,
+            entryIds: watermark.consideredEntryIds });
+          if (!watermark.capturedThroughEntryId ||
+              (comparison !== undefined && comparison > 0)) {
+            watermark.capturedThroughEntryId = completedSnapshot.finalEntryId;
+          }
+          watermark.updatedAt = nowIso(this.now);
+        }
+        const history = completedSnapshot.historySummary;
+        const cursor = summaryCursor(completedSnapshot);
+        if (history && cursor) {
+          const comparison = watermark ? cursorComparison(cursor, {
+            throughEntryId: watermark.historyThroughEntryId,
+            entryIds: watermark.historyEntryIds,
+          }) : undefined;
+          const shouldPublish = watermark && (!watermark.historyDigest ||
+            (comparison !== undefined && comparison > 0));
+          if (shouldPublish) {
+            watermark.historyDigest = await this.storeSnapshot({
+              entries: [],
+              historySummary: history,
+            });
+            watermark.historyThroughEntryId = cursor.throughEntryId;
+            watermark.historyEntryIds = cursor.entryIds.slice(-2_000);
+            watermark.updatedAt = nowIso(this.now);
+          }
+        }
+      }
       if (patch.status) job.status = patch.status;
       if (patch.callCount !== undefined) job.callCount = patch.callCount;
       if (patch.extractedCandidates !== undefined) {
@@ -1039,9 +1278,12 @@ export class DurableQueueStore {
       if (patch.status && patch.status !== "running") job.ownerPid = undefined;
       job.updatedAt = nowIso(this.now);
       if (job.status === "complete" || job.status === "failed") {
-        const { conversation: _conversation, ...metadata } = job.snapshot;
+        const { conversation: _conversation, sourceConversation: _sources, ...metadata } =
+          job.snapshot;
         job.snapshot = { ...metadata, entries: [] };
+        this.pruneFailedJobs(state);
         this.releaseTerminalSnapshot(state, job);
+        releaseCompletedArtifacts(job);
       }
       return { value: await this.hydrateJob(job) };
     });

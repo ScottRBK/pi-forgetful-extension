@@ -25,8 +25,11 @@ npm run check
 ```
 
 The tests exercise public behaviour using the real filesystem and Pi SDK, with predetermined
-external model responses. Optional Forgetful integration tests run its actual REST routes and
-SQLite repositories against an in-memory database with fixed test embeddings:
+external model responses. Ordinary checks include real Pi restart tests for capture cleanup after
+three failed attempts, persisted summary reuse, session/branch isolation, and provider-boundary
+context-limit enforcement. No paid model calls are required for these regressions.
+Optional Forgetful integration tests run its actual REST routes and SQLite repositories against
+an in-memory database with fixed test embeddings:
 
 ```bash
 FORGETFUL_TEST_SOURCE=/path/to/forgetful \

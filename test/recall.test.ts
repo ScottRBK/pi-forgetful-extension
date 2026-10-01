@@ -820,7 +820,8 @@ describe("RecallService", () => {
 function reviewerWithResponses(
   contents: AssistantMessage["content"][], logger?: FileLogger,
 ): PiMemoryModel {
-  const model = { provider: "fake", id: "memory" } as Model<any>;
+  const model = { provider: "fake", id: "memory", contextWindow: 200_000,
+    maxTokens: 16_384, input: ["text"] } as Model<any>;
   let index = 0;
   return new PiMemoryModel({
     find: () => model,

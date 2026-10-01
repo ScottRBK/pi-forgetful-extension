@@ -65,6 +65,8 @@ export interface PiMemoryModelOptions {
   transformHeaders?: MemoryModelHeaderTransform;
   /** Persisted Pi settings; unsaved host settings are not exposed through ExtensionContext. */
   compactionSettings?: CompactionSettings;
+  /** Total private context budget, including system, tools and maximum output. */
+  contextLimitTokens?: number;
 }
 
 function textContent(message: AssistantMessage): string {
@@ -378,6 +380,7 @@ export class PiMemoryModel implements MemoryModelClient {
   private readonly transformHeaders?: MemoryModelHeaderTransform;
   private readonly logger?: DiagnosticLogger;
   private readonly compactionSettings?: CompactionSettings;
+  private readonly contextLimitTokens?: number;
 
   constructor(
     private readonly registry: ModelRegistryPort,
@@ -393,6 +396,7 @@ export class PiMemoryModel implements MemoryModelClient {
     this.transformHeaders = options.transformHeaders;
     this.logger = options.logger;
     this.compactionSettings = options.compactionSettings;
+    this.contextLimitTokens = options.contextLimitTokens;
     if (
       !Number.isFinite(this.classificationTimeoutMs) ||
       this.classificationTimeoutMs <= 0
@@ -473,11 +477,12 @@ export class PiMemoryModel implements MemoryModelClient {
       requestTimeout(request, this.classificationTimeoutMs),
     );
     try {
+      const historyMessages = (request.conversation ?? []).map((record, index) =>
+        evidenceMessage(record, `Historical record ${index + 1}`, Date.now()));
       const context: Context = {
         systemPrompt: sanitizeText(request.policy),
         messages: [
-          ...(request.conversation ?? []).map((record, index) =>
-            evidenceMessage(record, `Historical record ${index + 1}`, Date.now())),
+          ...historyMessages,
           {
             role: "user",
             content: serializeInput(request.input),
@@ -496,18 +501,40 @@ export class PiMemoryModel implements MemoryModelClient {
         deadline.controller.signal,
       );
       const taskContext = new MemoryTaskContext(
-        model, context.messages.at(-1)!, this.compactionSettings,
+        model, context.messages.at(-1)!, this.compactionSettings, this.contextLimitTokens,
       );
-      const prepare = () => taskContext.prepare(
-        context, deadline.controller.signal, this.sessionId,
-        async (summaryContext, summaryOptions) => {
-          const response = await this.completeAttempt(model, summaryContext,
-            { ...options, maxTokens: summaryOptions.maxTokens },
-            request, deadline, deadline.compactionCalls + 1, "compaction");
-          ensureCompletionFinished(response, request, deadline.timedOut, false);
-          return response;
-        },
-      );
+      let initialPreparation = true;
+      const prepare = async (): Promise<number> => {
+        const maxTokens = await taskContext.prepare(
+          context, deadline.controller.signal, this.sessionId,
+          async (summaryContext, summaryOptions) => {
+            const response = await this.completeAttempt(model, summaryContext,
+              { ...options, maxTokens: summaryOptions.maxTokens },
+              request, deadline, deadline.compactionCalls + 1, "compaction");
+            ensureCompletionFinished(response, request, deadline.timedOut, false);
+            return response;
+          },
+        );
+        // Persist only initial source history, never private task replies or read continuations.
+        if (!initialPreparation) return maxTokens;
+        initialPreparation = false;
+        const compacted = taskContext.getCompactedHistory();
+        if (!compacted || !request.onConversationCompacted) return maxTokens;
+        const cut = historyMessages.length - compacted.retainedMessages.length;
+        const boundary = request.conversation?.[cut - 1] as
+          { id?: unknown; type?: unknown; throughEntryId?: unknown } | undefined;
+        const throughEntryId = boundary?.type === "capture_history_summary"
+          ? boundary.throughEntryId : boundary?.id;
+        if (cut <= 0 || typeof throughEntryId !== "string" ||
+            !compacted.retainedMessages.every((message, index) =>
+              message === historyMessages[cut + index])) {
+          throw new Error("Compacted history has no stable source boundary or unchanged tail");
+        }
+        await request.onConversationCompacted({ summary: compacted.summary,
+          summarizedThroughEntryId: throughEntryId,
+          retainedConversation: request.conversation!.slice(cut) });
+        return maxTokens;
+      };
       if (request.submission) {
         return await this.completeWithSubmission(
           model,
@@ -518,8 +545,10 @@ export class PiMemoryModel implements MemoryModelClient {
           prepare,
         );
       }
-      await prepare();
-      const response = await this.completeAttempt(model, context, options, request, deadline, 1);
+      const maxTokens = await prepare();
+      const response = await this.completeAttempt(
+        model, context, { ...options, maxTokens }, request, deadline, 1,
+      );
 
       return parseCompletionResponse(response, request, deadline.timedOut);
     } catch (error) {
@@ -619,7 +648,7 @@ export class PiMemoryModel implements MemoryModelClient {
     options: ModelsSimpleStreamOptions,
     request: ModelRequest,
     deadline: RequestDeadline,
-    prepare: () => Promise<void>,
+    prepare: () => Promise<number>,
   ): Promise<unknown> {
     const submission = request.submission!;
     const tool = submissionTool(submission);
@@ -637,9 +666,9 @@ export class PiMemoryModel implements MemoryModelClient {
     let attempt = 0;
     while (rejected < MAX_SUBMISSION_ATTEMPTS) {
       attempt++;
-      await prepare();
+      const maxTokens = await prepare();
       const response = await this.completeAttempt(
-        model, context, options, request, deadline, attempt,
+        model, context, { ...options, maxTokens }, request, deadline, attempt,
       );
       ensureCompletionFinished(response, request, deadline.timedOut, true);
       const calls = toolCalls(response);

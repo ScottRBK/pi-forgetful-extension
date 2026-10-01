@@ -170,6 +170,8 @@ export interface CaptureServiceOptions {
 export interface CaptureCheckpointResult {
   processed: number;
   processedJobIds: string[];
+  /** Transient final failures for UI reporting after durable job deletion. */
+  discardedJobs?: Array<{ jobId: string; error: string }>;
   paused: boolean;
   errors: string[];
 }
@@ -701,7 +703,8 @@ function snapshotForPersistence(snapshot: CaptureSnapshot): CaptureSnapshot {
 function captureConversation(snapshot: CaptureSnapshot): readonly unknown[] {
   if (!snapshot.conversation) return snapshot.entries;
   return [...snapshot.conversation,
-    ...snapshot.entries.filter((entry) => entry.id.startsWith("inspection:"))];
+    ...snapshot.entries.filter((entry) => entry.id.startsWith("inspection:") &&
+      !snapshot.conversation!.some((value) => record(value)?.id === entry.id))];
 }
 
 function captureWorkMetadata(snapshot: CaptureSnapshot) {
@@ -1833,7 +1836,7 @@ export class CaptureService {
     if (!(await this.enabled(job.snapshot.mode)))
       throw new CapturePause("capture is disabled");
     if (job.callCount >= this.maxModelCalls)
-      throw new CapturePause("capture model call budget reached");
+      throw new Error("capture model call budget reached");
   }
 
   private assertWriteAllowedNow(): void {
@@ -1904,7 +1907,14 @@ export class CaptureService {
       return { queued: false, jobId: snapshot.id, reason: "capture is off" };
     }
     const safeSnapshot = snapshotForPersistence(snapshot);
-    return this.queue.enqueue(safeSnapshot);
+    const result = await this.queue.enqueue(safeSnapshot);
+    if (result.historyError) {
+      const context = { jobId: result.jobId, sessionId: safeSnapshot.context.sessionId,
+        branchId: safeSnapshot.context.branchId };
+      this.emit("info", "history_cache_unavailable", context);
+      this.emit("debug", "history_cache_error", { ...context, error: result.historyError });
+    }
+    return result;
   }
 
   private async resolveDestination(
@@ -2560,7 +2570,7 @@ export class CaptureService {
     if (!inputs.length) return current;
     await this.ensureModelCallAllowed(current);
     if (current.callCount + 1 >= this.maxModelCalls)
-      throw new CapturePause("capture model call budget reserved for link review");
+      throw new Error("capture model call budget reserved for link review");
     current = await this.queue.checkpoint(current.id, { callCount: current.callCount + 1 });
     const accepted = new Map<string, CaptureDecision>();
     const rejected = new Map<string, string>();
@@ -2653,7 +2663,7 @@ export class CaptureService {
     const neighborhood = await this.existingNeighborhood(job, candidate, destination);
     await this.ensureModelCallAllowed(job);
     if (this.client.knowledge?.unlinkMemories && job.callCount + 1 >= this.maxModelCalls)
-      throw new CapturePause("capture model call budget reserved for link review");
+      throw new Error("capture model call budget reserved for link review");
     const currentJob = await this.queue.checkpoint(job.id, {
       callCount: job.callCount + 1,
     });
@@ -2820,7 +2830,7 @@ export class CaptureService {
     if (current.project_ids.length !== 1 || current.project_ids[0] !== destination)
       throw new Error("Selected memory is outside the exclusive destination project");
     if (this.client.knowledge?.unlinkMemories && job.callCount >= this.maxModelCalls)
-      throw new CapturePause("capture model call budget reserved for link review");
+      throw new Error("capture model call budget reserved for link review");
     const projectIds = [...new Set([destination, ...current.project_ids])];
     const replacementCandidate = {
       ...candidate,
@@ -2951,7 +2961,7 @@ export class CaptureService {
     }
     if (decision.action === "create") {
       if (this.client.knowledge?.unlinkMemories && job.callCount >= this.maxModelCalls)
-        throw new CapturePause("capture model call budget reserved for link review");
+        throw new Error("capture model call budget reserved for link review");
       const creation = await this.createMemory(job, candidate, destination);
       const id = creation.id;
       const memoryJob = await this.checkpointOutcome(job, candidate.id, {
@@ -3131,6 +3141,12 @@ export class CaptureService {
           modelVersion: currentJob.snapshot.modelVersion,
         },
         conversation: captureConversation(currentJob.snapshot),
+        onConversationCompacted: async (view) => {
+          const updated = await this.queue.checkpoint(currentJob.id, {
+            compactedConversation: view,
+          });
+          Object.assign(currentJob.snapshot, updated.snapshot);
+        },
         readTools: [this.sourceInspectionTool(currentJob)],
         submission,
       });
@@ -3226,6 +3242,7 @@ export class CaptureService {
 
   private async recordCandidateFailure(
     currentJob: QueueJob, candidate: CaptureCandidate, error: unknown,
+    result: CaptureCheckpointResult,
   ): Promise<void> {
     this.emit("info", error instanceof CapturePause ? "paused" : "error", {
       ...this.correlation(currentJob, candidate.id),
@@ -3234,13 +3251,21 @@ export class CaptureService {
       ...this.correlation(currentJob, candidate.id), error: scrubError(error),
     });
     if (error instanceof CapturePause) {
+      const latest = await this.queue.getJob(currentJob.id);
+      const exhausted = (latest ?? currentJob).attempts >= 3;
+      const message = scrubError(error);
       await this.queue.checkpoint(currentJob.id, {
-        status: "paused",
-        lastError: error.message,
+        status: exhausted ? "failed" : "paused",
+        lastError: message,
       });
+      if (exhausted) {
+        result.errors.push(message);
+        (result.discardedJobs ??= []).push({ jobId: currentJob.id, error: message });
+      } else result.paused = true;
       return;
     }
     const message = scrubError(error);
+    result.errors.push(message);
     const latest = await this.queue.getJob(currentJob.id);
     const status: QueueJobStatus =
       latest && latest.attempts >= 3 ? "failed" : "pending";
@@ -3248,15 +3273,16 @@ export class CaptureService {
       ...record(latest?.candidateOutcomes[candidate.id]),
       executionFailure: error instanceof Error ? error.message : String(error),
     });
-    await this.queue.checkpoint(currentJob.id, {
-      status,
-      lastError: message,
+    await this.queue.checkpoint(currentJob.id, { status, lastError: message });
+    if (status === "failed") (result.discardedJobs ??= []).push({
+      jobId: currentJob.id, error: message,
     });
   }
 
   private async processCandidates(
     job: QueueJob,
     candidates: CaptureCandidate[],
+    result: CaptureCheckpointResult,
   ): Promise<{ job: QueueJob; stopped: boolean }> {
     let currentJob = job;
     for (const candidate of candidates) {
@@ -3270,7 +3296,7 @@ export class CaptureService {
           currentJob.candidateOutcomes[candidate.id],
         );
       } catch (error) {
-        await this.recordCandidateFailure(currentJob, candidate, error);
+        await this.recordCandidateFailure(currentJob, candidate, error, result);
         return { job: currentJob, stopped: true };
       }
     }
@@ -3467,14 +3493,8 @@ export class CaptureService {
     return current;
   }
 
-  private async processJob(job: QueueJob): Promise<void> {
-    if (!(await this.enabled(job.snapshot.mode))) {
-      await this.queue.checkpoint(job.id, {
-        status: "paused",
-        lastError: "capture is disabled",
-      });
-      return;
-    }
+  private async processJob(job: QueueJob, result: CaptureCheckpointResult): Promise<void> {
+    if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
     const loaded = await this.loadCandidates(job);
     let currentJob = loaded.job;
     if (this.client.knowledge?.unlinkMemories && loaded.candidates.length > 1 &&
@@ -3486,7 +3506,7 @@ export class CaptureService {
       await this.queue.complete(currentJob.id);
       return;
     }
-    const processed = await this.processCandidates(currentJob, candidates);
+    const processed = await this.processCandidates(currentJob, candidates, result);
     if (processed.stopped) return;
     currentJob = await this.reviewLinks(processed.job, candidates);
     const latest = await this.queue.getJob(currentJob.id);
@@ -3512,7 +3532,15 @@ export class CaptureService {
         result.paused = true;
         break;
       }
-      const job = await this.queue.claimNext(this.identity, branch);
+      const job = await this.queue.claimNext(this.identity, branch, (discarded) => {
+        (result.discardedJobs ??= []).push(...discarded);
+        result.processedJobIds.push(...discarded.map((item) => item.jobId));
+        result.errors.push(...discarded.map((item) => item.error));
+        for (const outcome of discarded) {
+          this.emit("info", "discarded", { ...branch, jobId: outcome.jobId });
+          this.emit("debug", "error_detail", { ...branch, ...outcome });
+        }
+      });
       if (!job) break;
       result.processed += 1;
       result.processedJobIds.push(job.id);
@@ -3533,7 +3561,7 @@ export class CaptureService {
       finalEntryId: job.snapshot.finalEntryId,
     });
     try {
-      await this.processJob(job);
+      await this.processJob(job, result);
       const after = await this.queue.getJob(job.id);
       this.emit("info", after?.status === "complete" ? "completed" : "job_progress", {
         ...this.correlation(job), status: after?.status,
@@ -3548,10 +3576,12 @@ export class CaptureService {
       result.errors.push(scrubError(error));
       const latest = await this.queue.getJob(job.id);
       if (latest) {
-        const retryStatus = latest.attempts >= 3 ? "failed" : "pending";
-        await this.queue.checkpoint(job.id, {
-          status: error instanceof CapturePause ? "paused" : retryStatus,
-          lastError: scrubError(error),
+        const status = latest.attempts >= 3 ? "failed"
+          : error instanceof CapturePause ? "paused" : "pending";
+        if (status === "paused") result.paused = true;
+        await this.queue.checkpoint(job.id, { status, lastError: scrubError(error) });
+        if (status === "failed") (result.discardedJobs ??= []).push({
+          jobId: job.id, error: scrubError(error),
         });
       }
       return false;
@@ -3571,7 +3601,10 @@ export class CaptureService {
     const workerResult = await this.queue.withWorkerLock(
       this.identity,
       branch,
-      () => this.runBranchWorker(branch, budget, result),
+      async () => {
+        await this.runBranchWorker(branch, budget, result);
+        return true;
+      },
     );
     if (workerResult === undefined) result.paused = true;
     return result;
@@ -3635,6 +3668,8 @@ export class CaptureService {
       const result = await this.checkpointBranch(branch, remaining);
       total.processed += result.processed;
       total.processedJobIds.push(...result.processedJobIds);
+      if (result.discardedJobs?.length)
+        (total.discardedJobs ??= []).push(...result.discardedJobs);
       total.paused ||= result.paused;
       total.errors.push(...result.errors);
       remaining -= result.processed;
@@ -3840,11 +3875,12 @@ export class CaptureService {
         job.binding.accountId !== conflict.binding.accountId ||
         job.snapshot.context.sessionId !== conflict.sessionId ||
         job.snapshot.context.branchId !== conflict.branchId) return result;
-    if (!job.snapshot.conversation && job.snapshot.conversationCoverage !== "complete") {
+    const sources = job.snapshot.sourceConversation ?? job.snapshot.conversation;
+    if (!sources && job.snapshot.conversationCoverage !== "complete") {
       delete result.verifiedOrigin;
       return result;
     }
-    const journalIds = new Set((job.snapshot.conversation ?? []).flatMap((entry) => {
+    const journalIds = new Set((sources ?? []).flatMap((entry) => {
       const id = record(entry)?.id;
       return typeof id === "string" ? [id] : [];
     }));
@@ -4106,7 +4142,9 @@ export class CaptureService {
   ): Promise<NonNullable<PendingConflict["replacement"]>> {
     const origin = !conversation && conflict.jobId
       ? await this.queue.getJob(conflict.jobId) : undefined;
-    const history = conversation ?? (origin ? captureConversation(origin.snapshot) : undefined);
+    const history = conversation ?? (origin ? captureConversation({ ...origin.snapshot,
+      conversation: origin.snapshot.sourceConversation ?? origin.snapshot.conversation,
+    }) : undefined);
     const priorId = conflict.replacement?.memoryId ?? conflict.replacementId;
     const previous = priorId ? await this.client.get(priorId) : undefined;
     if (previous && (previous.project_ids.length !== 1 ||

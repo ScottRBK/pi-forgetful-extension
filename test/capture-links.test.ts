@@ -29,7 +29,8 @@ function snapshot(project: { id: number; name: string }): CaptureSnapshot {
 
 function model(reply: (name: string, input: any) => unknown) {
   return new PiMemoryModel({
-    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
+    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as any,
     complete: async (_model, context) => {
       const tool = context.tools![0]!;
       const input = decodeProviderContext(context).input;
@@ -379,10 +380,22 @@ for (const scenario of [
       }) });
     // Act.
     const queued = await service.enqueue(snapshot(project));
-    await service.checkpoint();
-    if (scenario === "retry" || scenario === "exhausted") await service.checkpoint();
-    if (scenario === "exhausted") await service.checkpoint();
-    // Assert: scope and uncertainty block writes; changed claims do not veto model operations.
+    let finalResult = await service.checkpoint();
+    const afterCreation = await queue.getJob(queued.jobId);
+    if (scenario === "retry" || scenario === "exhausted") finalResult = await service.checkpoint();
+    if (scenario === "exhausted") finalResult = await service.checkpoint();
+    // Assert: exhaustion discards local work, not a memory already saved in Forgetful.
+    if (scenario === "exhausted") {
+      assert.equal(await queue.getJob(queued.jobId), undefined);
+      const memoryId = (afterCreation!.candidateOutcomes.decision as any).memoryId;
+      const stored = await client.get(memoryId);
+      assert.ok(stored.linked_memory_ids!.includes(endpoint.id));
+      assert.equal(attempts, 2, "the saved model-call budget must not be exceeded");
+      assert.deepEqual(finalResult.discardedJobs?.map((item) => item.jobId), [queued.jobId]);
+      assert.ok(finalResult.errors.some((message) => /model call budget/.test(message)));
+      return;
+    }
+    // Scope and uncertainty block writes; changed claims do not veto model operations.
     const job = (await queue.getJob(queued.jobId))!;
     const outcome = job.candidateOutcomes.decision as any;
     const stored = await client.get(outcome.memoryId);
@@ -392,15 +405,9 @@ for (const scenario of [
       assert.ok(!stored.linked_memory_ids!.includes(endpoint.id));
     } else {
       assert.ok(stored.linked_memory_ids!.includes(endpoint.id));
-      if (scenario === "exhausted") {
-        assert.notEqual(job.status, "complete");
-        assert.notEqual(outcome.linkReview.status, "complete");
-      } else {
-        assert.equal(job.status, "complete", job.lastError);
-        assert.equal(outcome.linkReview.status, "partial");
-      }
+      assert.equal(job.status, "complete", job.lastError);
+      assert.equal(outcome.linkReview.status, "partial");
       assert.ok(job.callCount <= 4);
-      if (scenario === "exhausted") assert.equal(attempts, 2);
     }
   });
 }
@@ -1026,8 +1033,7 @@ for (const race of ["document-permission", "entity-permission", "late-entity",
     if (race === "removed-entity") {
       const before = (await queue.getJob(queued.jobId))!;
       assert.deepEqual(await setup.getMemoryEntityIds(replacement), [], JSON.stringify(before));
-      assert.equal((before.candidateOutcomes.decision as any).linkReview.preservationVerified,
-        true, JSON.stringify(before));
+      assert.equal(before.status, "complete", JSON.stringify(before));
       await service.checkpoint();
       assert.deepEqual(await setup.getMemoryEntityIds(replacement), []);
     }
@@ -1269,7 +1275,8 @@ test("batch overlap has an explicit array contract and preserves the trusted ove
     const overlay = "Compare submit_capture_decision with submit_capture_decisions. Preserve this.";
     let observed = false;
     const provider = new PiMemoryModel({
-      find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
+      find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as any,
       complete: async (_model, context) => {
         const name = context.tools![0]!.name;
         const input = decodeProviderContext(context).input;

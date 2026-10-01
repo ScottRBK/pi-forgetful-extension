@@ -47,7 +47,8 @@ for (const level of ["debug", "info", "off"] as const) {
       { action: "create", reason: "No overlap for SQLite" },
     ];
     const registry: ModelRegistryPort = {
-      find: () => ({ provider: "fake", id: "memory" }) as any,
+      find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
       complete: async (_model, context) => {
         const output = outputs.shift();
         const tool = context.tools?.[0];
@@ -261,7 +262,8 @@ test("CaptureService gives Pi the complete persisted evidence and capture contex
   const cwd = `/${"directory/".repeat(100)}`;
   const contexts: Context[] = [];
   const registry: ModelRegistryPort = {
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       return providerTool("capture-complete", "submit_capture_candidates", {
@@ -307,7 +309,8 @@ test("tool evidence correction explains observation as well as verified changes"
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
   const contexts: Context[] = [];
   const model = new PiMemoryModel({
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       return providerTool("observation-feedback", "submit_capture_candidates", {
@@ -514,7 +517,8 @@ test("capture candidate submission retries through the durable checkpoint flow",
     evidenceType: "userDecision",
   };
   const registry: ModelRegistryPort = {
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
@@ -687,7 +691,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
     model: new PiMemoryModel(
       registry,
       { provider: "fake", id: "memory" },
-      { classificationTimeoutMs: 1_000 },
+      { classificationTimeoutMs: 1_000, contextLimitTokens: 500_000 },
     ),
     instanceId: "instance-a",
   });
@@ -855,7 +859,8 @@ test("capture corrects overlong stored fields and preserves service-sized resour
   const service = new CaptureService({
     queue,
     client,
-    model: new PiMemoryModel(registry, { provider: "fake", id: "memory" }),
+    model: new PiMemoryModel(registry, { provider: "fake", id: "memory" },
+      { contextLimitTokens: 500_000 }),
     instanceId: "instance-a",
   });
 
@@ -908,7 +913,8 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   const contexts: Context[] = [];
   let overlapAttempts = 0;
   const registry: ModelRegistryPort = {
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
@@ -1049,7 +1055,8 @@ test("exhausted overlap submission skips one candidate and continues siblings", 
   let invalidAttempts = 0;
   let siblingAttempts = 0;
   const registry: ModelRegistryPort = {
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       const { input } = decodeProviderContext(context);
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
@@ -2782,7 +2789,8 @@ async function partialConflictFixture(t: import("node:test").TestContext, partia
   const contexts: Context[] = [];
   const outputs: unknown[] = [revision];
   const model = new PiMemoryModel({
-    find: () => ({ provider: "fake", id: "memory" }) as any,
+    find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
+      maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
       contexts.push(structuredClone(context));
       return providerTool("revision", context.tools![0]!.name, outputs.shift() as any);

@@ -81,7 +81,8 @@ async function searchServer(t: TestContext) {
 
 function reviewingModel() {
   const reviews: Array<Record<string, any>> = [];
-  const selection = { provider: "scripted", id: "memory" } as Model<any>;
+  const selection = { provider: "scripted", id: "memory", contextWindow: 200_000,
+    maxTokens: 16_384, input: ["text"] } as Model<any>;
   const model = new PiMemoryModel({
     find: () => selection,
     async complete(_model, input) {

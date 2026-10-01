@@ -324,16 +324,39 @@ The extension-owned capture queue must be durable before automatic mode is enabl
 1. Pin the complete active conversation at settlement, using stable session/branch entry IDs
    and the final assistant status. Include pre-compaction history, roles, calls and actual outcomes;
    never reread a mutable session later and assume it is the same run.
-2. Persist the full sanitized conversation in immutable private snapshot files, referenced by the
-   queue index with a verified digest. The index retains project context, recall scope, capture
-   mode, run identity and prompt/model versions. Record each candidate's resolved destination
-   before writing, so retries do not reroute it from a changed working directory.
+2. Persist sanitized history in immutable private snapshot files, referenced by the 50 MiB queue
+   index with a verified digest. Reuse a successful summary only for the same session/branch and
+   matching source boundary; retain recent messages and original unprocessed evidence. Persist
+   private-model compaction so stages and retries can reuse its summary plus unchanged tail.
+   Keep original native source records separately from that model view, preserving images, tool
+   arguments and failures until success or exhausted attempts. Conflicts verify origin against
+   these originals, not the compacted view. Retained source records never go in the queue index.
+   The index retains project context, recall scope, capture mode, run identity and prompt/model
+   versions. Record each candidate's resolved destination before writing, so retries do not
+   reroute it from a changed working directory.
 3. Advance the capture watermark with the durable enqueue. A stable session/branch plus final
    entry identity (and snapshot hash where needed) prevents the same settled turn being queued
    twice after retries, compaction, or restart.
-4. Run one locked worker per session/branch, with serialized queue-file mutations. Recover
-   pending records after restart, and retain per-candidate outcomes for retry and debug inspection.
-5. Remove or mark a queue record complete only after all candidate outcomes are recorded.
+4. Run one locked worker per session/branch, with serialized queue-file mutations. On Pi restart,
+   recover a saved branch only when its latest handled entry is on the active journal path; choose
+   the furthest matching same-session boundary. Divergent paths get a new branch, including
+   repeated visits to the same fork point when its old branch no longer matches. Lookup failure
+   logs the actual error and falls back without blocking recall. Recover pending records after
+   restart, retaining per-candidate receipts and evidence for retries.
+5. Complete a job only after all candidate outcomes are recorded. Advance the successful capture
+   cursor without moving backwards; it is distinct from enqueue receipts and summary progress.
+   A newer completion does not mark older pending jobs finished. Release bulky search/review
+   payloads and retain small UI outcomes; troubleshooting details belong in opt-in logs.
+6. Each started attempt counts, including permission-driven pauses and resumes. The third failed
+   or paused attempt discards the job, source sidecars and all associated conflicts immediately,
+   returning a final outcome for UI reporting. Exhausted model-call budgets fail rather than pause.
+   Abandon unfinished knowledge rather than retaining a manual cleanup backlog. Separate
+   deduplication markers prevent replay. Successful jobs may retain evidence for pending conflicts.
+7. Publish reusable summaries with a forward-only source-ID cursor per session and branch,
+   separately from enqueue deduplication and completed capture progress. An older retry cannot
+   replace a newer summary. Expire inactive summary caches after the retention period, protecting
+   active jobs and pending conflicts. Missing or corrupt reusable summaries fall back to pinned
+   session history with the actual error in existing logs; original source damage remains an error.
 
 The worker is not awaited by `agent_settled`, so automatic capture cannot delay the user's next
 turn. An in-memory queue or a timestamp-only watermark is not sufficient. The queue prevents
@@ -585,11 +608,15 @@ attempts share each task's three-minute deadline. Debug counts provider invocati
 
 ### Model capacity and record validation
 
-Use the selected Pi model's configured output allowance for every background purpose, including
-correction attempts. The registry's raw completion path receives `model.maxTokens` explicitly;
-there is no separate extension-owned output-token budget. Private tasks prepare context using Pi
-compaction helpers, persisted Pi settings and the selected model window, before the first request
-and between continuations. Current task instructions and tool schemas are preserved. Historical
+Private tasks prepare context using Pi compaction helpers and persisted Pi settings before the
+first request and between continuations. User setting `context_limit_tokens` defaults to 100000;
+the effective window is the smaller of this limit and the actual model window, counting policy,
+tools, messages and the permitted reply. Resolve the reply allowance before each provider call as
+the smaller of `model.maxTokens`, Pi's `reserveTokens` (default 16384), and the remaining window.
+Use the same allowance for context validation and the raw provider request. Never clip returned
+submissions into incomplete JSON. This does not change the main Pi session. With compaction
+disabled, shrink the reply allowance if input fits; reject input that leaves no room for a reply.
+Current task instructions and tool schemas are preserved. Historical
 images use native blocks for capable models, including during summarization. Unsupported images
 or indivisible records that cannot fit fail explicitly; evidence is never silently clipped.
 Unsaved host settings are not available through Pi's extension context. Summaries are derived
@@ -602,11 +629,13 @@ schemas return validation failures to the model for correction rather than silen
 content. Corrections remain subject to the existing attempt count and request deadline.
 
 Stored-record selection counts, trust and scope checks, secret redaction, transport safety, queue
-index capacity and diagnostic preview limits remain separate safeguards. Full conversation files
-do not share the index's 5 MiB limit. They remain private and durable until outstanding work and
-pending conflicts release them. Large input can still exceed provider capacity or the unchanged
-task deadline; neither failure permits silent clipping. Legacy truncated snapshots remain marked
-as incomplete rather than being called full conversations.
+index capacity and diagnostic preview limits remain separate safeguards. Snapshot and historical
+summary files do not share the index's 50 MiB limit. Raw unprocessed evidence remains private and
+durable until success or exhausted attempts. Successful summaries remain reusable; conflicts from
+successful jobs retain their source evidence. Failed jobs and their conflicts are removed entirely.
+Large input can still exceed provider capacity or the unchanged task deadline; neither failure
+permits silent clipping. Legacy truncated snapshots remain marked as incomplete, while deliberate
+compaction is labelled summarized rather than complete.
 
 ## Transport
 
@@ -635,7 +664,8 @@ application services, scope policy, prompt policy, or capture queue.
 - normal assistant stop: retain a live recall job so a late terminal result can be delivered;
 - repeated failures: open a short-lived circuit breaker;
 - capture failure: record actual outcomes and ask the model at a later checkpoint whether to retry
-  unfinished operations or stop; completed operations are not automatically repaired or repeated;
+  unfinished operations or stop; completed operations are not automatically repaired or repeated.
+  After three failed attempts total, discard the job and all associated conflicts and evidence;
 - project cannot be resolved in project mode: skip rather than search globally.
 - capture destination cannot be resolved: skip that candidate with setup guidance; global recall
   remains usable, and a failed override never falls back to another write destination;
@@ -674,10 +704,11 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    already-delivered state only after a context boundary.
 3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
    scoped Forgetful data to the main agent.
-4. **Capture input seam**: the capture model receives the full pinned active conversation and
-   composed capture policy, including the current project and evidence for another destination.
-   The watermark tracks processed work without hiding earlier context. Evidence eligibility is
-   separate from conversation visibility.
+4. **Capture input seam**: the capture model receives pinned session/branch history (a successful
+   summary plus original recent messages when compacted) and composed capture policy, including
+   the current project and evidence for another destination. The watermark tracks work separately
+   from context compaction. Original unprocessed evidence survives retries; a summary is never
+   eligible source evidence. Stored summaries survive restart and never cross session/branch scope.
    Candidate extraction accepts one private tool submission, returns bounded validation feedback
    for correction, and never treats text-only JSON as a valid submission.
 5. **Capture mechanism seam**: given a private create/skip/supersede/escalate submission, the

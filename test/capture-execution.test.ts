@@ -403,7 +403,8 @@ test(`rejected batch corrections never resurrect earlier decisions: ${correction
     const { client, project, queue } = await fixture(t);
     let batches = 0;
     const model = new PiMemoryModel({
-      find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as any,
+      find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as any,
       complete: async (_model, context) => {
         const name = context.tools![0]!.name;
         const input = decodeProviderContext(context).input;

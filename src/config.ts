@@ -8,6 +8,7 @@ import type { FileLogLevel } from "./logging.ts";
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
 export const DEFAULT_FORGETFUL_TIMEOUT_MS = 10_000;
 export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
+export const DEFAULT_MEMORY_CONTEXT_LIMIT_TOKENS = 100_000;
 export const DEFAULT_RECALL_CONCURRENCY = 2;
 export const MAX_RECALL_CONCURRENCY = 8;
 
@@ -23,6 +24,15 @@ function resolveRecallConcurrency(value: unknown, warnings: string[]): number {
     `Using ${DEFAULT_RECALL_CONCURRENCY}.`,
   );
   return DEFAULT_RECALL_CONCURRENCY;
+}
+
+function resolveContextLimit(value: unknown, warnings: string[]): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  if (value !== undefined) warnings.push(
+    "Invalid context_limit_tokens; choose a positive safe integer. " +
+    `Using ${DEFAULT_MEMORY_CONTEXT_LIMIT_TOKENS}.`,
+  );
+  return DEFAULT_MEMORY_CONTEXT_LIMIT_TOKENS;
 }
 
 export type ScopeSource = "default" | "project" | "invalid";
@@ -74,6 +84,7 @@ export interface ForgetfulConfig {
   instance: ForgetfulInstanceConfig;
   recallModelTimeoutMs: number;
   recallConcurrency: number;
+  contextLimitTokens: number;
   model?: ModelSelection;
   prompts: PromptOverlays;
   warnings: string[];
@@ -107,6 +118,7 @@ export interface PersistedUserSettings {
   logging?: unknown;
   recall_model_timeout_ms?: unknown;
   recall_concurrency?: unknown;
+  context_limit_tokens?: unknown;
   model?: unknown;
 }
 
@@ -361,6 +373,7 @@ export async function loadForgetfulConfig(
       DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,
     ),
     recallConcurrency: resolveRecallConcurrency(user.recall_concurrency, warnings),
+    contextLimitTokens: resolveContextLimit(user.context_limit_tokens, warnings),
     instance: {
       baseUrl: rawBaseUrl.replace(/\/$/, ""),
       token,
@@ -414,6 +427,7 @@ export async function updateUserSettings(
       | "logging"
       | "recall_model_timeout_ms"
       | "recall_concurrency"
+      | "context_limit_tokens"
       | "model"
     >
   >,

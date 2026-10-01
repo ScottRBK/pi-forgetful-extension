@@ -3,6 +3,8 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type {
   CaptureMode,
   CaptureSnapshot,
+  CaptureHistorySummary,
+  CompactedConversation,
   EvidenceEntry,
   Scope,
   WorkContext,
@@ -97,12 +99,15 @@ export function sanitizeCaptureConversation(conversation: readonly unknown[]): u
 
 /** Also used at the queue boundary, including callers that did not use the Pi adapter. */
 export function sanitizeCaptureSnapshot(snapshot: CaptureSnapshot): CaptureSnapshot {
-  const { conversation, entries, ...metadata } = snapshot;
+  const { conversation, sourceConversation, entries, ...metadata } = snapshot;
   return {
-    ...sanitizeValue(metadata) as Omit<CaptureSnapshot, "entries" | "conversation">,
+    ...sanitizeValue(metadata) as Omit<CaptureSnapshot,
+      "entries" | "conversation" | "sourceConversation">,
     entries: entries.map((entry) => sanitizeValue(entry) as EvidenceEntry),
     ...(conversation !== undefined
       ? { conversation: sanitizeCaptureConversation(conversation) } : {}),
+    ...(sourceConversation !== undefined
+      ? { sourceConversation: sanitizeCaptureConversation(sourceConversation) } : {}),
   };
 }
 
@@ -213,6 +218,52 @@ function collectEvidence(
     evidenceEntries.push(evidence);
   }
   return evidenceEntries;
+}
+
+export function captureSummaryRecord(history: CaptureHistorySummary): unknown {
+  return { type: "capture_history_summary", id: `capture-summary:${history.throughEntryId}`,
+    throughEntryId: history.throughEntryId, summary: sanitizeText(history.text),
+    trust: "derived-context-not-source-evidence" };
+}
+
+/** Replace only the historical model view. Raw evidence survives until the job finishes. */
+export function compactCaptureSnapshot(
+  snapshot: CaptureSnapshot,
+  view: CompactedConversation,
+): CaptureSnapshot {
+  const conversation = snapshot.conversation ? [...snapshot.conversation,
+    ...snapshot.entries.filter((entry) => entry.id.startsWith("inspection:") &&
+      !snapshot.conversation!.some((record) => isRecord(record) && record.id === entry.id))]
+    : snapshot.entries;
+  const cut = conversation.findIndex((entry) => isRecord(entry) &&
+    (entry.id === view.summarizedThroughEntryId ||
+      (entry.type === "capture_history_summary" &&
+        entry.throughEntryId === view.summarizedThroughEntryId)));
+  if (cut < 0 || !view.summary.trim() ||
+      JSON.stringify(conversation.slice(cut + 1)) !== JSON.stringify(view.retainedConversation)) {
+    throw new Error("Compacted capture history must preserve the unchanged source tail");
+  }
+  const historySummary = { throughEntryId: view.summarizedThroughEntryId,
+    text: sanitizeText(view.summary) };
+  return { ...snapshot, historySummary, conversationCoverage: "summarized",
+    sourceConversation: snapshot.sourceConversation ?? snapshot.conversation ?? snapshot.entries,
+    conversation: [captureSummaryRecord(historySummary), ...view.retainedConversation] };
+}
+
+/** A summary from a successful capture may replace the same prefix on this exact branch. */
+export function reuseCaptureHistory(
+  snapshot: CaptureSnapshot,
+  history: CaptureHistorySummary | undefined,
+): CaptureSnapshot {
+  if (!history || !snapshot.conversation) return snapshot;
+  const cut = snapshot.conversation.findIndex((entry) =>
+    isRecord(entry) && entry.id === history.throughEntryId);
+  if (cut < 0) return snapshot;
+  const covered = new Set(snapshot.conversation.slice(0, cut + 1)
+    .flatMap((entry) => isRecord(entry) && typeof entry.id === "string" ? [entry.id] : []));
+  return { ...snapshot, historySummary: history, conversationCoverage: "summarized",
+    conversation: [captureSummaryRecord(history), ...snapshot.conversation.slice(cut + 1)],
+    entries: snapshot.entries.filter((entry) => !covered.has(entry.id)) };
 }
 
 export function buildCaptureSnapshot(options: SnapshotOptions): SnapshotResult {

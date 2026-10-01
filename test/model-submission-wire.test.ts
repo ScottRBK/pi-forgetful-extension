@@ -194,11 +194,12 @@ test("full context reaches Pi and oversized submitted content can be corrected",
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     models: [{ id: "memory", name: "memory", reasoning: false, input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 48_000, maxTokens: 32_768 }],
+      // Both the full correction transcript and its output allowance must fit.
+      contextWindow: 96_000, maxTokens: 32_768 }],
   });
   const model = new PiMemoryModel(new ModelRegistry(runtime), {
     provider: "context-test", id: "memory",
-  });
+  }, { compactionSettings: { enabled: true, reserveTokens: 32_768, keepRecentTokens: 20_000 } });
 
   // Act: schema validation, rather than a response-size guard, requests a correction.
   const result = await model.complete({
@@ -228,5 +229,5 @@ test("full context reaches Pi and oversized submitted content can be corrected",
   assert.equal(rejected?.content, explanation);
   const allowances = requests.map((request) => request.max_tokens ?? request.max_completion_tokens);
   assert.deepEqual(allowances, [32_768, 32_768],
-    "initial and correction requests use the configured model allowance");
+    "initial and correction requests honour the explicitly configured reply reserve");
 });

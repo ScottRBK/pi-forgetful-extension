@@ -23,7 +23,8 @@ test("wrong-name batch submissions cannot authorize capture writes", realOptions
   const queue = new DurableQueueStore({ directory, instanceId: "routing" });
   let wrongCalls = 0;
   const model = new PiMemoryModel({
-    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as Model<any>,
+    find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as Model<any>,
     complete: async (_model, context) => {
       const tool = context.tools![0]!;
       let name = tool.name;

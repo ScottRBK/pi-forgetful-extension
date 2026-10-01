@@ -132,7 +132,8 @@ async function harness(
     string,
     (args: string, context: any) => Promise<void>
   >();
-  const model = { provider: "test", id: "memory" };
+  const model = { provider: "test", id: "memory", contextWindow: 200_000,
+    maxTokens: 16_384, input: ["text"] };
 
   const capture: FakeCapture = {
     enqueued: [],
@@ -956,7 +957,8 @@ async function recallReviewHarness(
 ) {
   const modelInputs: string[] = [];
   const modelPolicies: string[] = [];
-  const selected = { provider: "test", id: "memory" } as Model<any>;
+  const selected = { provider: "test", id: "memory", contextWindow: 200_000,
+    maxTokens: 16_384, input: ["text"] } as Model<any>;
   const model = new PiMemoryModel({
     find: () => selected,
     complete: async (_model, context, completionOptions) => {
@@ -5127,6 +5129,47 @@ test("resolver rejects late dispatch while navigation drains an accepted resolut
     await first?.catch(() => undefined);
     await second;
     await navigation;
+    await fixture.cleanup();
+  }
+});
+
+test("debug reports discarded capture once without reading deleted queue diagnostics", async () => {
+  // Arrange: final failure is returned by the capture worker, not retained in its queue.
+  const fixture = await harness({ userSettings: { verbosity: "debug" } });
+  let deletedJobId = "";
+  let diagnosticReads = 0;
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.capture.checkpoint = async () => {
+      deletedJobId ||= fixture.capture.enqueued.at(-1)?.id ?? "";
+      return { processed: 1, processedJobIds: [deletedJobId], paused: false,
+        errors: ["Final provider failure"],
+        discardedJobs: [{ jobId: deletedJobId, error: "Final provider failure" }] };
+    };
+    fixture.capture.diagnostics = async () => {
+      diagnosticReads++;
+      return { jobs: [], conflicts: [] };
+    };
+    fixture.entries.push(entry("discard-user", "root", "user", "capture work"));
+    fixture.entries.push(entry("discard-answer", "discard-user", "assistant", "done", "stop"));
+
+    // Act: report the failed job, then a later checkpoint returns its stale ID again.
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    for (let count = 0; count < 50 && !fixture.notifications.some((message) =>
+      message.includes("Final provider failure")); count++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    fixture.entries.push(entry("later-user", "discard-answer", "user", "next work"));
+    fixture.entries.push(entry("later-answer", "later-user", "assistant", "done", "stop"));
+    await fixture.emit("agent_settled", { type: "agent_settled" });
+    await fixture.capture.checkpoint();
+
+    // Assert: failed work is no longer tracked; no missing-outcome notice or repeated failure.
+    const feedback = fixture.notifications.filter((message) =>
+      message.startsWith("Forgetful capture"));
+    assert.deepEqual(feedback, ["Forgetful capture failed: Final provider failure."]);
+    assert.equal(diagnosticReads, 0);
+  } finally {
     await fixture.cleanup();
   }
 });

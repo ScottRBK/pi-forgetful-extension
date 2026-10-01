@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   DEFAULT_FORGETFUL_BASE_URL,
   loadForgetfulConfig,
+  updateUserSettings,
   writeProjectScope,
   type ForgetfulConfig,
 } from "../src/config.ts";
@@ -31,7 +32,47 @@ test("fresh projects use global scope and the default service endpoint", async (
   assert.equal(config.instance.timeoutMs, 10_000);
   assert.equal(config.recallModelTimeoutMs, 5_000);
   assert.equal(config.recallConcurrency, 2);
+  assert.equal(config.contextLimitTokens, 100_000);
   assert.equal(config.verbosity, "warning");
+});
+
+test("private context limit persists in user settings and ignores project overrides", async t => {
+  // Arrange.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const settings = join(root, "settings.json");
+  await mkdir(join(root, ".pi", "forgetful"), { recursive: true });
+  await writeFile(join(root, ".pi", "forgetful", "settings.json"),
+    JSON.stringify({ context_limit_tokens: 999_999 }));
+
+  // Act.
+  await updateUserSettings(settings, { context_limit_tokens: 48_000 });
+  const config = await loadForgetfulConfig({
+    cwd: root, trusted: true, userSettingsPath: settings,
+  });
+
+  // Assert.
+  assert.equal(config.contextLimitTokens, 48_000);
+  assert.deepEqual(config.warnings, []);
+});
+
+test("invalid private context limits warn and use the 100000 token default", async t => {
+  // Arrange.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const settings = join(root, "settings.json");
+  for (const value of [0, -1, 1.5, "50000", null, true, {}, 1e20]) {
+    await writeFile(settings, JSON.stringify({ context_limit_tokens: value }));
+
+    // Act.
+    const config = await loadForgetfulConfig({
+      cwd: root, trusted: true, userSettingsPath: settings,
+    });
+
+    // Assert.
+    assert.equal(config.contextLimitTokens, 100_000);
+    assert.match(config.warnings.join("\n"), /context_limit_tokens.*100000/);
+  }
 });
 
 test("verbosity accepts log levels and takes precedence over legacy debug settings", async () => {

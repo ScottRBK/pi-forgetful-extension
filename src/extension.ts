@@ -1747,7 +1747,7 @@ export function createForgetfulExtension(
       let config = await loadRuntimeConfig(ctx);
       const sessionId = ctx.sessionManager.getSessionId();
       const currentLeaf = ctx.sessionManager.getLeafId();
-      const branchId = `${sessionId}:${currentLeaf ?? "root"}`;
+      const fallbackBranchId = `${sessionId}:${currentLeaf ?? "root"}`;
       const resolvedClient = await resolveRuntimeClient(ctx, config);
       config = resolvedClient.config;
       const client = resolvedClient.client;
@@ -1764,6 +1764,7 @@ export function createForgetfulExtension(
           sessionId,
           logger,
           classificationTimeoutMs: config.recallModelTimeoutMs,
+          contextLimitTokens: config.contextLimitTokens,
           compactionSettings: SettingsManager.create(ctx.cwd, agentDir, {
             projectTrusted: ctx.isProjectTrusted(),
           }).getCompactionSettings(),
@@ -1775,7 +1776,7 @@ export function createForgetfulExtension(
         config,
         client,
         model,
-        branchId,
+        fallbackBranchId,
       );
       const instanceId = makeInstanceId(config);
       const queueDirectory = join(
@@ -1787,13 +1788,29 @@ export function createForgetfulExtension(
           .digest("hex")
           .slice(0, 32),
       );
+      let branchId = fallbackBranchId;
+      try {
+        const activeEntryIds = ctx.sessionManager.getBranch(currentLeaf ?? undefined)
+          .map((entry) => entry.id);
+        branchId = await new DurableQueueStore({
+          directory: queueDirectory,
+          instanceId,
+          endpoint: config.instance.baseUrl,
+          accountId: instanceId,
+        }).resolveBranchId(sessionId, activeEntryIds, fallbackBranchId);
+      } catch (error) {
+        logger.emit("info", "branch.resolve_failed", {
+          branchId: fallbackBranchId,
+          error: boundedErrorDiagnostic(error),
+        });
+      }
       return {
         logger,
         config,
         client,
         model,
         recall,
-        context,
+        context: { ...context, sessionId, branchId },
         sessionId,
         currentLeaf,
         branchId,
@@ -2303,12 +2320,13 @@ export function createForgetfulExtension(
         );
         if (jobIds.length === 0) return;
         let unavailable = 0;
-        const results = await Promise.all(
-          jobIds.map(async (jobId) => ({
-            jobId,
-            outcome: await readCaptureOutcome(capture, runtime, jobId),
-          })),
-        );
+        const results = await Promise.all(jobIds.map(async (jobId) => {
+          const discarded = checkpointResult?.discardedJobs?.find((item) => item.jobId === jobId);
+          return { jobId, outcome: discarded
+            ? automaticCaptureJobOutcome({ jobs: [{ id: jobId, status: "failed",
+              lastError: discarded.error, candidates: [] }] }, jobId)
+            : await readCaptureOutcome(capture, runtime, jobId) };
+        }));
         if (!isCurrentRuntime(runtime, ctx)) return;
         const items: CaptureFeedbackItem[] = [];
         for (const { jobId, outcome } of results) {
@@ -2431,9 +2449,6 @@ export function createForgetfulExtension(
       state.runtime = undefined;
       const runtime = await loadRuntime(ctx, event);
       runtime.baselineEntryId = ctx.sessionManager.getLeafId();
-      runtime.branchId =
-        `${ctx.sessionManager.getSessionId()}:` +
-        `${runtime.baselineEntryId ?? "root"}`;
       runtime.lastCaptureEntryId = undefined;
       runtime.skipNextCapture = false;
     });

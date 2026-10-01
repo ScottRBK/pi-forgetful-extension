@@ -34,7 +34,8 @@ for (const scenario of ["unlinked-irrelevant", "foreign-only", "keep-during-revi
       const queue = new DurableQueueStore({ directory, instanceId: scenario });
       const tasks: string[] = [];
       const model = new PiMemoryModel({
-        find: () => ({ provider: "test", id: "memory", maxTokens: 8_000 }) as Model<any>,
+        find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
+      contextWindow: 200_000, input: ["text"] }) as Model<any>,
         complete: async (_model, context) => {
           const name = context.tools![0]!.name;
           tasks.push(name);

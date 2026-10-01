@@ -213,6 +213,8 @@ export interface ModelRequest {
   input: unknown;
   /** Ordered historical records, kept separate from the current task and its instructions. */
   conversation?: readonly unknown[];
+  /** Persist the initial compacted historical view; never private task/tool turns. */
+  onConversationCompacted?: (view: CompactedConversation) => Promise<void>;
   signal?: AbortSignal;
   submission?: ModelSubmissionTool;
   /** Task-specific read capabilities. Private models never inherit the main agent's tools. */
@@ -279,6 +281,17 @@ export interface EvidenceEntry {
   details?: unknown;
 }
 
+export interface CaptureHistorySummary {
+  throughEntryId: string;
+  text: string;
+}
+
+export interface CompactedConversation {
+  summary: string;
+  summarizedThroughEntryId: string;
+  retainedConversation: readonly unknown[];
+}
+
 export interface CaptureSnapshot {
   id: string;
   context: WorkContext;
@@ -286,8 +299,11 @@ export interface CaptureSnapshot {
   entries: EvidenceEntry[];
   /** Sanitized Pi entry records in root-to-pinned-leaf order; never evidence by role alone. */
   conversation?: readonly unknown[];
-  conversationCoverage?: "complete" | "legacy-partial";
-  /** Previously processed boundary, for scheduling only; never a context cutoff. */
+  conversationCoverage?: "complete" | "legacy-partial" | "summarized";
+  /** Original native source records retained independently of the compacted model view. */
+  sourceConversation?: readonly unknown[];
+  historySummary?: CaptureHistorySummary;
+  /** Previously processed boundary, independent of the historical context cutoff. */
   processedThroughEntryId?: string | null;
   leafEntryId?: string;
   finalEntryId: string;
