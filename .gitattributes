@@ -1,2 +1,0 @@
-# Patch context adds a space before existing tab indentation.
-patches/*.patch whitespace=-space-before-tab
