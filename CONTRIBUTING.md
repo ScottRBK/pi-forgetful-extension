@@ -45,6 +45,44 @@ The integration suite also covers graph and artifact recall, interrupted rich ca
 scope, and repeated `/forgetful encode` runs through Pi's real command and tool boundaries.
 Stored-file fixtures are created only in the isolated server; the extension exposes no upload tool.
 
+### Native Codex compaction and recall
+
+Point this optional regression at a local `pi-codex-compaction` source entry point:
+
+```bash
+FORGETFUL_TEST_CODEX_COMPACTION=/path/to/pi-codex-compaction/index.ts \
+  node --import tsx --test test/recall-native-compaction-pi.test.ts
+```
+
+It loads both extensions into real Pi sessions and inspects the final Codex request after provider
+hooks. It covers bounded waits, late automatic recall, either extension load order, tree navigation,
+and a no-checkpoint control that discusses the marker prefix as ordinary chat. The real Codex
+converter runs, but the test stops before transport; there are no paid calls or changes to installed
+packages, settings, or production data.
+The source checkout must resolve the same Pi SDK dependencies as the test runner.
+
+The unpatched compaction plugin rebuilds requests from saved history and loses transient recall
+facts. This regression intentionally fails against that version. Existing checkpoints can also
+contain old recall lifecycle markers; preserving new context-hook changes does not remove items
+already stored inside a checkpoint.
+
+The reviewed plugin fix is saved in
+[`patches/pi-codex-compaction-context.patch`](patches/pi-codex-compaction-context.patch).
+It was built from upstream `ogulcancelik/pi-extensions` revision `373a8cf` and also applies to the
+installed `@ogulcancelik/pi-codex-compaction` 0.1.5 files checked during review.
+To reapply it to the plugin package directory, set absolute paths and check before changing files:
+
+```bash
+PATCH=/absolute/path/to/pi-forgetful-extension/patches/pi-codex-compaction-context.patch
+PLUGIN=/absolute/path/to/pi-codex-compaction
+git -C "$PLUGIN" apply --check -p3 "$PATCH"
+git -C "$PLUGIN" apply -p3 "$PATCH"
+```
+
+For the upstream monorepo, omit `-p3` and set `PLUGIN` to its root. If the check fails, stop: the
+plugin may already be patched or its version may differ. Restart or reload Pi after applying it.
+An npm update can replace the patched files; keep the patch to reapply after checking compatibility.
+
 ### Live recall submission checks
 
 This opt-in test spends model credits using the configured Forgetful memory model and Pi's normal

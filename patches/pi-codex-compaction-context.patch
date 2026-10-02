@@ -1,0 +1,1229 @@
+From 1155206a58e7fa9a820804ed8ba176d97872c0a7 Mon Sep 17 00:00:00 2001
+From: Scott Raisbeck <scott_raisbeck1337@hotmail.com>
+Date: Fri, 2 Oct 2026 23:39:45 +0100
+Subject: [PATCH] fix(codex-compaction): preserve request-time context changes
+
+---
+ packages/pi-codex-compaction/README.md        |  36 +
+ .../context-delivery.node.ts                  | 776 ++++++++++++++++++
+ packages/pi-codex-compaction/index.ts         | 101 ++-
+ .../pi-codex-compaction/native-compaction.ts  | 186 +++++
+ packages/pi-codex-compaction/package.json     |   3 +-
+ 5 files changed, 1097 insertions(+), 5 deletions(-)
+ create mode 100644 packages/pi-codex-compaction/context-delivery.node.ts
+
+diff --git a/packages/pi-codex-compaction/README.md b/packages/pi-codex-compaction/README.md
+index bddefc5..8fd4961 100644
+--- a/packages/pi-codex-compaction/README.md
++++ b/packages/pi-codex-compaction/README.md
+@@ -37,6 +37,34 @@ Native checkpoints are persisted in `CompactionEntry.details`. Resume, forks, tr
+
+ Compaction is fail-closed. If a native request fails, Pi's compaction is cancelled and the previous history remains intact. The extension never silently falls back to Pi text summarization. If a persisted native checkpoint is malformed or belongs to another Codex model, the next request is aborted rather than sending Pi's local marker to OpenAI.
+
++### Context from other extensions
++
++After a checkpoint, the `context` hook swaps the checkpoint and the saved messages it already
++covers for one transient marker message. Everything else Pi sends (messages other extensions
++added, messages they filtered out, edited tail messages) is kept as is. Just before the request,
++the marker is replaced by the checkpoint's replacement history. The marker is never saved to the
++session and is never sent to OpenAI.
++
++If the marker cannot be placed or found safely, the extension warns (a notification, or
++`console.warn` without a UI) and rebuilds the request from the saved session. The checkpoint is
++still used, but other extensions' context edits are lost for that request. Fallback cases:
++
++- another hook edited a saved message the checkpoint covers (removing one is fine)
++- duplicate saved messages that cannot be told apart
++- the checkpoint was written by an older version as a custom entry
++- a later hook removed, duplicated or altered the marker
++- the host Pi has no `buildSessionProjection` (before Pi 0.87)
++
++The warning shows once per session and checkpoint, not on every request. A new checkpoint, or a
++restarted session, warns again. The rebuild also ignores Pi `context_edit` entries (an existing
++limitation of the saved-branch rebuild); the normal path honours them.
++
++The marker is recognised only as a whole user message holding the exact form
++`[codex-native-checkpoint:<entryId>:<uuid>]`. Text that merely mentions the prefix is ordinary
++content. That exact form is reserved: if a request without a checkpoint still carries such a
++message, only that message is dropped. A user who types that exact form by hand loses that message.
++The pending marker is kept until the next context event, so a re-sent request resolves the same way.
++
+ ## Configuration
+
+ On Pi 0.84.4 and later, configure compaction through Pi in `~/.pi/agent/settings.json` or project-local `.pi/settings.json`:
+@@ -64,3 +92,11 @@ The current conversation is sent to the ChatGPT Codex Responses endpoint. OpenAI
+ Native checkpoints are model-specific. Switch back to the model that created the checkpoint before continuing. Provider switching is not a portability path because no textual summary is generated.
+
+ Pi does not expose a finalized provider payload during `session_before_compact`. The extension mirrors Pi's Codex message conversion and combines it with the latest observed request shape to construct the compaction request. Extensions loaded later that independently rewrite provider payloads can therefore create order-dependent behavior.
++
++The opaque checkpoint is not filtered. Text that another extension injected before compaction
++and that ended up inside the checkpoint stays there. Only messages added after the checkpoint
++are controlled by context hooks. A hook that rewrites a covered saved message and changes its
++timestamp is seen as a removal plus an addition, so the new message is sent next to the checkpoint.
++
++Regression tests for context delivery: `npm run test:context` (`node --test`, Node 22.19+ runs
++the TypeScript directly; kept out of Bun's `*.test.ts` discovery on purpose).
+diff --git a/packages/pi-codex-compaction/context-delivery.node.ts b/packages/pi-codex-compaction/context-delivery.node.ts
+new file mode 100644
+index 0000000..b8ad2ae
+--- /dev/null
++++ b/packages/pi-codex-compaction/context-delivery.node.ts
+@@ -0,0 +1,776 @@
++// Regression tests for context delivery after a native Codex checkpoint.
++//
++// Seam: registered extension handlers -> real SessionManager -> real pi-ai Codex provider.
++// Only the network is faked: the provider's onPayload hook records the final request and stops.
++// Runs with plain Node (>=22.19, native type stripping): npm run test:context
++// Not named *.test.ts on purpose, so Bun's auto-discovery leaves it alone.
++import assert from "node:assert/strict";
++import { describe, mock, test } from "node:test";
++import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
++import { stream } from "@earendil-works/pi-ai/api/openai-codex-responses";
++import { registerCodexCompactionExtension } from "./index.ts";
++import {
++	modelKey,
++	NATIVE_COMPACTION_KIND,
++	NATIVE_COMPACTION_VERSION,
++} from "./native-compaction.ts";
++
++type Hook = (event: any, ctx: any) => any;
++type Extension = (pi: any) => void;
++
++const codex = {
++	id: "gpt-test",
++	name: "GPT Test",
++	api: "openai-codex-responses",
++	provider: "openai-codex",
++	baseUrl: "http://127.0.0.1:1",
++	reasoning: true,
++	input: ["text"],
++	contextWindow: 200_000,
++	maxTokens: 16_384,
++	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++} as any;
++
++const claude = { ...codex, id: "claude-test", provider: "anthropic", api: "anthropic-messages" };
++const MARKER_PREFIX = "[codex-native-checkpoint:";
++const LOCAL_SUMMARY = "OpenAI Codex native compaction checkpoint (local).";
++
++function jwt(): string {
++	const body = Buffer.from(JSON.stringify({
++		"https://api.openai.com/auth": { chatgpt_account_id: "account-123" },
++	})).toString("base64url");
++	return `header.${body}.signature`;
++}
++
++// ---- session builders -------------------------------------------------------------------------
++
++const user = (text: string, timestamp: number) =>
++	({ role: "user", content: [{ type: "text", text }], timestamp }) as any;
++
++const assistant = (blocks: any[], timestamp: number) => ({
++	role: "assistant",
++	content: blocks,
++	api: codex.api,
++	provider: codex.provider,
++	model: codex.id,
++	usage: {
++		input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
++		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++	},
++	stopReason: "stop",
++	timestamp,
++}) as any;
++
++const say = (text: string, timestamp: number) =>
++	assistant([{ type: "text", text }], timestamp);
++
++function details(label: string, model = codex) {
++	return {
++		kind: NATIVE_COMPACTION_KIND,
++		version: NATIVE_COMPACTION_VERSION,
++		modelKey: modelKey(model),
++		replacementHistory: [
++			{ role: "user", content: [{ type: "input_text", text: `retained by ${label}` }] },
++			{ type: "compaction", id: `cmp_${label}`, encrypted_content: `opaque-${label}` },
++		],
++	};
++}
++
++/** old(1000) answer(1001) kept(1002) kept-answer(1003) [compaction] tail(2000..2002) */
++function seedSession(options: { tail?: boolean } = {}) {
++	const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++	sm.appendMessage(user("old question", 1000));
++	const oldAnswer = sm.appendMessage(say("old answer", 1001));
++	const kept = sm.appendMessage(user("kept question", 1002));
++	sm.appendMessage(say("kept answer", 1003));
++	const checkpoint = sm.appendCompaction(LOCAL_SUMMARY, kept, 5000, details("one"), true);
++	if (options.tail !== false) {
++		sm.appendMessage(user("tail question", 2000));
++		sm.appendMessage(say("tail answer", 2001));
++		sm.appendMessage(user("latest question", 2002));
++	}
++	return { sm, kept, oldAnswer, checkpoint };
++}
++
++// ---- runtime: handlers + provider recording --------------------------------------------------
++
++function createRuntime(
++	options: { hasUI?: boolean; model?: any; view?: (sm: SessionManager) => any } = {},
++) {
++	const hooks = new Map<string, Hook[]>();
++	const notices: string[] = [];
++	const errors: string[] = [];
++	let model = options.model ?? codex;
++	const pi = {
++		on: (name: string, hook: Hook) => {
++			hooks.set(name, [...(hooks.get(name) ?? []), hook]);
++		},
++		getAllTools: () => [],
++		getActiveTools: () => [],
++		registerEntryRenderer: () => {},
++		appendEntry: () => {},
++		sendUserMessage: () => {},
++	};
++	const use = (extension: Extension) => extension(pi);
++	const codexExtension: Extension = (api) => registerCodexCompactionExtension(api, "1.0.0");
++
++	const ctxFor = (sm: SessionManager) => ({
++		model,
++		mode: options.hasUI === false ? "print" : "tui",
++		hasUI: options.hasUI !== false,
++		cwd: "/tmp/pi-codex-compaction-test",
++		ui: { notify: (message: string) => notices.push(message) },
++		abort: () => {},
++		isProjectTrusted: () => false,
++		getSystemPrompt: () => "You are Codex.",
++		sessionManager: options.view ? options.view(sm) : sm,
++	});
++
++	// Mirrors the runner: a throwing handler is recorded and skipped.
++	type Pick = (event: any, result: any) => void;
++	const run = async (name: string, event: any, ctx: any, pick: Pick) => {
++		for (const hook of hooks.get(name) ?? []) {
++			try {
++				pick(event, await hook(event, ctx));
++			} catch (error) {
++				errors.push(error instanceof Error ? error.message : String(error));
++			}
++		}
++	};
++
++	const runContext = async (sm: SessionManager, messages?: any[]) => {
++		const source = messages ?? sm.buildSessionContext().messages;
++		const event = { type: "context", messages: structuredClone(source) };
++		await run("context", event, ctxFor(sm), (e, result) => {
++			if (result?.messages) e.messages = result.messages;
++		});
++		return event.messages as any[];
++	};
++
++	/** Sends [system, ...messages] through the real Codex provider and returns the final body. */
++	const runRequest = async (sm: SessionManager, messages: any[], rawPayload?: any) => {
++		let body: any;
++		const ctx = ctxFor(sm);
++		const system = { role: "system", content: "You are Codex.", timestamp: 1 };
++		const llm = [system, ...convertToLlm(messages)];
++		const events = stream(model, { messages: llm } as any, {
++			apiKey: jwt(),
++			onPayload: async (payload: any) => {
++				const event = { type: "before_provider_request", payload: rawPayload ?? payload };
++				await run("before_provider_request", event, ctx, (e, result) => {
++					if (result !== undefined) e.payload = result;
++				});
++				body = event.payload;
++				throw new Error("stop before network");
++			},
++		} as any);
++		for await (const _ of events) { /* drain */ }
++		return body;
++	};
++
++	const turn = async (sm: SessionManager) => runRequest(sm, await runContext(sm));
++	const fire = async (name: string, sm: SessionManager, event: any = {}) =>
++		run(name, event, ctxFor(sm), () => {});
++
++	return {
++		use, codexExtension, runContext, runRequest, turn, fire, notices, errors,
++		setModel: (next: any) => { model = next; },
++	};
++}
++
++// ---- wire inspection (independent of the code under test) ------------------------------------
++
++function wire(payload: any): string[] {
++	return (payload.input as any[]).map((item) => {
++		if (item.type === "compaction") return `<compaction:${item.encrypted_content}>`;
++		if (item.type === "function_call") return `call:${item.call_id}`;
++		if (item.type === "function_call_output") return `out:${item.call_id}:${item.output}`;
++		if (item.type === "message") return item.content.map((part: any) => part.text).join("");
++		return item.content.map((part: any) => part.text).join("");
++	});
++}
++
++const messageText = (message: any) =>
++	typeof message.content === "string"
++		? message.content
++		: (message.content ?? []).map((part: any) => part.text ?? "").join("");
++
++const recall: Extension = (pi) =>
++	pi.on("context", (event: any) => {
++		const messages = [...event.messages];
++		messages.splice(messages.length - 1, 0, {
++			role: "custom", customType: "forgetful", content: "RECALL", display: false,
++			timestamp: 2002,
++		});
++		return { messages };
++	});
++
++const dropText = (text: string): Extension => (pi) =>
++	pi.on("context", (event: any) => ({
++		messages: event.messages.filter((m: any) => !messageText(m).includes(text)),
++	}));
++
++const REWRITTEN_TAIL = [
++	"retained by one", "<compaction:opaque-one>", "tail question", "tail answer", "latest question",
++];
++
++describe("native checkpoint context delivery", () => {
++	for (const order of ["before", "after"] as const) {
++		test(`delivers context injected by another hook registered ${order} codex`, async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			if (order === "before") rt.use(recall);
++			rt.use(rt.codexExtension);
++			if (order === "after") rt.use(recall);
++
++			const payload = await rt.turn(sm);
++
++			assert.deepEqual(wire(payload), [
++				"retained by one", "<compaction:opaque-one>", "tail question", "tail answer",
++				"RECALL", "latest question",
++			]);
++			assert.deepEqual(rt.notices, []);
++		});
++
++		test(`keeps a tail message filtered by a hook registered ${order} codex out`, async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			if (order === "before") rt.use(dropText("tail question"));
++			rt.use(rt.codexExtension);
++			if (order === "after") rt.use(dropText("tail question"));
++
++			const payload = await rt.turn(sm);
++
++			assert.deepEqual(wire(payload), [
++				"retained by one", "<compaction:opaque-one>", "tail answer", "latest question",
++			]);
++			assert.deepEqual(rt.notices, []);
++		});
++	}
++
++	test("a retained record filtered by an earlier hook stays absent quietly", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(dropText("kept question"));
++		rt.use(recall);
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "tail question", "tail answer",
++			"RECALL", "latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("sends exactly one compaction item and never replays retained history", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		const text = JSON.stringify(payload);
++		assert.equal(payload.input.filter((item: any) => item.type === "compaction").length, 1);
++		const replays = [
++			"old question", "old answer", "kept question", "kept answer", LOCAL_SUMMARY,
++		];
++		for (const replayed of replays) {
++			assert.equal(text.includes(replayed), false, `${replayed} was replayed`);
++		}
++		assert.equal(text.includes(MARKER_PREFIX), false);
++		assert.equal(payload.instructions, "You are Codex.");
++		assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++	});
++
++	test("warns and falls back when an earlier hook edits a retained record", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use((pi) => pi.on("context", (event: any) => ({
++			messages: event.messages.map((m: any) =>
++				m.role === "user" && messageText(m) === "kept question"
++					? { ...m, content: [{ type: "text", text: "EDITED kept question" }] }
++					: m),
++		})));
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		const text = JSON.stringify(payload);
++		assert.equal(text.includes("EDITED"), false);
++		assert.equal(text.includes("kept question"), false);
++		assert.equal(payload.input.filter((item: any) => item.type === "compaction").length, 1);
++		assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		assert.equal(rt.notices.length, 1);
++		assert.match(rt.notices[0]!, /edited/i);
++	});
++
++	test("identical duplicate messages are matched by count", async () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		const kept = sm.appendMessage(user("same", 1000));
++		sm.appendCompaction(LOCAL_SUMMARY, kept, 5000, details("one"), true);
++		sm.appendMessage(user("same", 1000));
++		sm.appendMessage(user("latest question", 2002));
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "same", "latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("an ambiguous duplicate with a removed copy falls back with a warning", async () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		const kept = sm.appendMessage(user("same", 1000));
++		sm.appendCompaction(LOCAL_SUMMARY, kept, 5000, details("one"), true);
++		sm.appendMessage(user("same", 1000));
++		sm.appendMessage(user("latest question", 2002));
++		const rt = createRuntime();
++		let removed = false;
++		rt.use((pi) => pi.on("context", (event: any) => ({
++			messages: event.messages.filter((m: any) => {
++				if (!removed && messageText(m) === "same") return (removed = true) && false;
++				return true;
++			}),
++		})));
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "same", "latest question",
++		]);
++		assert.equal(rt.notices.length, 1);
++	});
++
++	test("tool calls and results after the checkpoint are unchanged", async () => {
++		const { sm } = seedSession({ tail: false });
++		sm.appendMessage(user("read it", 2000));
++		sm.appendMessage(assistant(
++			[{ type: "toolCall", id: "call_1|fc_1", name: "read", arguments: { path: "a.txt" } }],
++			2001,
++		));
++		sm.appendMessage({
++			role: "toolResult", toolCallId: "call_1|fc_1", toolName: "read",
++			content: [{ type: "text", text: "file body" }], isError: false, timestamp: 2002,
++		} as any);
++		sm.appendMessage(user("latest question", 2003));
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "read it", "call:call_1",
++			"out:call_1:file body", "latest question",
++		]);
++		assert.equal(payload.input.find((item: any) => item.type === "function_call").id, "fc_1");
++	});
++
++	test("sessions without a checkpoint are untouched and keep injected context", async () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		sm.appendMessage(user("first", 1000));
++		sm.appendMessage(say("answer", 1001));
++		sm.appendMessage(user("latest question", 1002));
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use(recall);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), ["first", "answer", "RECALL", "latest question"]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("non-Codex models are not given a checkpoint marker", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime({ model: claude });
++		rt.use(rt.codexExtension);
++
++		const messages = await rt.runContext(sm);
++
++		assert.equal(messages.some((m) => messageText(m).includes(MARKER_PREFIX)), false);
++		assert.equal(messages.some((m) => m.role === "compactionSummary"), false);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("a checkpoint for another model keeps the existing blocked behaviour", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime({ model: { ...codex, id: "gpt-other" } });
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(payload.input, []);
++		assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++	});
++
++	test("the marker never reaches the saved session", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const messages = await rt.runContext(sm);
++
++		assert.equal(messages.filter((m) => messageText(m).startsWith(MARKER_PREFIX)).length, 1);
++		assert.equal(JSON.stringify(sm.getEntries()).includes(MARKER_PREFIX), false);
++	});
++
++	test("warns and rebuilds when a later hook removes the marker", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use(dropText(MARKER_PREFIX));
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++		assert.equal(rt.notices.length, 1);
++		assert.match(rt.notices[0]!, /marker/i);
++	});
++
++	test("warns and rebuilds when a later hook duplicates the marker", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use((pi) => pi.on("context", (event: any) => ({
++			messages: event.messages.flatMap((m: any) =>
++				messageText(m).startsWith(MARKER_PREFIX) ? [m, structuredClone(m)] : [m]),
++		})));
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++		assert.equal(rt.notices.length, 1);
++	});
++
++	test("without a UI the fallback is reported on the console", async () => {
++		const warn = mock.method(console, "warn", () => {});
++		try {
++			const { sm } = seedSession();
++			const rt = createRuntime({ hasUI: false });
++			rt.use(rt.codexExtension);
++			rt.use(dropText(MARKER_PREFIX));
++
++			await rt.turn(sm);
++
++			assert.equal(warn.mock.callCount(), 1);
++			assert.match(String(warn.mock.calls[0]!.arguments[0]), /marker/i);
++		} finally {
++			warn.mock.restore();
++		}
++	});
++
++	test("a legacy custom-entry checkpoint falls back with a warning", async () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		sm.appendMessage(user("old question", 1000));
++		sm.appendCustomEntry(NATIVE_COMPACTION_KIND, details("legacy"));
++		sm.appendMessage(user("latest question", 2002));
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by legacy", "<compaction:opaque-legacy>", "latest question",
++		]);
++		assert.equal(rt.notices.length, 1);
++	});
++
++	describe("marker scope", () => {
++		const markerOf = (messages: any[]) =>
++			messages.map(messageText).find((text) => text.startsWith(MARKER_PREFIX))!;
++		const markerPayload = (marker: string) => ({
++			model: codex.id,
++			input: [
++				{ role: "user", content: [{ type: "input_text", text: marker }] },
++				{ role: "user", content: [{ type: "input_text", text: "latest question" }] },
++			],
++		});
++
++		test("another session cannot resolve a marker from this one", async () => {
++			const a = seedSession();
++			const b = seedSession();
++			const rt = createRuntime();
++			rt.use(rt.codexExtension);
++			const marker = markerOf(await rt.runContext(a.sm));
++
++			const payload = await rt.runRequest(b.sm, [], markerPayload(marker));
++
++			assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++			assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		});
++
++		test("a different checkpoint on another branch cannot resolve the marker", async () => {
++			const { sm, oldAnswer } = seedSession();
++			const rt = createRuntime();
++			rt.use(rt.codexExtension);
++			const marker = markerOf(await rt.runContext(sm));
++			sm.branch(oldAnswer);
++			const forkKept = sm.appendMessage(user("fork question", 3000));
++			sm.appendCompaction(LOCAL_SUMMARY, forkKept, 5000, details("fork"), true);
++			sm.appendMessage(user("latest question", 3001));
++
++			const payload = await rt.runRequest(sm, [], markerPayload(marker));
++
++			assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++			assert.deepEqual(wire(payload), [
++				"retained by fork", "<compaction:opaque-fork>", "latest question",
++			]);
++		});
++
++		test("model selection discards the pending marker", async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			rt.use(rt.codexExtension);
++			const messages = await rt.runContext(sm);
++			await rt.fire("model_select", sm, { model: codex });
++
++			const payload = await rt.runRequest(sm, messages);
++
++			assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++			assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		});
++
++		test("session shutdown discards the pending marker", async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			rt.use(rt.codexExtension);
++			const messages = await rt.runContext(sm);
++			await rt.fire("session_shutdown", sm, { reason: "quit" });
++
++			const payload = await rt.runRequest(sm, messages);
++
++			assert.equal(JSON.stringify(payload).includes(MARKER_PREFIX), false);
++			assert.deepEqual(wire(payload), REWRITTEN_TAIL);
++		});
++
++		test("the same transformed payload can be sent twice with context intact", async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			rt.use(recall);
++			rt.use(rt.codexExtension);
++			const messages = await rt.runContext(sm);
++
++			const first = await rt.runRequest(sm, messages);
++			const second = await rt.runRequest(sm, messages);
++
++			assert.deepEqual(second.input, first.input);
++			assert.deepEqual(wire(second), [
++				"retained by one", "<compaction:opaque-one>", "tail question", "tail answer",
++				"RECALL", "latest question",
++			]);
++			assert.deepEqual(rt.notices, []);
++		});
++
++		test("a newer context supersedes the older marker; stale one is not sent", async () => {
++			const { sm } = seedSession();
++			const rt = createRuntime();
++			rt.use(rt.codexExtension);
++			const stale = await rt.runContext(sm);
++			const fresh = await rt.runContext(sm);
++
++			const staleBody = await rt.runRequest(sm, stale);
++			const freshBody = await rt.runRequest(sm, fresh);
++
++			assert.equal(JSON.stringify(staleBody).includes(MARKER_PREFIX), false);
++			assert.deepEqual(wire(staleBody), REWRITTEN_TAIL);
++			assert.deepEqual(wire(freshBody), REWRITTEN_TAIL);
++		});
++	});
++});
++
++describe("marker lookalikes", () => {
++	const GENUINE = "[codex-native-checkpoint:abcd1234:123e4567-e89b-12d3-a456-426614174000]";
++	const mention = "see [codex-native-checkpoint:x] in the docs";
++
++	const plainSession = () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		sm.appendMessage(user(mention, 1000));
++		sm.appendMessage(say(`you wrote \`${mention}\``, 1001));
++		sm.appendMessage(user("latest question", 1002));
++		return sm;
++	};
++
++	test("ordinary chat that mentions the marker prefix keeps other hooks' context", async () => {
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use(recall);
++
++		const payload = await rt.turn(plainSession());
++
++		assert.deepEqual(wire(payload), [
++			mention, `you wrote \`${mention}\``, "RECALL", "latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("a mention in the tail after a checkpoint is not treated as a marker", async () => {
++		const { sm } = seedSession({ tail: false });
++		sm.appendMessage(user(mention, 2000));
++		sm.appendMessage(user("latest question", 2002));
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use(recall);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", mention, "RECALL", "latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("without a checkpoint only a stray whole marker item is dropped", async () => {
++		const sm = plainSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		const payload = {
++			model: codex.id,
++			instructions: "custom instructions",
++			extension_field: 7,
++			input: [
++				{ role: "user", content: [{ type: "input_text", text: "from another hook" }] },
++				{ role: "user", content: [{ type: "input_text", text: GENUINE }] },
++				{ role: "user", content: [{ type: "input_text", text: mention }] },
++			],
++		};
++
++		const sent = await rt.runRequest(sm, [], payload);
++
++		assert.deepEqual(sent, { ...payload, input: [payload.input[0], payload.input[2]] });
++	});
++
++	test("a stray marker is dropped while the current one is resolved", async () => {
++		const { sm } = seedSession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use((pi) => pi.on("context", (event: any) => ({
++			messages: [...event.messages, user(GENUINE, 2003)],
++		})));
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [...REWRITTEN_TAIL]);
++		assert.deepEqual(rt.notices, []);
++	});
++});
++
++describe("fallback warnings", () => {
++	const legacySession = () => {
++		const sm = SessionManager.inMemory("/tmp/pi-codex-compaction-test");
++		sm.appendMessage(user("old question", 1000));
++		sm.appendCustomEntry(NATIVE_COMPACTION_KIND, details("legacy"));
++		sm.appendMessage(user("latest question", 2002));
++		return sm;
++	};
++	const LEGACY = ["retained by legacy", "<compaction:opaque-legacy>", "latest question"];
++
++	test("a legacy custom checkpoint warns once per checkpoint, not once per request", async () => {
++		const sm = legacySession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const bodies = [await rt.turn(sm), await rt.turn(sm), await rt.turn(sm)];
++
++		assert.deepEqual(bodies.map(wire), [LEGACY, LEGACY, LEGACY]);
++		assert.equal(rt.notices.length, 1);
++	});
++
++	test("a new checkpoint gets a fresh warning and a restarted session does too", async () => {
++		const sm = legacySession();
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		await rt.turn(sm);
++		sm.appendCustomEntry(NATIVE_COMPACTION_KIND, details("legacy2"));
++		await rt.turn(sm);
++		await rt.turn(sm);
++		assert.equal(rt.notices.length, 2);
++
++		await rt.fire("session_shutdown", sm, { reason: "quit" });
++		await rt.turn(sm);
++
++		assert.equal(rt.notices.length, 3);
++	});
++
++	test("a Pi without buildSessionProjection warns once and keeps the checkpoint", async () => {
++		const { sm } = seedSession();
++		const old = (real: SessionManager) => ({
++			getSessionId: () => real.getSessionId(),
++			getBranch: () => real.getBranch(),
++			getLeafId: () => real.getLeafId(),
++		});
++		const rt = createRuntime({ view: old });
++		rt.use(rt.codexExtension);
++
++		const bodies = [await rt.turn(sm), await rt.turn(sm), await rt.turn(sm)];
++
++		assert.deepEqual(bodies.map(wire), [REWRITTEN_TAIL, REWRITTEN_TAIL, REWRITTEN_TAIL]);
++		assert.equal(rt.notices.length, 1);
++		assert.match(rt.notices[0]!, /buildSessionProjection|not supported|older Pi/i);
++		assert.equal(rt.errors.length, 0);
++	});
++});
++
++describe("Pi context edits", () => {
++	const idOf = (sm: SessionManager, text: string) =>
++		sm.getEntries().find(
++			(e: any) => e.type === "message" && messageText(e.message) === text,
++		)!.id;
++
++	test("an edit removing a tail message is honoured", async () => {
++		const { sm } = seedSession();
++		sm.appendContextEdit(idOf(sm, "tail question"), null);
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "tail answer", "latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("an edit replacing a tail message is honoured", async () => {
++		const { sm } = seedSession();
++		sm.appendContextEdit(idOf(sm, "tail question"), {
++			content: [{ type: "text", text: "tail question (trimmed)" }],
++		});
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++
++		const payload = await rt.turn(sm);
++
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "tail question (trimmed)", "tail answer",
++			"latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++
++	test("an edit to a record the checkpoint covers does not cause a fallback", async () => {
++		const { sm } = seedSession();
++		sm.appendContextEdit(idOf(sm, "kept question"), {
++			content: [{ type: "text", text: "kept question (trimmed)" }],
++		});
++		const rt = createRuntime();
++		rt.use(rt.codexExtension);
++		rt.use(recall);
++
++		const payload = await rt.turn(sm);
++
++		assert.equal(JSON.stringify(payload).includes("kept question"), false);
++		assert.deepEqual(wire(payload), [
++			"retained by one", "<compaction:opaque-one>", "tail question", "tail answer", "RECALL",
++			"latest question",
++		]);
++		assert.deepEqual(rt.notices, []);
++	});
++});
+diff --git a/packages/pi-codex-compaction/index.ts b/packages/pi-codex-compaction/index.ts
+index 5f950c9..0205e9b 100644
+--- a/packages/pi-codex-compaction/index.ts
++++ b/packages/pi-codex-compaction/index.ts
+@@ -9,6 +9,8 @@ import {
+ 	buildReplacementHistory,
+ 	buildToolPayload,
+ 	callRemoteCompaction,
++	checkpointMarkerText,
++	dropStrayCheckpointMarkers,
+ 	effectiveInputForBranch,
+ 	findNativeCheckpoint,
+ 	isJsonObject,
+@@ -17,8 +19,10 @@ import {
+ 	modelKey,
+ 	NATIVE_COMPACTION_KIND,
+ 	NATIVE_COMPACTION_VERSION,
++	placeCheckpointMarker,
+ 	resolveCodexResponsesUrl,
+ 	stripInputFromPayload,
++	swapCheckpointMarker,
+ 	type JsonObject,
+ 	type NativeCompactionDetails,
+ 	type ResponseItem,
+@@ -29,6 +33,12 @@ type CachedPayloadShape = {
+ 	payload: JsonObject;
+ };
+
++type PendingMarker = {
++	entryId: string;
++	modelKey: string;
++	marker: string;
++};
++
+ type CompactionStatus = {
+ 	state: "running" | "complete" | "failed";
+ 	error?: string;
+@@ -83,6 +93,8 @@ function setFeatureHeader(headers: Record<string, string | null>): void {
+
+ export function registerCodexCompactionExtension(pi: ExtensionAPI, hostVersion = VERSION): void {
+ 	const payloadShapeBySession = new Map<string, CachedPayloadShape>();
++	const pendingMarkerBySession = new Map<string, PendingMarker>();
++	const warnedFallbacks = new Set<string>();
+ 	const useLegacyFallback = needsLegacyCompactionFallback(hostVersion);
+ 	let legacyCompaction: LegacyCompactionState | undefined;
+
+@@ -156,25 +168,83 @@ export function registerCodexCompactionExtension(pi: ExtensionAPI, hostVersion =
+ 		};
+ 	};
+
++	// Fallback keeps the checkpoint but loses other extensions' context edits, so say so.
++	// Once per session and checkpoint: every model call would otherwise repeat it.
++	const warnFallback = (ctx: ExtensionContext, checkpointId: string, reason: string): void => {
++		const key = `${ctx.sessionManager.getSessionId()}:${checkpointId}`;
++		if (warnedFallbacks.has(key)) return;
++		warnedFallbacks.add(key);
++		const message =
++			`OpenAI Codex checkpoint: ${reason}; rebuilt the request from the saved session.`;
++		if (ctx.hasUI) ctx.ui.notify(message, "warning");
++		else console.warn(`[pi-codex-compaction] ${message}`);
++	};
++
+ 	pi.on("session_start", () => {
+ 		payloadShapeBySession.clear();
++		pendingMarkerBySession.clear();
++		warnedFallbacks.clear();
+ 		legacyCompaction = undefined;
+ 	});
+ 	pi.on("session_shutdown", () => {
+ 		payloadShapeBySession.clear();
++		pendingMarkerBySession.clear();
++		warnedFallbacks.clear();
+ 		legacyCompaction = undefined;
+ 	});
+ 	pi.on("model_select", (_event, ctx) => {
+ 		payloadShapeBySession.delete(ctx.sessionManager.getSessionId());
++		pendingMarkerBySession.delete(ctx.sessionManager.getSessionId());
+ 		legacyCompaction = undefined;
+ 	});
+
+ 	pi.on("context", (event, ctx) => {
+-		const checkpoint = findNativeCheckpoint(ctx.sessionManager.getBranch() as SessionEntry[]);
+-		if (checkpoint.status === "none") return undefined;
+-		return {
++		const sessionId = ctx.sessionManager.getSessionId();
++		pendingMarkerBySession.delete(sessionId);
++		const branch = ctx.sessionManager.getBranch() as SessionEntry[];
++		const found = findNativeCheckpoint(branch);
++		if (found.status === "none") return undefined;
++		const withoutSummary = {
+ 			messages: event.messages.filter((message) => message.role !== "compactionSummary"),
+ 		};
++		if (
++			found.status !== "valid"
++			|| !isOpenAICodexModel(ctx.model)
++			|| found.checkpoint.details.modelKey !== modelKey(ctx.model)
++		) {
++			return withoutSummary;
++		}
++
++		const marker = checkpointMarkerText(found.checkpoint.entryId, randomUUID());
++		let plan: ReturnType<typeof placeCheckpointMarker>;
++		const sessionManager = ctx.sessionManager as Partial<typeof ctx.sessionManager>;
++		if (branch[found.checkpoint.entryIndex]?.type !== "compaction") {
++			plan = { ok: false, reason: "the checkpoint is a legacy custom entry" };
++		} else if (typeof sessionManager.buildSessionProjection !== "function") {
++			plan = { ok: false, reason: "this Pi version does not provide buildSessionProjection" };
++		} else {
++			try {
++				plan = placeCheckpointMarker({
++					messages: event.messages,
++					projection: sessionManager.buildSessionProjection(),
++					branch,
++					checkpoint: found.checkpoint,
++					marker,
++				});
++			} catch (error) {
++				plan = { ok: false, reason: errorMessage(error) };
++			}
++		}
++		if (!plan.ok) {
++			warnFallback(ctx, found.checkpoint.entryId, plan.reason);
++			return withoutSummary;
++		}
++		pendingMarkerBySession.set(sessionId, {
++			entryId: found.checkpoint.entryId,
++			modelKey: modelKey(ctx.model),
++			marker,
++		});
++		return { messages: plan.messages };
+ 	});
+
+ 	pi.on("before_provider_headers", (event, ctx) => {
+@@ -203,9 +273,32 @@ export function registerCodexCompactionExtension(pi: ExtensionAPI, hostVersion =
+
+ 		const branch = ctx.sessionManager.getBranch() as SessionEntry[];
+ 		const checkpoint = findNativeCheckpoint(branch);
++		// Kept until the next context event so a re-sent payload resolves the same way.
++		const pending = pendingMarkerBySession.get(sessionId);
+
+ 		try {
+-			if (checkpoint.status === "none") return undefined;
++			if (checkpoint.status === "none") {
++				const cleaned = dropStrayCheckpointMarkers(event.payload);
++				return cleaned === event.payload ? undefined : cleaned;
++			}
++			if (
++				pending
++				&& checkpoint.status === "valid"
++				&& pending.entryId === checkpoint.checkpoint.entryId
++				&& pending.modelKey === modelKey(model)
++			) {
++				const swapped = swapCheckpointMarker(
++					event.payload,
++					pending.marker,
++					checkpoint.checkpoint.details.replacementHistory,
++				);
++				if (swapped) return swapped;
++				warnFallback(
++					ctx,
++					checkpoint.checkpoint.entryId,
++					"the checkpoint marker was missing or changed by another hook",
++				);
++			}
+ 			const input = effectiveInputForBranch({ branch, model, tools: pi.getAllTools() });
+ 			const payload: JsonObject = { ...event.payload, input };
+ 			delete payload.messages;
+diff --git a/packages/pi-codex-compaction/native-compaction.ts b/packages/pi-codex-compaction/native-compaction.ts
+index ce38577..be690d6 100644
+--- a/packages/pi-codex-compaction/native-compaction.ts
++++ b/packages/pi-codex-compaction/native-compaction.ts
+@@ -4,6 +4,7 @@ import {
+ 	convertToLlm,
+ 	sessionEntryToContextMessages,
+ 	type SessionEntry,
++	type SessionProjection,
+ 	type ToolInfo,
+ } from "@earendil-works/pi-coding-agent";
+ import { calculateCost, type Message, type Model, type Usage } from "@earendil-works/pi-ai";
+@@ -685,3 +686,188 @@ export function stripInputFromPayload(payload: JsonObject): JsonObject {
+ 	delete shape.previous_response_id;
+ 	return shape;
+ }
++
++// ---- Checkpoint marker ------------------------------------------------------------------------
++//
++// Pi's `context` event lets other extensions add or remove messages, but the provider request is
++// built from those messages afterwards. To keep their changes, the context hook swaps the
++// checkpoint (and the saved messages it already covers) for one transient marker message. The
++// request hook later swaps that marker for the checkpoint's replacement history.
++
++type ContextMessage = SessionProjection["messages"][number];
++
++export const CHECKPOINT_MARKER_PREFIX = "[codex-native-checkpoint:";
++
++export function checkpointMarkerText(entryId: string, nonce: string): string {
++	return `${CHECKPOINT_MARKER_PREFIX}${entryId}:${nonce}]`;
++}
++
++export type MarkerPlan = { ok: true; messages: ContextMessage[] } | { ok: false; reason: string };
++
++function canonicalJson(value: unknown): string {
++	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
++	if (isJsonObject(value)) {
++		const keys = Object.keys(value).filter((key) => value[key] !== undefined).sort();
++		const fields = keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
++		return `{${fields.join(",")}}`;
++	}
++	return JSON.stringify(value) ?? "null";
++}
++
++function messageIdentity(message: ContextMessage): string {
++	return `${message.role}|${(message as JsonObject).timestamp}`;
++}
++
++function messageKey(message: ContextMessage): string {
++	return `${messageIdentity(message)}|${shortHash(canonicalJson(message))}`;
++}
++
++/**
++ * Replaces the checkpoint summary and the saved messages the checkpoint already covers with one
++ * marker message, leaving every other message (other extensions' additions, edited tail) alone.
++ *
++ * Covered messages are matched by role, timestamp and content, counted as a multiset. A covered
++ * message another hook already removed stays removed. If one was edited, or duplicates make the
++ * match ambiguous, the result is `ok: false` so the caller can fall back safely.
++ */
++export function placeCheckpointMarker(params: {
++	messages: ContextMessage[];
++	projection: SessionProjection;
++	branch: SessionEntry[];
++	checkpoint: NativeCheckpoint;
++	marker: string;
++}): MarkerPlan {
++	const { projection, branch, checkpoint } = params;
++	const boundary = projection.entries[0]?.sourceEntry;
++	if (boundary?.type !== "compaction" || boundary.id !== checkpoint.entryId) {
++		return { ok: false, reason: "the checkpoint is not the active compaction boundary" };
++	}
++
++	const branchIndex = new Map(branch.map((entry, index) => [entry.id, index]));
++	const covered = new Map<string, { message: ContextMessage; count: number }>();
++	const later = new Map<string, number>();
++	for (const [position, projected] of projection.entries.entries()) {
++		const index = branchIndex.get(projected.sourceEntry.id);
++		if (index === undefined) {
++			return { ok: false, reason: "the saved branch changed unexpectedly" };
++		}
++		const isCovered = position === 0 || index < checkpoint.entryIndex;
++		for (const message of projected.messages) {
++			if (message.role === "system") continue;
++			const key = messageKey(message);
++			if (isCovered) {
++				covered.set(key, { message, count: (covered.get(key)?.count ?? 0) + 1 });
++			} else {
++				later.set(key, (later.get(key) ?? 0) + 1);
++			}
++		}
++	}
++
++	const present = new Map<string, number>();
++	const unknownByIdentity = new Map<string, number>();
++	for (const message of params.messages) {
++		const key = messageKey(message);
++		present.set(key, (present.get(key) ?? 0) + 1);
++		if (!covered.has(key) && !later.has(key)) {
++			const identity = messageIdentity(message);
++			unknownByIdentity.set(identity, (unknownByIdentity.get(identity) ?? 0) + 1);
++		}
++	}
++
++	const toDrop = new Map<string, number>();
++	for (const [key, { message, count }] of covered) {
++		const found = present.get(key) ?? 0;
++		if (found < count && (unknownByIdentity.get(messageIdentity(message)) ?? 0) > 0) {
++			return { ok: false, reason: "a saved message covered by the checkpoint was edited" };
++		}
++		const sharedWithLater = later.get(key) ?? 0;
++		if (sharedWithLater > 0 && found !== count + sharedWithLater) {
++			return { ok: false, reason: "duplicate saved messages cannot be told apart safely" };
++		}
++		toDrop.set(key, Math.min(count, found));
++	}
++
++	const messages: ContextMessage[] = [];
++	let markerAt: number | undefined;
++	for (const message of params.messages) {
++		const key = messageKey(message);
++		const remaining = toDrop.get(key) ?? 0;
++		if (remaining > 0) {
++			toDrop.set(key, remaining - 1);
++			markerAt ??= messages.length;
++			continue;
++		}
++		messages.push(message);
++	}
++	messages.splice(markerAt ?? 0, 0, {
++		role: "user",
++		content: [{ type: "text", text: params.marker }],
++		timestamp: Date.now(),
++	} as ContextMessage);
++	return { ok: true, messages };
++}
++
++const MARKER_GRAMMAR = new RegExp(
++	`^${CHECKPOINT_MARKER_PREFIX.replace(/[[\]]/g, "\\$&")}[^\\s:\\]]+:`
++	+ "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\]$",
++);
++
++function wireText(item: unknown): string[] {
++	if (!isJsonObject(item) || !Array.isArray(item.content)) return [];
++	return item.content.flatMap((part) =>
++		isJsonObject(part) && typeof part.text === "string" ? [part.text] : []);
++}
++
++/** The marker text when `item` is exactly one user input_text holding a complete marker. */
++function wholeMarkerText(item: unknown): string | undefined {
++	if (!isJsonObject(item) || item.role !== "user" || !Array.isArray(item.content)) {
++		return undefined;
++	}
++	const part = item.content[0];
++	if (item.content.length !== 1 || !isJsonObject(part) || part.type !== "input_text") {
++		return undefined;
++	}
++	return typeof part.text === "string" && MARKER_GRAMMAR.test(part.text) ? part.text : undefined;
++}
++
++/**
++ * Drops request items that are exactly a complete marker (a bridge nobody will resolve) and
++ * leaves everything else, including text that merely mentions the marker prefix, untouched.
++ * Returns the payload itself when there is nothing to drop.
++ */
++export function dropStrayCheckpointMarkers(payload: JsonObject): JsonObject {
++	if (!Array.isArray(payload.input)) return payload;
++	const input = payload.input.filter((item) => wholeMarkerText(item) === undefined);
++	return input.length === payload.input.length ? payload : { ...payload, input };
++}
++
++/**
++ * Swaps the one exact marker item for the replacement history, leaving every other request item
++ * and field untouched. Other complete markers (stale ones) are dropped. Returns undefined when
++ * the current marker is missing, duplicated or altered.
++ */
++export function swapCheckpointMarker(
++	payload: JsonObject,
++	marker: string,
++	replacementHistory: ResponseItem[],
++): JsonObject | undefined {
++	if (!Array.isArray(payload.input)) return undefined;
++	const input: unknown[] = payload.input;
++	const carriers = input.flatMap((item, index) =>
++		wireText(item).some((text) => text.includes(marker)) ? [index] : []);
++	const at = carriers[0];
++	if (carriers.length !== 1 || at === undefined || wholeMarkerText(input[at]) !== marker) {
++		return undefined;
++	}
++
++	const next: JsonObject = {
++		...payload,
++		input: input.flatMap((item, index) => {
++			if (index === at) return replacementHistory.map(cloneItem);
++			return wholeMarkerText(item) === undefined ? [item] : [];
++		}),
++	};
++	delete next.messages;
++	delete next.previous_response_id;
++	return next;
++}
+diff --git a/packages/pi-codex-compaction/package.json b/packages/pi-codex-compaction/package.json
+index c774f06..bb6ecd6 100644
+--- a/packages/pi-codex-compaction/package.json
++++ b/packages/pi-codex-compaction/package.json
+@@ -25,7 +25,8 @@
+     "node": ">=22.19.0"
+   },
+   "scripts": {
+-    "test": "bun test"
++    "test": "bun test",
++    "test:context": "node --test context-delivery.node.ts"
+   },
+   "peerDependencies": {
+     "@earendil-works/pi-ai": "*",
