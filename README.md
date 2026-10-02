@@ -311,8 +311,10 @@ limited number of records, but does not shorten their text before model review.
 
 ### Recall
 
-The memory model returns a validated plan with bounded topic queries, intent, entities, and
-repository hints. The extension starts that job without holding the main model call. The automatic
+The memory model submits a plan through the private `submit_recall_plan` tool, with bounded
+queries, intent, entities, and repository hints. Text-only answers cannot drive searches. Invalid
+calls receive validation feedback and up to three total submission attempts within the existing
+recall deadline. The extension starts that job without holding the main model call. The automatic
 hook starts with pending state and a stable protocol; if the planner has already
 advanced, the latest boundary renders retrieval-underway state instead. It then renders either
 bounded untrusted context or an explicit no-context or failure terminal state. The extension
@@ -426,9 +428,11 @@ graph.
 
 Each private capture tool allows at most three attempts within its existing model request and
 three-minute deadline. Invalid calls receive validation feedback so the model can correct them;
-text-only replies are not parsed as fallback JSON. If any submitted candidate or attached resource
-is invalid, reject the submission for correction before writing its valid siblings. Nothing is
-silently discarded. Diagnostic rejection previews remain bounded and redacted.
+text-only replies and JSON strings inside arguments are not parsed as instructions. Candidates
+must use declared fields, including `destinationProjectId`, `destinationProjectName`, and
+`destinationRationale`; undeclared destination aliases are rejected. If any candidate or attached
+resource is invalid, reject the submission for correction before writing its valid siblings.
+Nothing is silently discarded. Diagnostic rejection previews remain bounded and redacted.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
 a memory. The model selects existing records by ID; the executor does not guess identity from names.

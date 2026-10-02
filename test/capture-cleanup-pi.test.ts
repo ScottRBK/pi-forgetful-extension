@@ -93,16 +93,18 @@ for (const failure of ["provider", "submission"] as const) {
           if (model.id === "memory") memoryReplyAllowances.push(options?.maxTokens);
           const name = providerTools(context)[0]?.name;
           const capture = model.id === "memory" && name === "submit_capture_candidates";
+          const plan = model.id === "memory" && name === "submit_recall_plan";
           if (capture) captureCalls++;
           const providerFailure = capture && failure === "provider";
           const message: AssistantMessage = {
             role: "assistant", api: "faux", provider: "test", model: model.id,
             content: capture ? [{ type: "toolCall", id: `capture-${captureCalls}`, name: name!,
               arguments: { candidates: "invalid submission" } }]
+              : plan ? [{ type: "toolCall", id: "recall-plan", name: "submit_recall_plan",
+                arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
               : [{ type: "text", text: model.id === "main" ? "Decision noted."
-                : JSON.stringify({ search: false, queries: [], entities: [],
-                  queryIntent: "No recall needed" }) }],
-            stopReason: providerFailure ? "error" : capture ? "toolUse" : "stop",
+                : "No recall needed." }],
+            stopReason: providerFailure ? "error" : capture || plan ? "toolUse" : "stop",
             ...(providerFailure ? { errorMessage: "Scripted capture provider failure" } : {}),
             timestamp: Date.now(),
             usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
@@ -111,7 +113,8 @@ for (const failure of ["provider", "submission"] as const) {
           const stream = createAssistantMessageEventStream();
           queueMicrotask(() => {
             if (providerFailure) stream.push({ type: "error", reason: "error", error: message });
-            else stream.push({ type: "done", reason: capture ? "toolUse" : "stop", message });
+            else stream.push({ type: "done",
+              reason: capture || plan ? "toolUse" : "stop", message });
             stream.end(message);
           });
           return stream;

@@ -69,14 +69,6 @@ export interface PiMemoryModelOptions {
   contextLimitTokens?: number;
 }
 
-function textContent(message: AssistantMessage): string {
-  return message.content
-    .filter((part): part is TextContent => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-}
-
 function serializeInput(input: unknown): string {
   let text: string;
   if (typeof input === "string") text = input;
@@ -88,46 +80,6 @@ function serializeInput(input: unknown): string {
     }
   }
   return typeof input === "string" ? sanitizeText(text) : text;
-}
-
-function fencedJson(text: string): string {
-  const fence = "```";
-  if (!text.startsWith(fence)) return text;
-
-  let contentStart = fence.length;
-  if (text.slice(contentStart, contentStart + 4).toLowerCase() === "json") {
-    contentStart += 4;
-  }
-  while (contentStart < text.length && /\s/.test(text[contentStart]!))
-    contentStart += 1;
-
-  const closingFence = text.lastIndexOf(fence);
-  if (
-    closingFence < contentStart ||
-    text.slice(closingFence + fence.length).trim() !== ""
-  ) {
-    return text;
-  }
-  return text.slice(contentStart, closingFence).trim();
-}
-
-function firstJsonDelimiter(text: string): number {
-  const objectStart = text.indexOf("{");
-  const arrayStart = text.indexOf("[");
-  if (objectStart === -1) return arrayStart;
-  if (arrayStart === -1) return objectStart;
-  return Math.min(objectStart, arrayStart);
-}
-
-function parseCompletionResponse(
-  response: AssistantMessage,
-  request: ModelRequest,
-  timedOut: boolean,
-): unknown {
-  ensureCompletionFinished(response, request, timedOut, false);
-  const text = sanitizeText(textContent(response));
-  if (request.signal?.aborted) throw new Error("Memory model request aborted");
-  return parseModelResponse(text);
 }
 
 function ensureCompletionFinished(
@@ -146,30 +98,6 @@ function ensureCompletionFinished(
     response.errorMessage || response.stopReason,
   ).slice(0, 500);
   throw new Error(`Memory model request failed: ${detail}`);
-}
-
-export function parseModelResponse(text: string): unknown {
-  const candidate = fencedJson(text.trim());
-  if (candidate === "") return "";
-  try {
-    return JSON.parse(candidate) as unknown;
-  } catch {
-    const objectStart = firstJsonDelimiter(candidate);
-    const objectEnd = Math.max(
-      candidate.lastIndexOf("}"),
-      candidate.lastIndexOf("]"),
-    );
-    if (objectStart >= 0 && objectEnd > objectStart) {
-      try {
-        return JSON.parse(
-          candidate.slice(objectStart, objectEnd + 1),
-        ) as unknown;
-      } catch {
-        // Keep the model's text when it is not valid structured output.
-      }
-    }
-    return text;
-  }
 }
 
 export function modelLabel(model: ModelSelection): string {
@@ -463,6 +391,12 @@ export class PiMemoryModel implements MemoryModelClient {
     if (!isRecallConcurrency(request.readConcurrency ?? 1)) {
       throw new TypeError("Memory model readConcurrency must be an integer from 1 to 8");
     }
+    if (!request.submission) {
+      throw new TypeError("Memory model submission tool is required");
+    }
+    if (typeof request.submission.validate !== "function") {
+      throw new TypeError("Memory model submission tool validator is required");
+    }
     const model = this.registry.find(
       this.selection.provider,
       this.selection.id,
@@ -489,10 +423,8 @@ export class PiMemoryModel implements MemoryModelClient {
             timestamp: Date.now(),
           },
         ],
-        ...(request.submission
-          ? { tools: [submissionTool(request.submission),
-            ...(request.readTools ?? []).map(submissionTool)] }
-          : {}),
+        tools: [submissionTool(request.submission),
+          ...(request.readTools ?? []).map(submissionTool)],
       };
       const options = requestOptions(
         model,
@@ -535,22 +467,14 @@ export class PiMemoryModel implements MemoryModelClient {
           retainedConversation: request.conversation!.slice(cut) });
         return maxTokens;
       };
-      if (request.submission) {
-        return await this.completeWithSubmission(
-          model,
-          context,
-          options,
-          request,
-          deadline,
-          prepare,
-        );
-      }
-      const maxTokens = await prepare();
-      const response = await this.completeAttempt(
-        model, context, { ...options, maxTokens }, request, deadline, 1,
+      return await this.completeWithSubmission(
+        model,
+        context,
+        options,
+        request,
+        deadline,
+        prepare,
       );
-
-      return parseCompletionResponse(response, request, deadline.timedOut);
     } catch (error) {
       throwRequestFailure(error, request);
     } finally {

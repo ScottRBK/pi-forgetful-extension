@@ -81,13 +81,14 @@ test("real Pi capture rechecks trust synchronously after final endpoint authoriz
             reviewed = true;
             args = { reviews: [{ candidateId: "reports", decisions: [{ memoryId: unrelated.id,
               action: "reject", reason: "Printer queue is unrelated to report generation" }] }] };
+          } else if (name === "submit_recall_plan") {
+            args = { search: false, queries: [], queryIntent: "", entities: [] };
           } else throw new Error(`Unexpected private tool ${name}`);
         }
         const message = { role: "assistant", api: "faux", provider: "gate-test", model: model.id,
           content: name ? [{ type: "toolCall", id: "submission", name, arguments: args }]
-            : [{ type: "text", text: model.id === "main" ? "Understood." : JSON.stringify({
-              search: false, queries: [], queryIntent: "", entities: [],
-            }) }], stopReason: name ? "toolUse" : "stop", timestamp: Date.now(),
+            : [{ type: "text", text: model.id === "main" ? "Understood." : "No recall needed." }],
+          stopReason: name ? "toolUse" : "stop", timestamp: Date.now(),
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         } as AssistantMessage;

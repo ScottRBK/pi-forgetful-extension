@@ -88,10 +88,11 @@ function reviewingModel() {
     async complete(_model, input) {
       // Simulate only provider responses; real recall and private submission validation execute.
       let content: AssistantMessage["content"];
-      if (!input.tools) {
-        content = [{ type: "text", text: JSON.stringify({ search: true,
-          queries: ["first decision", "second decision"], queryIntent: "Find decisions",
-          entities: [] }) }];
+      if (input.tools?.[0]?.name === "submit_recall_plan") {
+        content = [{ type: "toolCall", id: "plan", name: "submit_recall_plan", arguments: {
+          search: true, queries: ["first decision", "second decision"],
+          queryIntent: "Find decisions", entities: [],
+        } }];
       } else {
         const message = input.messages.at(-1)!;
         const text = typeof message.content === "string" ? message.content :
@@ -106,7 +107,7 @@ function reviewingModel() {
       }
       return { role: "assistant", content, api: "openai-completions", provider: "scripted",
         model: "memory", timestamp: Date.now(),
-        stopReason: input.tools ? "toolUse" : "stop",
+        stopReason: "toolUse",
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     },

@@ -1,7 +1,7 @@
 /** Shared recall defaults. Capture stage protocols live in CaptureService, not in overlays. */
 export const DEFAULT_MEMORY_POLICIES = {
   classification: [
-    "Return exactly one JSON object with fields:",
+    "Submit exactly one submit_recall_plan tool call. Do not answer with JSON text. Fields:",
     "search (boolean), queries (zero to two short strings), queryIntent (short string),",
     "optional repositorySpecific (boolean), and entities (zero to ten short strings).",
     "First identify a historical fact missing from the current conversation that could change",
@@ -9,7 +9,7 @@ export const DEFAULT_MEMORY_POLICIES = {
     "When search is true, queryIntent states that gap. Seek evidence, not a guessed answer.",
     "Use a second query only for a distinct necessary facet, not a paraphrase of the first.",
     "For catch-up or change-history requests, seek the current position and the reason it changed.",
-    'When search is false, return {"search":false,"queries":[],"queryIntent":"","entities":[]}.',
+    'When no history is needed, submit search=false, queries=[], queryIntent="", entities=[].',
     "Set repositorySpecific true only for the active repository; include context.repoName in those",
     "queries. Otherwise set it false and name the relevant subjects or repositories.",
     "A dependency may need another project's evidence; shared vocabulary alone is not a link.",

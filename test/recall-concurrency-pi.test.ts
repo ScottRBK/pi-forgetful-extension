@@ -85,8 +85,9 @@ for (const [configured, failedRead] of [
             name: "forgetful_recall_wait", arguments: {} }] :
             [{ type: "text", text: "Reviewed recall received." }];
         } else if (contexts.length === 1) {
-          content = [{ type: "text", text: JSON.stringify({ search: true,
-            queries: ["initial-1", "initial-2"], queryIntent: "Find decisions", entities: [] }) }];
+          content = [{ type: "toolCall", id: "plan", name: "submit_recall_plan",
+            arguments: { search: true, queries: ["initial-1", "initial-2"],
+              queryIntent: "Find decisions", entities: [] } }];
         } else if (contexts.length === 2) {
           content = Array.from({ length: readCount }, (_, index) => ({ type: "toolCall" as const,
             id: `read-${index + 1}`, name: "read_forgetful", arguments: {

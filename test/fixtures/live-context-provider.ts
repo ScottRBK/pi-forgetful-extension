@@ -90,9 +90,12 @@ function choose(request: Wire): Reply {
       memoryIds: documentId ? [] : [read.record.id],
       ...(documentId ? { documentIds: [documentId] } : {}), reason: "Read the fixture record" });
   }
+  if (names.includes("submit_recall_plan")) {
+    return call("submit_recall_plan", { search: true, queries: ["stored context"], entities: [],
+      queryIntent: "Find stored context for the current question", repositorySpecific: true });
+  }
   assert.equal(names.length, 0, `Unexpected private task: ${names.join(", ")}`);
-  return JSON.stringify({ search: true, queries: ["stored context"], entities: [],
-    queryIntent: "Find stored context for the current question", repositorySpecific: true });
+  return "Scripted wiring response.";
 }
 
 export async function scriptedRuntime(t: TestContext, directory: string) {

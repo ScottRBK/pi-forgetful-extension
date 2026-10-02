@@ -103,6 +103,7 @@ for (const outcome of ["shutdown", "navigation"] as const) {
         streamSimple(model, context) {
           const submission = providerTools(context)[0]?.name;
           const capture = model.id === "memory" && submission === "submit_capture_candidates";
+          const plan = model.id === "memory" && submission === "submit_recall_plan";
           const input = capture ? decodeProviderContext(context).input : {};
           const evidence = input.eligibleEvidence?.find(
             (entry: { role: string }) => entry.role === "user");
@@ -120,16 +121,18 @@ for (const outcome of ["shutdown", "navigation"] as const) {
                 context: "Explicit user decision.", keywords: ["storage"], tags: ["decision"],
                 sourceEntryIds: [evidence.id], evidenceType: "userDecision",
               }] } }]
-              : [{ type: "text", text: model.id === "main" ? "Decision noted." : JSON.stringify({
-                search: false, queries: [], queryIntent: "No recall needed", entities: [],
-              }) }],
-            stopReason: (capture || write) ? "toolUse" : "stop", timestamp: Date.now(),
+              : plan ? [{ type: "toolCall", id: "recall-plan", name: "submit_recall_plan",
+                arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
+              : [{ type: "text", text: model.id === "main" ? "Decision noted."
+                : "No recall needed." }],
+            stopReason: (capture || write || plan) ? "toolUse" : "stop", timestamp: Date.now(),
             usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           };
           const stream = createAssistantMessageEventStream();
           const emit = () => {
-            stream.push({ type: "done", reason: (capture || write) ? "toolUse" : "stop", message });
+            stream.push({ type: "done",
+              reason: (capture || write || plan) ? "toolUse" : "stop", message });
             stream.end(message);
           };
           if (capture) {

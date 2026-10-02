@@ -128,10 +128,11 @@ async function fixture(t: TestContext) {
             context: "Confirmed delivery requirement", keywords: ["delivery"], tags: [],
             importance: 7, sourceEntryIds: [inspectionId], documentIds: [], codeArtifactIds: [],
             entityIds: [], memoryIds: [], fileIds: [], sourceFiles: ["delivery.txt"] };
+        } else if (name === "submit_recall_plan") {
+          args = { search: false, queries: [], queryIntent: "", entities: [] };
         } else {
           assert.equal(name, undefined, `Unexpected private tool ${name}`);
-          message.content = [{ type: "text", text: JSON.stringify({ search: false, queries: [],
-            entities: [], queryIntent: "No recall required" }) }];
+          message.content = [{ type: "text", text: "No recall required." }];
         }
       }
       if (name) {

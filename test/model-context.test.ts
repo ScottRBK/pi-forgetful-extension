@@ -456,7 +456,7 @@ test("successive summaries share the classification deadline", { timeout: 10_000
 
   // Act.
   await assert.rejects(model.complete({ purpose: "classification", policy: "Classify.", input: {},
-    conversation: longConversation() }), (error: Error) => {
+    conversation: longConversation(), submission }), (error: Error) => {
     assert.match(String(error.cause), /timeout/);
     return true;
   });

@@ -75,6 +75,7 @@ test("public Pi shutdown drains capture before the queue directory can be remove
       streamSimple(model, context) {
         const submission = providerTools(context)[0]?.name;
         const capture = model.id === "memory" && submission === "submit_capture_candidates";
+        const plan = model.id === "memory" && submission === "submit_recall_plan";
         const input = capture ? decodeProviderContext(context).input : {};
         const evidence = input.eligibleEvidence?.find(
           (entry: { role: string }) => entry.role === "user");
@@ -87,16 +88,17 @@ test("public Pi shutdown drains capture before the queue directory can be remove
               context: "Explicit user decision.", keywords: ["storage"], tags: ["decision"],
               sourceEntryIds: [evidence.id], evidenceType: "userDecision",
             }] } }]
-            : [{ type: "text", text: model.id === "main" ? "Decision noted." : JSON.stringify({
-              search: false, queries: [], queryIntent: "No recall needed", entities: [],
-            }) }],
-          stopReason: capture ? "toolUse" : "stop", timestamp: Date.now(),
+            : plan ? [{ type: "toolCall", id: "recall-plan", name: "submit_recall_plan",
+              arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
+            : [{ type: "text", text: model.id === "main" ? "Decision noted."
+              : "No recall needed." }],
+          stopReason: capture || plan ? "toolUse" : "stop", timestamp: Date.now(),
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         };
         const stream = createAssistantMessageEventStream();
         const emit = () => {
-          stream.push({ type: "done", reason: capture ? "toolUse" : "stop", message });
+          stream.push({ type: "done", reason: capture || plan ? "toolUse" : "stop", message });
           stream.end(message);
         };
         if (capture) {
@@ -269,7 +271,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           let name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
           const input = model.id === "memory" ? decodeProviderContext(context).input : {};
           let decision: JsonObject = {
-            search: false, queries: [], queryIntent: "No recall needed", entities: [],
+            search: false, queries: [], queryIntent: "", entities: [],
           };
           if (name === "submit_capture_candidates") {
             const user = input.eligibleEvidence.find(
@@ -297,7 +299,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
             role: "assistant", api: "faux", provider: "test", model: model.id,
             content: name ? [{ type: "toolCall", id: `${name}-1`, name, arguments: decision }]
               : [{ type: "text", text: model.id === "main" ? "Decision noted."
-                : JSON.stringify(decision) }],
+                : "No recall needed." }],
             stopReason: name ? "toolUse" : "stop", timestamp: Date.now(),
             usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },

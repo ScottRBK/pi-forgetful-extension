@@ -8,7 +8,6 @@ import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
   PiMemoryModel,
   modelLabel,
-  parseModelResponse,
   type ModelRegistryPort,
 } from "../src/model.ts";
 import type { ModelSubmissionTool } from "../src/contracts.ts";
@@ -22,7 +21,7 @@ const selectedModel = {
 
 for (const level of ["debug", "info", "off"] as const) {
   test(`model ${level} file records SDK attempts without credentials`, async (t) => {
-    // Arrange: malformed output must be observable before parsing; auth stays outside context.
+    // Arrange: provider output is observable before validation; auth stays outside context.
     const directory = await mkdtemp(join(tmpdir(), "model-log-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const logger = new FileLogger({ directory, sessionId: "session-log", level });
@@ -31,7 +30,7 @@ for (const level of ["debug", "info", "off"] as const) {
       find: () => selectedModel,
       complete: async (_model, context) => {
         contexts.push(structuredClone(context));
-        return response('malformed { "password": "private-response-secret"');
+        return resultResponse({ ok: true, password: "private-response-secret" });
       },
     };
     const model = new PiMemoryModel(registry, selectedModel, {
@@ -43,6 +42,7 @@ for (const level of ["debug", "info", "off"] as const) {
     await model.complete({
       purpose: "capture", policy: "Capture policy", input: { text: "Capture this decision" },
       diagnosticContext: { sessionId: "session-log", branchId: "branch-log", jobId: "job-log" },
+      submission: resultSubmission(),
     });
     await logger.flush();
 
@@ -62,13 +62,13 @@ for (const level of ["debug", "info", "off"] as const) {
     assert.ok(completed.data.elapsedMs >= 0);
     if (level === "info") {
       assert.ok(events.every((entry) => entry.level === "info"));
-      assert.doesNotMatch(text, /Capture this decision|malformed|Capture policy/);
+      assert.doesNotMatch(text, /Capture this decision|Capture policy/);
     } else {
       assert.deepEqual(events.find((entry) => entry.event === "model.request").data.context,
         contexts[0]);
       const raw = events.find((entry) => entry.event === "model.response");
-      assert.match(raw.data.response.content[0].text, /malformed/);
-      assert.match(raw.data.response.content[0].text, /redacted/);
+      assert.match(JSON.stringify(raw.data.response), /submit_result/);
+      assert.match(JSON.stringify(raw.data.response), /redacted/);
     }
   });
 }
@@ -101,6 +101,26 @@ function toolResponse(
     content: calls.map((call) => ({ type: "toolCall" as const, ...call })),
     stopReason: "toolUse",
   };
+}
+
+function resultSubmission(
+  validate: ModelSubmissionTool["validate"] = (input) => input,
+): ModelSubmissionTool {
+  return {
+    name: "submit_result",
+    description: "Submit the private task result.",
+    parameters: {
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+      additionalProperties: true,
+    },
+    validate,
+  };
+}
+
+function resultResponse(args: Record<string, any> = { ok: true }): AssistantMessage {
+  return toolResponse([{ id: "result-1", name: "submit_result", arguments: args }]);
 }
 
 function reviewSubmission(
@@ -172,13 +192,14 @@ test("large SDK output is accepted while diagnostic previews stay bounded", asyn
   t.after(() => rm(directory, { recursive: true, force: true }));
   const logger = new FileLogger({ directory, sessionId: "session", level: "debug" });
   const model = new PiMemoryModel({ find: () => selectedModel,
-    complete: async () => response(`oversized-raw-response ${"x".repeat(200_000)}`),
+    complete: async () => resultResponse({ ok: true, body: `oversized-raw-response ${
+      "x".repeat(200_000)}` }),
   }, selectedModel, { logger });
 
   // Act.
   const result = await model.complete({ purpose: "capture", policy: "policy", input: {},
-    diagnosticContext: { jobId: "large-job" } });
-  assert.equal(result, `oversized-raw-response ${"x".repeat(200_000)}`);
+    diagnosticContext: { jobId: "large-job" }, submission: resultSubmission() });
+  assert.deepEqual(result, { ok: true, body: `oversized-raw-response ${"x".repeat(200_000)}` });
   await logger.flush();
 
   // Assert: logger truncation must not discard the job ID and all response detail.
@@ -203,11 +224,13 @@ test("throwing diagnostic sink cannot change the model result", async (t) => {
   }
   const logger = new ThrowingLogger({ directory, sessionId: "session", level: "debug" });
   const model = new PiMemoryModel({
-    find: () => selectedModel, complete: async () => response('{"ok":true}'),
+    find: () => selectedModel, complete: async () => resultResponse(),
   }, selectedModel, { logger });
 
   // Act.
-  const result = await model.complete({ purpose: "capture", policy: "policy", input: {} });
+  const result = await model.complete({
+    purpose: "capture", policy: "policy", input: {}, submission: resultSubmission(),
+  });
   await logger.flush();
 
   // Assert.
@@ -215,7 +238,7 @@ test("throwing diagnostic sink cannot change the model result", async (t) => {
   assert.match(await readFile(logger.filePath, "utf8"), /model.completed/);
 });
 
-test("memory model sends a bounded JSON request and parses a JSON response", async () => {
+test("memory model sends a bounded request and accepts a submission tool call", async () => {
   const calls: Array<{ systemPrompt?: string; content: unknown }> = [];
   const registry: ModelRegistryPort = {
     find: () => selectedModel,
@@ -224,7 +247,7 @@ test("memory model sends a bounded JSON request and parses a JSON response", asy
         systemPrompt: context.systemPrompt,
         content: context.messages[0]?.content,
       });
-      return response('```json\n{"search":true,"queries":["auth"]}\n```');
+      return resultResponse({ ok: true, search: true, queries: ["auth"] });
     },
   };
   const model = new PiMemoryModel(registry, {
@@ -236,9 +259,10 @@ test("memory model sends a bounded JSON request and parses a JSON response", asy
     purpose: "classification",
     policy: "Return a bounded plan.",
     input: { prompt: "How did we solve auth?" },
+    submission: resultSubmission(),
   });
 
-  assert.deepEqual(result, { search: true, queries: ["auth"] });
+  assert.deepEqual(result, { ok: true, search: true, queries: ["auth"] });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.systemPrompt, "Return a bounded plan.");
   assert.match(String(calls[0]?.content), /How did we solve auth/);
@@ -279,6 +303,42 @@ test("memory model accepts one valid recall review submission tool call", async 
       reason: "The memory directly answers the request.",
     },
   });
+});
+
+test("memory model rejects a missing submission before provider dispatch", async () => {
+  let calls = 0;
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async () => {
+      calls += 1;
+      return response("{}");
+    },
+  };
+  const model = new PiMemoryModel(registry, { provider: "fake", id: "memory-model" });
+
+  await assert.rejects(
+    model.complete({ purpose: "classification", policy: "policy", input: {} } as any),
+    /Memory model submission tool is required/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("memory model rejects a submission without a validator before provider dispatch", async () => {
+  // Arrange: JavaScript callers may bypass the mandatory TypeScript contract.
+  let calls = 0;
+  const model = new PiMemoryModel({
+    find: () => selectedModel,
+    complete: async () => { calls++; return resultResponse({ ok: true }); },
+  }, selectedModel);
+  const submission = { ...resultSubmission(), validate: undefined };
+
+  // Act.
+  await assert.rejects(model.complete({
+    purpose: "classification", policy: "Submit", input: {}, submission,
+  } as any), /submission tool validator is required/);
+
+  // Assert: an invalid local contract must not consume three provider calls.
+  assert.equal(calls, 0);
 });
 
 test("memory model sends semantic review rejection as an error tool result", async () => {
@@ -485,7 +545,7 @@ test("memory model redacts nested sensitive fields before JSON encoding", async 
     find: () => selectedModel,
     complete: async (_model, context) => {
       seen = String(context.messages[0]?.content);
-      return response("{}");
+      return resultResponse();
     },
   };
   const model = new PiMemoryModel(registry, {
@@ -499,6 +559,7 @@ test("memory model redacts nested sensitive fields before JSON encoding", async 
       nested: { api_key: "sk-abcdefghijklmnopqrstuvwxyz" },
       text: "safe",
     },
+    submission: resultSubmission(),
   });
   assert.doesNotMatch(seen, /sk-abcdefghijklmnopqrstuvwxyz/);
   assert.match(seen, /\[redacted\]/);
@@ -515,7 +576,9 @@ test("memory model fails clearly when the configured model is unavailable", asyn
   });
 
   await assert.rejects(
-    model.complete({ purpose: "overlap", policy: "policy", input: {} }),
+    model.complete({
+      purpose: "overlap", policy: "policy", input: {}, submission: resultSubmission(),
+    }),
     /not available/,
   );
 });
@@ -532,7 +595,9 @@ test("memory model preserves a bounded, redacted provider error for diagnostics"
   const model = new PiMemoryModel(registry, { provider: "fake", id: "memory-model" });
 
   await assert.rejects(
-    model.complete({ purpose: "classification", policy: "policy", input: {} }),
+    model.complete({
+      purpose: "classification", policy: "policy", input: {}, submission: resultSubmission(),
+    }),
     (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.equal(error.message, "Memory model request failed");
@@ -546,29 +611,30 @@ test("memory model preserves a bounded, redacted provider error for diagnostics"
   );
 });
 
-test("plain model output remains usable when it is not JSON", () => {
-  assert.equal(
-    parseModelResponse("No memory is relevant."),
-    "No memory is relevant.",
-  );
+test("model label uses provider and model id", () => {
   assert.equal(
     modelLabel({ provider: "fake", id: "memory-model" }),
     "fake/memory-model",
   );
 });
 
-test("unclosed fenced output stays bounded for a long whitespace run", () => {
-  const input = `\`\`\`${" ".repeat(1_200)}x`;
-  const started = performance.now();
+test("memory model rejects repeated text-only task output instead of parsing it", async () => {
+  let calls = 0;
+  const model = new PiMemoryModel({
+    find: () => selectedModel,
+    complete: async () => {
+      calls += 1;
+      return response(`\`\`\`${" ".repeat(1_200)}x`);
+    },
+  }, selectedModel);
 
-  const result = parseModelResponse(input);
-
-  const elapsed = performance.now() - started;
-  assert.equal(result, input);
-  assert.ok(
-    elapsed < 100,
-    `fenced response parsing took ${elapsed.toFixed(1)} ms`,
+  await assert.rejects(
+    model.complete({
+      purpose: "capture", policy: "Use the tool.", input: {}, submission: resultSubmission(),
+    }),
+    /Memory model submission failed/,
   );
+  assert.equal(calls, 3);
 });
 
 test("memory model sanitizes the provider input and hides provider error details", async () => {
@@ -595,29 +661,33 @@ test("memory model sanitizes the provider input and hides provider error details
       purpose: "capture",
       policy: "policy",
       input: "api_key=sk-abcdefghijklmnopqrstuvwxyz",
+      submission: resultSubmission(),
     }),
     (error: Error) => error.message === "Memory model request failed",
   );
   assert.doesNotMatch(seen, /sk-abcdefghijklmnopqrstuvwxyz/);
 });
 
-test("memory model sanitizes provider output before structured parsing", async () => {
+test("memory model returns validated tool arguments without rewriting the decision", async () => {
+  // Arrange: diagnostic redaction must not change the arguments accepted by the task validator.
+  const arguments_ = { ok: true, content: "api_key=sk-abcdefghijklmnopqrstuvwxyz" };
   const registry: ModelRegistryPort = {
     find: () => selectedModel,
-    complete: async () =>
-      response('{"content":"api_key=sk-abcdefghijklmnopqrstuvwxyz"}'),
+    complete: async () => resultResponse(arguments_),
   };
-  const model = new PiMemoryModel(registry, {
-    provider: "fake",
-    id: "memory-model",
-  });
+  const model = new PiMemoryModel(registry, selectedModel);
+  let validated: unknown;
+  const submission = resultSubmission();
+  submission.validate = (input) => { validated = input; return input; };
+
+  // Act.
   const result = await model.complete({
-    purpose: "capture",
-    policy: "policy",
-    input: {},
+    purpose: "capture", policy: "policy", input: {}, submission,
   });
-  assert.doesNotMatch(JSON.stringify(result), /sk-abcdefghijklmnopqrstuvwxyz/);
-  assert.match(JSON.stringify(result), /\[redacted\]/);
+
+  // Assert: the service receives precisely what it validated; task-specific privacy stays there.
+  assert.deepEqual(validated, arguments_);
+  assert.deepEqual(result, arguments_);
 });
 
 test("memory model stops promptly when the caller aborts a non-cooperative provider", async () => {
@@ -637,6 +707,7 @@ test("memory model stops promptly when the caller aborts a non-cooperative provi
     policy: "policy",
     input: {},
     signal: controller.signal,
+    submission: resultSubmission(),
   });
   setTimeout(() => controller.abort(), 10);
   await assert.rejects(pending, /aborted/);
@@ -653,12 +724,14 @@ for (const structured of [false, true]) {
       find: () => selectedModel,
       complete: async (_model, context) => {
         seen = context.messages[0]?.content;
-        return response("{}");
+        return resultResponse();
       },
     }, selectedModel);
 
     // Act.
-    await model.complete({ purpose: "capture", policy: "policy", input });
+    await model.complete({
+      purpose: "capture", policy: "policy", input, submission: resultSubmission(),
+    });
 
     // Assert: no rejection or character truncation before Pi sees the context.
     assert.equal(seen, structured ? JSON.stringify(input) : text);
@@ -679,7 +752,9 @@ for (const purpose of ["capture", "overlap"] as const) {
     });
 
     // Act: move to one millisecond before the required deadline.
-    const pending = model.complete({ purpose, policy: "policy", input: {} });
+    const pending = model.complete({
+      purpose, policy: "policy", input: {}, submission: resultSubmission(),
+    });
     let settled = false;
     void pending.finally(() => { settled = true; }).catch(() => undefined);
     const rejected = assert.rejects(pending, /Memory model request failed/);
@@ -745,7 +820,7 @@ test("capture and overlap inherit the same configured model allowance", async ()
     find: () => selectedModel,
     complete: async (_model, _context, options) => {
       maxTokens.push(options?.maxTokens ?? 0);
-      return response("{}");
+      return resultResponse();
     },
   };
   const model = new PiMemoryModel(registry, {
@@ -753,8 +828,12 @@ test("capture and overlap inherit the same configured model allowance", async ()
     id: "memory-model",
   });
 
-  await model.complete({ purpose: "capture", policy: "policy", input: {} });
-  await model.complete({ purpose: "overlap", policy: "policy", input: {} });
+  await model.complete({
+    purpose: "capture", policy: "policy", input: {}, submission: resultSubmission(),
+  });
+  await model.complete({
+    purpose: "overlap", policy: "policy", input: {}, submission: resultSubmission(),
+  });
 
   assert.deepEqual(maxTokens, [16_384, 16_384]);
 });
@@ -764,7 +843,7 @@ test("memory model keeps the capture deadline independent from classification", 
     find: () => selectedModel,
     complete: async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
-      return response("{}");
+      return resultResponse();
     },
   };
   const model = new PiMemoryModel(
@@ -774,7 +853,9 @@ test("memory model keeps the capture deadline independent from classification", 
   );
 
   await assert.rejects(
-    model.complete({ purpose: "classification", policy: "policy", input: {} }),
+    model.complete({
+      purpose: "classification", policy: "policy", input: {}, submission: resultSubmission(),
+    }),
     (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.equal(error.message, "Memory model request failed");
@@ -784,10 +865,14 @@ test("memory model keeps the capture deadline independent from classification", 
     },
   );
   await assert.doesNotReject(
-    model.complete({ purpose: "capture", policy: "policy", input: {} }),
+    model.complete({
+      purpose: "capture", policy: "policy", input: {}, submission: resultSubmission(),
+    }),
   );
   await assert.doesNotReject(
-    model.complete({ purpose: "overlap", policy: "policy", input: {} }),
+    model.complete({
+      purpose: "overlap", policy: "policy", input: {}, submission: resultSubmission(),
+    }),
   );
 });
 
@@ -797,7 +882,7 @@ test("memory model passes the real session and public header transform to Pi", a
     find: () => selectedModel,
     complete: async (_model, _context, options) => {
       seenOptions = options;
-      return response("{}");
+      return resultResponse();
     },
   };
   const model = new PiMemoryModel(
@@ -812,7 +897,9 @@ test("memory model passes the real session and public header transform to Pi", a
     },
   );
 
-  await model.complete({ purpose: "classification", policy: "policy", input: {} });
+  await model.complete({
+    purpose: "classification", policy: "policy", input: {}, submission: resultSubmission(),
+  });
 
   assert.equal(seenOptions?.sessionId, "pi-session-123");
   assert.ok(seenOptions?.transformHeaders);

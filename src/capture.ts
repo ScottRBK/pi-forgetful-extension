@@ -459,7 +459,7 @@ const CAPTURE_CANDIDATE = Type.Object({
   relationships: Type.Optional(
     Type.Array(CAPTURE_RELATIONSHIP_RESOURCE, { maxItems: MAX_RICH_RELATIONSHIPS }),
   ),
-});
+}, { additionalProperties: false });
 const CAPTURE_CANDIDATE_PARAMETERS = Type.Object({
   candidates: Type.Array(CAPTURE_CANDIDATE, {
     maxItems: 3,
@@ -651,13 +651,6 @@ function clone<T>(value: T): T {
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return undefined;
-    }
-  }
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
@@ -879,30 +872,12 @@ interface CandidateDestination {
 function candidateDestination(
   item: Record<string, unknown>,
 ): CandidateValidation<CandidateDestination> {
-  const destination = record(item.destination);
-  const projectIdValue = projectId(
-    item.destinationProjectId ??
-      item.targetProjectId ??
-      destination?.projectId ??
-      destination?.id,
-  );
-  const projectName = stringValue(
-    item.destinationProjectName ??
-      item.targetProjectName ??
-      destination?.projectName ??
-      destination?.name,
-  );
-  const rationale = stringValue(
-    item.destinationRationale ??
-      item.targetProjectRationale ??
-      destination?.rationale,
-  );
+  const projectIdValue = projectId(item.destinationProjectId);
+  const projectName = stringValue(item.destinationProjectName);
+  const rationale = stringValue(item.destinationRationale);
   const hasDestinationInput = [
     "destinationProjectId",
-    "targetProjectId",
     "destinationProjectName",
-    "targetProjectName",
-    "destination",
   ].some((key) => key in item);
   if (hasDestinationInput && projectIdValue === undefined && !projectName) {
     return invalidCandidate(
@@ -1312,6 +1287,17 @@ function eligibleCandidate(
   if (!item) return invalidCandidate("candidate must be a JSON object");
   if (hasSensitiveData(JSON.stringify(item)))
     return invalidCandidate("candidate contains sensitive data");
+  const undeclaredDestinationFields = [
+    "destination",
+    "targetProjectId",
+    "targetProjectName",
+    "targetProjectRationale",
+  ].filter((key) => key in item);
+  if (undeclaredDestinationFields.length > 0) {
+    return invalidCandidate(
+      `undeclared destination fields: ${undeclaredDestinationFields.join(", ")}`,
+    );
+  }
   if (!stringValue(item.id)) return invalidCandidate("candidate id is missing or empty");
   const fields = candidateFields(item, snapshot);
   if (!fields.valid) return fields;

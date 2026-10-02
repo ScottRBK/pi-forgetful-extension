@@ -79,6 +79,19 @@ function message(
   };
 }
 
+function recallPlanMessage(arguments_: JsonObject): AssistantMessage {
+  return message(
+    "memory",
+    [{
+      type: "toolCall",
+      id: "plan-1",
+      name: "submit_recall_plan",
+      arguments: arguments_,
+    }],
+    "toolUse",
+  );
+}
+
 function messageText(context: Context): string {
   const raw = context.messages.at(-1)?.content;
   if (typeof raw === "string") return raw;
@@ -297,23 +310,24 @@ test(
             void plannerGate.release.then(() => {
               const noContext =
                 mode === "late-no-context" || mode === "progress-no-context";
-              const text = mode === "late-failure"
-                ? "invalid planner output"
-                : JSON.stringify({
-                    search: !noContext,
-                    queries: noContext
-                      ? []
-                      : [
-                          input.prompt === "queued request one"
-                            ? "queue-one"
-                            : input.prompt === "queued request two"
-                              ? "queue-two"
-                              : "database decision",
-                        ],
-                    queryIntent: noContext ? "" : "Recall database decisions",
-                    entities: [],
-                  });
-              emit(message("memory", [{ type: "text", text }]));
+              if (mode === "late-failure") {
+                emit(message("memory", [{ type: "text", text: "invalid planner output" }]));
+                return;
+              }
+              emit(recallPlanMessage({
+                search: !noContext,
+                queries: noContext
+                  ? []
+                  : [
+                      input.prompt === "queued request one"
+                        ? "queue-one"
+                        : input.prompt === "queued request two"
+                          ? "queue-two"
+                          : "database decision",
+                    ],
+                queryIntent: noContext ? "" : "Recall database decisions",
+                entities: [],
+              }));
             });
           }
           return stream;

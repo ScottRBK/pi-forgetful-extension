@@ -51,15 +51,19 @@ for (const scenario of ["skip", "queued skip", "branched skip", "pinned settleme
         input: ["text"], contextWindow: 64_000, maxTokens: 2048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
       streamSimple(model, context) {
-        const capture = providerTools(context)[0]?.name === "submit_capture_candidates";
+        const name = providerTools(context)[0]?.name;
+        const capture = name === "submit_capture_candidates";
+        const plan = name === "submit_recall_plan";
         if (capture) receive(structuredClone(context));
         const message: AssistantMessage = {
           role: "assistant", api: "faux", provider: "context-test", model: model.id,
           content: capture ? [{ type: "toolCall", id: "capture", name: "submit_capture_candidates",
-            arguments: { candidates: [] } }] : [{ type: "text", text: model.id === "main"
-            ? "Acknowledged." : JSON.stringify({ search: false, queries: [], entities: [],
-              queryIntent: "No history required" }) }],
-          stopReason: capture ? "toolUse" : "stop", timestamp: Date.now(),
+            arguments: { candidates: [] } }]
+            : plan ? [{ type: "toolCall", id: "recall-plan", name: "submit_recall_plan",
+              arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
+            : [{ type: "text", text: model.id === "main" ? "Acknowledged."
+              : "No history required." }],
+          stopReason: capture || plan ? "toolUse" : "stop", timestamp: Date.now(),
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         };

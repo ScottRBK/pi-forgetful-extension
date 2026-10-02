@@ -107,9 +107,12 @@ test("memory requests use Pi's configured output allowance for every purpose", {
     requests.push(JSON.parse(body));
     const base = { id: "completion", object: "chat.completion.chunk", created: 1, model: "memory" };
     const chunks = [
-      { ...base, choices: [{ index: 0, delta: { role: "assistant", content: "{}" },
+      { ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{
+        index: 0, id: `call-${requests.length}`, type: "function",
+        function: { name: "submit_result", arguments: JSON.stringify({ ok: true }) },
+      }] },
         finish_reason: null }] },
-      { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+      { ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
     ];
     response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
     response.end(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") +
@@ -142,7 +145,13 @@ test("memory requests use Pi's configured output allowance for every purpose", {
 
   // Act: the same configured model serves all four background operations.
   for (const purpose of ["classification", "recall-review", "capture", "overlap"] as const) {
-    await model.complete({ purpose, policy: "Return JSON", input: { work: "A decision" } });
+    await model.complete({ purpose, policy: "Submit.", input: { work: "A decision" },
+      submission: {
+        name: "submit_result", description: "Submit the task result.",
+        parameters: { type: "object", properties: { ok: { type: "boolean" } },
+          required: ["ok"], additionalProperties: false },
+        validate: (input) => input,
+      } });
   }
 
   // Assert: no request substitutes an extension-owned output cap.

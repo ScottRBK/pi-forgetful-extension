@@ -216,10 +216,14 @@ export interface ModelRequest {
   /** Persist the initial compacted historical view; never private task/tool turns. */
   onConversationCompacted?: (view: CompactedConversation) => Promise<void>;
   signal?: AbortSignal;
-  submission?: ModelSubmissionTool;
+  /** Required for decisions/actions; contextual summaries use the separate compaction path. */
+  submission: ModelSubmissionTool;
   /** Task-specific read capabilities. Private models never inherit the main agent's tools. */
   readTools?: ModelReadTool[];
-  /** Concurrent reads in one tool-call batch: 1–8, default 1. Recall opts in; capture stays serial. */
+  /**
+   * Concurrent reads in one tool-call batch: 1–8, default 1.
+   * Recall opts in; capture stays serial.
+   */
   readConcurrency?: number;
   /** Task-owned state refreshed after all results in a read batch, before the next model turn. */
   readBatchContext?: () => unknown;

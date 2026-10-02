@@ -16,7 +16,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
 import { DurableQueueStore } from "../src/queue.ts";
-import { providerTools } from "./provider-context.ts";
+import { providerSystemPrompt, providerTools } from "./provider-context.ts";
 
 async function eventually(check: () => Promise<void>): Promise<void> {
   const deadline = Date.now() + 5000;
@@ -103,7 +103,8 @@ test("real Pi restart reuses same-path capture summary branch", { timeout: 25_00
       capture_mode: "observe",
       enabled: true,
       logging: "debug",
-      context_limit_tokens: 8000,
+      // Still forces old-history compaction, with room for the new planner tool protocol.
+      context_limit_tokens: 10_000,
       timeout_ms: 2000,
     }));
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({
@@ -135,27 +136,29 @@ test("real Pi restart reuses same-path capture summary branch", { timeout: 25_00
       })),
       streamSimple(model, context) {
         const toolName = providerTools(context)[0]?.name;
+        const policy = providerSystemPrompt(context);
         const capture = model.id === "memory" && toolName === "submit_capture_candidates";
         const compacting = model.id === "memory" && !capture &&
-          includes(context, "Historical record");
+          policy.includes("context summarization assistant");
+        const plan = model.id === "memory" && !compacting &&
+          toolName === "submit_recall_plan";
         if (capture) captureRequests.push(structuredClone(context));
         if (compacting) {
           summaryCalls += 1;
           compactionRequests.push(structuredClone(context));
         }
         const message: AssistantMessage = {
-          ...assistant(model.id === "main" ? "Acknowledged." :
-            JSON.stringify({ search: false, queries: [], entities: [],
-              queryIntent: "No recall required" })),
+          ...assistant(model.id === "main" ? "Acknowledged." : "No recall required."),
           provider: "restart-history",
           model: model.id,
           content: capture ? [{ type: "toolCall", id: `capture-${captureRequests.length}`,
             name: toolName!, arguments: { candidates: [] } }]
-            : [{ type: "text", text: compacting
+            : plan ? [{ type: "toolCall", id: "recall-plan", name: toolName!,
+              arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
+            : [{ type: "text", text: model.id === "main" ? "Acknowledged." : compacting
               ? "RESTART_SUMMARY: older captured planning history."
-              : JSON.stringify({ search: false, queries: [], entities: [],
-                queryIntent: "No recall required" }) }],
-          stopReason: capture ? "toolUse" : "stop",
+              : "No recall required." }],
+          stopReason: capture || plan ? "toolUse" : "stop",
         };
         const stream = createAssistantMessageEventStream();
         stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message });

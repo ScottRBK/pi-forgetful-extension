@@ -973,15 +973,13 @@ async function recallReviewHarness(
           entities: options.entities ?? [] };
       return {
         role: "assistant",
-        content: reviewing
-          ? [{
-            type: "toolCall",
-            id: `review-${modelInputs.length}`,
-            name: "submit_recall_review",
-            arguments: output,
-          }]
-          : [{ type: "text", text: JSON.stringify(output) }],
-        stopReason: reviewing ? "toolUse" : "stop",
+        content: [{
+          type: "toolCall",
+          id: `submission-${modelInputs.length}`,
+          name: reviewing ? "submit_recall_review" : "submit_recall_plan",
+          arguments: output,
+        }],
+        stopReason: "toolUse",
       } as AssistantMessage;
     },
   }, selected, { classificationTimeoutMs: options.modelTimeoutMs });

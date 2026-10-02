@@ -221,7 +221,9 @@ describe("RecallService", () => {
     assert.equal(input.prompt, prompt);
     assert.deepEqual(input.sessionContext.map(({ text }) => text),
       sessionContext.map(({ text }) => text));
-    assert.equal(request.policy, classificationPolicy);
+    assert.ok(request.policy.startsWith(`${classificationPolicy}\n`));
+    assert.match(request.policy, /Submit exactly one submit_recall_plan tool call/);
+    assert.equal(request.submission?.name, "submit_recall_plan");
   });
 
   it("shares complete retrieved evidence between automatic and foreground recall", async () => {
@@ -826,9 +828,12 @@ function reviewerWithResponses(
   return new PiMemoryModel({
     find: () => model,
     async complete(_model, input) {
-      const content = input.tools ? contents[index++]! : [{ type: "text" as const,
-        text: JSON.stringify({ search: true, queries: ["recall transport"],
-          queryIntent: "Find the transport boundary", entities: [] }) }];
+      const content: AssistantMessage["content"] =
+        input.tools?.[0]?.name === "submit_recall_review" ? contents[index++]! : [{
+          type: "toolCall", id: "plan", name: "submit_recall_plan",
+          arguments: { search: true, queries: ["recall transport"],
+            queryIntent: "Find the transport boundary", entities: [] },
+        }];
       return {
         role: "assistant", content, api: "openai-completions", provider: "fake", model: "memory",
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,

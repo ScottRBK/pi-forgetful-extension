@@ -1517,13 +1517,11 @@ test(
       })),
       streamSimple(model, context) {
         const stream = createAssistantMessageEventStream();
-        const decision = model.id === "memory"
-          ? {
-              search: false,
-              queries: [],
-              queryIntent: "No historical context needed",
-              entities: [],
-            }
+        const submissionName = model.id === "memory"
+          ? providerTools(context)[0]?.name
+          : undefined;
+        const decision = submissionName === "submit_recall_plan"
+          ? { search: false, queries: [], queryIntent: "", entities: [] }
           : undefined;
         const latestUser = context.messages.findLast(
           (message) =>
@@ -1534,7 +1532,12 @@ test(
         const shouldCall = model.id === "main" && !mainPrompts.has(promptKey);
         if (shouldCall) mainPrompts.add(promptKey);
         const content = decision
-          ? [{ type: "text" as const, text: JSON.stringify(decision) }]
+          ? [{
+              type: "toolCall" as const,
+              id: "plan-1",
+              name: "submit_recall_plan",
+              arguments: decision,
+            }]
           : shouldCall
             ? [{
               type: "toolCall" as const,
@@ -1549,7 +1552,7 @@ test(
           provider: "test",
           model: model.id,
           content,
-          stopReason: decision || !shouldCall ? "stop" : "toolUse",
+          stopReason: decision || shouldCall ? "toolUse" : "stop",
           timestamp: Date.now(),
           usage: {
             input: 1,

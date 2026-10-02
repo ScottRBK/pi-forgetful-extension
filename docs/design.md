@@ -156,11 +156,14 @@ smaller failure surface.
 
 1. On `before_agent_start`, create a session/branch/generation-scoped job and start the planner
    without awaiting it. Return stable protocol instructions and a pending lifecycle message.
-2. Validate a bounded planner response containing:
+2. Require one private `submit_recall_plan` tool call and validate its bounded arguments:
    - `search`: boolean;
    - one or two topic queries;
    - query intent;
    - zero or more entity names.
+   Invalid, unknown, duplicate, or semantically rejected calls receive validation feedback;
+   text-only replies receive a correction, never JSON parsing. Allow up to three submission
+   attempts within the same recall deadline. No validated plan means no searches.
 3. Resolve the effective scope from the persisted project setting. The planner cannot replace
    this user-controlled scope for an individual operation.
 4. Search a warm Forgetful HTTP service. When the plan selects retrieval, the next model boundary
@@ -200,11 +203,12 @@ summary remains bounded by the existing review contract (3,000 characters). This
 submission-field limit, not a limit on the evidence or reasoning available to the reviewer. Only the
 rendered latest state is visible at a model-call boundary; persisted markers and tool results follow
 the persistence rules above.
-Review summaries are also untrusted. One planning call and one bounded review path share the
-overall recall budget with search and optional enrichment. The review path stops after the first
-valid private submission and never parses text-only review output as JSON. Explicit main-agent read
-tools retain their direct results; the main agent reviews those itself. Lifecycle delivery never
-recursively starts recall or capture.
+Review summaries are also untrusted. One bounded planning path and one bounded review path share
+an overall recall budget with search and optional enrichment. Each stops after its first valid
+private submission and never parses text-only output as JSON. All behavior-driving memory model
+requests require a schema-validated submission tool; only context summaries remain plain text.
+Explicit main-agent read tools retain their direct results; the main agent reviews those itself.
+Lifecycle delivery never recursively starts recall or capture.
 
 ## Recall scope and capture destination
 
@@ -389,6 +393,9 @@ is then processed by the durable worker described above.
    and provenance; source editing, shell execution and uploads are unavailable. Accept exactly one
    private `submit_capture_candidates` submission; do not parse text output as fallback JSON.
 3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
+   Candidates use only schema-declared fields. Destination selection accepts only the declared
+   `destinationProjectId`, `destinationProjectName`, and `destinationRationale` fields, not aliases.
+   JSON strings are never decoded into candidates, decisions, destinations, or other instructions.
    Reject the submission for correction if any candidate or attached resource is invalid. Do not
    silently discard an invalid record or write valid siblings before the submission is corrected.
    Then resolve each accepted destination.
@@ -600,8 +607,8 @@ Initial SLO candidates to validate:
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture
 model calls are measured separately because they are not on the asynchronous recall path. The
-implementation bounds recall to one planner call and one review path per prompt, with at most three
-private review-submission attempts. The reviewer may explore only stored Forgetful records through
+implementation bounds recall to one planner path and one review path per prompt, with at most three
+private submission attempts per path. The reviewer may explore only stored Forgetful records through
 read-only tools in that same path. Capture extraction, overlap and connection review each consume
 a task from the four-task durable budget. Read turns, compaction and at most three submission
 attempts share each task's three-minute deadline. Debug counts provider invocations separately.
@@ -694,8 +701,10 @@ Each slice remains vertically usable and covered by regression tests.
 The automated boundary starts after a model has made a structured decision. Tests do not claim
 to prove that a real model classifies, splits, or judges novelty correctly.
 
-1. **Planner input seam**: the planner receives the expected user prompt, session context,
-   project identity, scope, and composed classification policy.
+1. **Planner input/submission seam**: the planner receives the expected user prompt, session
+   context, project identity, scope, composed classification policy, and private plan tool schema.
+   Only validated tool arguments drive retrieval; commentary and JSON text do not. Invalid calls
+   can be corrected within the existing three-attempt and shared deadline bounds.
 2. **Recall lifecycle seam**: given search and review decisions and seeded Forgetful data, the
    first real Pi model boundary receives pending state without waiting; a later boundary renders
    retrieval progress only while it remains current, then an explicit context, no-context, or

@@ -45,6 +45,20 @@ const SOURCE_FIELDS = {
   fileIds: "File",
 } as const;
 const SUBMIT_RECALL_REVIEW = "submit_recall_review";
+const SUBMIT_RECALL_PLAN = "submit_recall_plan";
+const PLAN_POLICY = `Submit exactly one ${SUBMIT_RECALL_PLAN} tool call. ` +
+  "Do not answer with JSON text. Text and commentary do not submit a plan. " +
+  "When search is true, supply one or two non-empty queries and a non-empty queryIntent. " +
+  "When no history is needed, submit search=false, queries=[], queryIntent=\"\", entities=[]. " +
+  "The supplied scope remains authoritative; projectId may select only a supplied project.";
+const RECALL_PLAN_PARAMETERS = Type.Object({
+  search: Type.Boolean(),
+  queries: Type.Array(Type.String({ minLength: 1 }), { maxItems: MAX_SEARCHES }),
+  queryIntent: Type.String(),
+  entities: Type.Array(Type.String({ minLength: 1 }), { maxItems: MAX_ENTITIES }),
+  repositorySpecific: Type.Optional(Type.Boolean()),
+  projectId: Type.Optional(Type.Integer({ minimum: 1 })),
+}, { additionalProperties: false });
 
 function isForgetfulResponseError(
   error: unknown,
@@ -218,7 +232,7 @@ function plannerString(
       `Planner field ${field} must be ${required ? "a non-empty string" : "a string"}`,
     );
   }
-  return value.trim();
+  return sanitizeText(value.trim());
 }
 
 function positiveInteger(value: unknown, field: string): number {
@@ -433,7 +447,7 @@ function parsePlan(value: unknown): RecallPlan {
     ...(repositorySpecific === undefined ? {} : { repositorySpecific }),
   };
 
-  const projectId = value.projectId ?? value.project_id;
+  const projectId = value.projectId;
   if (projectId !== undefined)
     plan.projectId = positiveInteger(projectId, "projectId");
   return plan;
@@ -574,14 +588,16 @@ function reviewValidationDebug(
   ].join("\n");
 }
 
-function reviewAttemptTrace(rejections: string[], exhausted = false): string {
+function submissionAttemptTrace(
+  rejections: string[], exhausted = false, label: "Review" | "Planner" = "Review",
+): string {
   const bounded = rejections.slice(-3).map((reason, index) =>
     `Rejected attempt ${index + 1}: ${trim(sanitizeText(reason), MAX_REVIEW_REJECTION_CHARS)}`);
   const attempts = exhausted ? rejections.length : rejections.length + 1;
   return [
-    `Review attempts: ${attempts}`,
+    `${label} attempts: ${attempts}`,
     ...bounded,
-    ...(exhausted ? ["Review attempts exhausted; failing open."] : []),
+    ...(exhausted ? [`${label} attempts exhausted; failing open.`] : []),
   ].join("\n");
 }
 
@@ -704,6 +720,7 @@ export class RecallService {
     const deadline = createDeadlineSignal(request.signal, deadlineMs);
     let stage = "planning";
     let debugTrace = "";
+    const plannerRejections: string[] = [];
     const reviewRejections: string[] = [];
     let failedReviewDebug: string | undefined;
     try {
@@ -721,8 +738,15 @@ export class RecallService {
             sessionId: request.context.sessionId, branchId: request.context.branchId,
             ...request.diagnosticContext,
           },
-          policy: sanitizePolicy(request.classificationPolicy),
+          policy: `${sanitizePolicy(request.classificationPolicy)}\n${PLAN_POLICY}`,
           input: this.plannerInput(request),
+          submission: {
+            name: SUBMIT_RECALL_PLAN,
+            description: "Submit whether to recall history and the exact search plan.",
+            parameters: RECALL_PLAN_PARAMETERS,
+            validate: parsePlan,
+            onRejection: (reason) => { plannerRejections.push(reason); },
+          },
           signal: deadline.signal,
         }),
         deadline.signal,
@@ -731,19 +755,22 @@ export class RecallService {
         return parsePlan(value);
       });
       this.ensureLive(deadline);
+      if (plannerRejections.length) {
+        debugTrace = submissionAttemptTrace(plannerRejections, false, "Planner");
+      }
       request.onPlan?.(plan);
       stage = "scope resolution";
       const scope = request.scope;
       if (!plan.search) {
         this.recordSuccess();
-        return this.empty(scope, "planner-no-search");
+        return { ...this.empty(scope, "planner-no-search"), debugTrace };
       }
       const blockedReason = await this.authorizeProjectSelection(
         request,
         deadline,
         plan,
       );
-      if (blockedReason) return this.empty(scope, blockedReason);
+      if (blockedReason) return { ...this.empty(scope, blockedReason), debugTrace };
       const resolution = await raceAbort(
         this.resolveScope(
           request.context,
@@ -756,13 +783,14 @@ export class RecallService {
       );
       if (resolution.reason) {
         this.recordSuccess();
-        return this.empty(scope, resolution.reason);
+        return { ...this.empty(scope, resolution.reason), debugTrace };
       }
       stage = "memory search";
       const queries = plan.queries.map((query) => this.searchRequest(
         query, plan, request.context, scope, resolution,
       ).query);
-      debugTrace = `Queries: ${JSON.stringify(queries)}\nIntent: ${sanitizeText(plan.queryIntent)}`;
+      debugTrace += `${debugTrace ? "\n" : ""}Queries: ${JSON.stringify(queries)}\n` +
+        `Intent: ${sanitizeText(plan.queryIntent)}`;
       const search = await this.searchMemories(
         request,
         plan,
@@ -844,7 +872,7 @@ export class RecallService {
       );
     } catch (error) {
       return this.finishFailure(request, deadline, error, {
-        stage, debugTrace, reviewRejections, failedReviewDebug,
+        stage, debugTrace, plannerRejections, reviewRejections, failedReviewDebug,
       });
     } finally {
       deadline.finish();
@@ -915,22 +943,28 @@ export class RecallService {
     trace: {
       stage: string;
       debugTrace: string;
+      plannerRejections: string[];
       reviewRejections: string[];
       failedReviewDebug: string | undefined;
     },
   ): RecallResult {
     if (!request.signal?.aborted) this.recordFailure();
+    const planning = trace.stage === "planning" || trace.stage === "plan validation";
     let attemptDebug: string | undefined;
     if (error instanceof ModelSubmissionError) {
-      attemptDebug = reviewAttemptTrace(error.rejectionReasons, true);
+      attemptDebug = submissionAttemptTrace(
+        error.rejectionReasons, true, planning ? "Planner" : "Review",
+      );
+    } else if (planning && trace.plannerRejections.length > 0) {
+      attemptDebug = submissionAttemptTrace(trace.plannerRejections, false, "Planner");
     } else if (trace.reviewRejections.length > 0) {
-      attemptDebug = reviewAttemptTrace(trace.reviewRejections);
+      attemptDebug = submissionAttemptTrace(trace.reviewRejections);
     }
     const debugTrace = trace.debugTrace + (attemptDebug ? `\n${attemptDebug}` : "");
     const validationDebug = error instanceof ReviewValidationError
       ? error.debug : trace.failedReviewDebug;
     const diagnosticStage = error instanceof ModelSubmissionError
-      ? "review validation" : trace.stage;
+      ? planning ? "plan validation" : "review validation" : trace.stage;
     return {
       ...this.empty(request.scope, failureReason(deadline, request.signal)),
       diagnostic: deadline.diagnostic(diagnosticStage, error),
@@ -965,7 +999,7 @@ export class RecallService {
         ),
       );
     }
-    debugTrace += `\n${reviewAttemptTrace(reviewRejections)}`;
+    debugTrace += `\n${submissionAttemptTrace(reviewRejections)}`;
     const selected = sourceLabels(review.sources);
     const rejected = sourceLabels(reviewSources(candidates))
       .filter((label) => !selected.includes(label));

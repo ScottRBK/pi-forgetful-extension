@@ -5,6 +5,8 @@ A seamless persistent-memory extension for the Pi coding agent.
 The intended experience requires no memory commands during normal work:
 
 - a separately configured memory model plans recall while the main agent starts work;
+- every behavior-driving private model response uses a schema-validated submission tool, never
+  parsed JSON text; compaction summaries remain contextual text;
 - automatic recall gives the main agent only bounded context reviewed through a private,
   schema-validated submission tool; raw search results are never a fallback;
 - the latest rendered recall state is transient; the initial pending marker and any useful-result

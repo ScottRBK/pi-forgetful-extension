@@ -9,7 +9,20 @@ import {
   ModelRegistry,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { ModelSubmissionTool } from "../src/contracts.ts";
 import { PiMemoryModel } from "../src/model.ts";
+
+const submission: ModelSubmissionTool = {
+  name: "submit_result",
+  description: "Submit the session-model fixture result.",
+  parameters: Type.Object({
+    ok: Type.Boolean(),
+  }),
+  validate(input) {
+    return input;
+  },
+};
 
 test(
   "background memory completion preserves the Pi session at the real provider boundary",
@@ -19,27 +32,6 @@ test(
       headers: Record<string, string | string[] | undefined>;
       body: string;
     }> = [];
-    const firstChunk = JSON.stringify({
-      id: "memory-1",
-      object: "chat.completion.chunk",
-      created: 1,
-      model: "memory",
-      choices: [
-        {
-          index: 0,
-          delta: { role: "assistant", content: "{}" },
-          finish_reason: null,
-        },
-      ],
-    });
-    const finalChunk = JSON.stringify({
-      id: "memory-1",
-      object: "chat.completion.chunk",
-      created: 1,
-      model: "memory",
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    });
     const server = createServer(async (request, response) => {
       let body = "";
       for await (const chunk of request) body += chunk;
@@ -51,11 +43,16 @@ test(
       const chunks = [
         {
           id: "memory-1", object: "chat.completion.chunk", created: 1, model: "memory",
-          choices: [{ index: 0, delta: { role: "assistant", content: "{}" }, finish_reason: null }],
+          choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{
+            index: 0,
+            id: "result-1",
+            type: "function",
+            function: { name: "submit_result", arguments: JSON.stringify({ ok: true }) },
+          }] }, finish_reason: null }],
         },
         {
           id: "memory-1", object: "chat.completion.chunk", created: 1, model: "memory",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         },
       ];
@@ -111,6 +108,7 @@ test(
         purpose: "classification",
         policy: "Return JSON.",
         input: { prompt: "remember this" },
+        submission,
       });
     } catch (error) {
       const cause = error instanceof Error && error.cause instanceof Error
@@ -119,7 +117,7 @@ test(
       assert.fail(`${error instanceof Error ? error.message : String(error)}${cause}`);
     }
 
-    assert.deepEqual(result, {});
+    assert.deepEqual(result, { ok: true });
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.headers["x-opencode-session"], "pi-session-123");
     assert.equal(requests[0]?.headers["x-opencode-client"], "pi");
@@ -133,6 +131,7 @@ test(
     );
     await secondSession.complete({
       purpose: "classification", policy: "Return JSON.", input: { prompt: "second session" },
+      submission,
     });
     assert.equal(requests.length, 2);
     assert.equal(requests[1]?.headers["x-opencode-session"], "pi-session-456");

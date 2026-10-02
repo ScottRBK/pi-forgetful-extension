@@ -57,17 +57,24 @@ function registry(
   return { find: () => model, complete };
 }
 
+const submission = {
+  name: "submit_result",
+  description: "Submit the private task result.",
+  parameters: Type.Object({ ok: Type.Boolean() }, { additionalProperties: false }),
+  validate: (input: unknown) => input,
+};
+
 test("default budget caps large-output models for every private purpose", async () => {
   // Arrange: real model catalogs can advertise output larger than the private 100k budget.
   const calls: Array<{ context: Context; options?: ModelsSimpleStreamOptions }> = [];
   const model = new PiMemoryModel(registry(largeOutputModel, async (_model, context, options) => {
     calls.push({ context: structuredClone(context), options });
-    return response("{}");
+    return toolResponse("result", "submit_result", { ok: true });
   }), { provider: "fake", id: "large-output" });
 
   // Act.
   for (const purpose of ["classification", "recall-review", "capture", "overlap"] as const) {
-    await model.complete({ purpose, policy: "Return JSON.", input: { work: purpose } });
+    await model.complete({ purpose, policy: "Submit.", input: { work: purpose }, submission });
   }
 
   // Assert: provider output is capped before dispatch, not allowed to consume the input budget.
@@ -83,13 +90,14 @@ test("disabled compaction still caps generation before provider dispatch", async
   const maxTokens: number[] = [];
   const model = new PiMemoryModel(registry(largeOutputModel, async (_model, _context, options) => {
     maxTokens.push(options?.maxTokens ?? 0);
-    return response("{}");
+    return toolResponse("result", "submit_result", { ok: true });
   }), { provider: "fake", id: "large-output" }, {
     compactionSettings: { ...settings, enabled: false },
   });
 
   // Act.
-  await model.complete({ purpose: "capture", policy: "Return JSON.", input: { ok: true } });
+  await model.complete({ purpose: "capture", policy: "Submit.", input: { ok: true },
+    submission });
 
   // Assert.
   assert.deepEqual(maxTokens, [16_384]);
@@ -101,12 +109,12 @@ test("small model windows use only the space left by actual provider input", asy
   const calls: Array<{ context: Context; maxTokens: number }> = [];
   const model = new PiMemoryModel(registry(small, async (_model, context, options) => {
     calls.push({ context: structuredClone(context), maxTokens: options?.maxTokens ?? 0 });
-    return response("{}");
+    return toolResponse("result", "submit_result", { ok: true });
   }), { provider: "fake", id: "large-output" });
 
   // Act.
-  await model.complete({ purpose: "capture", policy: "Return JSON.",
-    input: { evidence: "Compact input. ".repeat(500) } });
+  await model.complete({ purpose: "capture", policy: "Submit.",
+    input: { evidence: "Compact input. ".repeat(500) }, submission });
 
   // Assert.
   assert.equal(calls.length, 1);
