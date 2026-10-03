@@ -29,7 +29,11 @@ export async function createToolSession(
   dependencies?: ForgetfulExtensionDependencies,
 ) {
   const root = await mkdtemp(join(tmpdir(), "forgetful-tool-validation-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  let closeSession: (() => Promise<void>) | undefined;
+  t.after(async () => {
+    try { await closeSession?.(); }
+    finally { await rm(root, { recursive: true, force: true }); }
+  });
   const agentDir = join(root, "agent");
   await mkdir(join(agentDir, "forgetful"), { recursive: true });
   await writeFile(join(agentDir, "forgetful/settings.json"), JSON.stringify({
@@ -84,7 +88,12 @@ export async function createToolSession(
     model: runtime.getModel("validation-test", "main"), settingsManager: settings,
     sessionManager: SessionManager.inMemory(root), resourceLoader: loader, noTools: "builtin",
   });
-  t.after(() => session.dispose());
+  closeSession = async () => {
+    try {
+      await session.abort();
+      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    } finally { session.dispose(); }
+  };
   await session.bindExtensions({});
   return { session, modelResults, root, settings };
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -59,6 +59,7 @@ interface Harness {
   widgets: Map<string, { content: unknown; placement?: string; component?: any }>;
   widgetCalls: Array<{ key: string; content: unknown; placement?: string }>;
   widgetRenderRequests: number;
+  events: EventEmitter;
   tools: Map<string, any>;
   cleanup(): Promise<void>;
 }
@@ -126,6 +127,7 @@ async function harness(
   }>();
   const widgetCalls: Array<{ key: string; content: unknown; placement?: string }> = [];
   let widgetRenderRequests = 0;
+  const events = new EventEmitter();
   const tools = new Map<string, any>();
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<
@@ -218,15 +220,20 @@ async function harness(
         widgetCalls.push({ key, content, placement: options?.placement });
         if (content === undefined) {
           widgets.delete(key);
+          events.emit("widget");
           return;
         }
         const component = typeof content === "function"
           ? content(
-            { requestRender() { widgetRenderRequests += 1; } },
+            { requestRender() {
+              widgetRenderRequests += 1;
+              events.emit("render");
+            } },
             { fg: (_color: string, text: string) => text },
           )
           : undefined;
         widgets.set(key, { content, placement: options?.placement, component });
+        events.emit("widget");
       },
       notify: (message: string) => {
         notifications.push(message);
@@ -273,6 +280,7 @@ async function harness(
     },
     sendMessage(message: unknown, sendOptions: unknown) {
       sentMessages.push({ message, options: sendOptions });
+      events.emit("message");
     },
     sendUserMessage(content: unknown, sendOptions: unknown) {
       sentUserMessages.push({ content, options: sendOptions });
@@ -318,6 +326,7 @@ async function harness(
     statuses,
     widgets,
     widgetCalls,
+    events,
     get widgetRenderRequests() {
       return widgetRenderRequests;
     },
@@ -345,6 +354,8 @@ async function harness(
       await commands.get("forgetful")?.(args, ctx);
     },
     async cleanup() {
+      for (const handler of handlers.get("session_shutdown") ?? [])
+        await handler({ type: "session_shutdown", reason: "quit" }, ctx);
       for (const widget of widgets.values()) widget.component?.dispose?.();
       widgets.clear();
       await rm(root, { recursive: true, force: true });
@@ -1015,6 +1026,16 @@ async function waitForCondition(
   assert.ok(condition(), description);
 }
 
+/** Observe the existing Pi UI/message boundary; the deadline only fails a missing event. */
+async function waitForFixtureEvent(
+  fixture: Harness,
+  event: "widget" | "message" | "render",
+  condition: () => boolean,
+): Promise<void> {
+  const signal = AbortSignal.timeout(2_000);
+  while (!condition()) await once(fixture.events, event, { signal });
+}
+
 function recallMessages(fixture: Harness): Array<Record<string, any>> {
   const messages: Array<Record<string, any>> = [];
   for (const result of fixture.contextResults) {
@@ -1130,27 +1151,29 @@ for (const ending of ["completion", "widget removal"]) {
       await reviewing;
 
       // Assert: the spinner is above the editor, animated, and not footer/model content.
-      const widget = fixture.widgets.get("forgetful-recall");
+      const widget = fixture.widgets.get("forgetful-activity");
       assert.ok(widget);
       assert.equal(widget.placement, "aboveEditor");
-      assert.equal(fixture.statuses.has("forgetful-recall"), false);
+      assert.equal(fixture.statuses.has("forgetful-activity"), false);
       const component = widget.component as { render(width: number): string[] };
       const firstFrame = component.render(80).join("\n");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitForFixtureEvent(fixture, "render", () =>
+        component.render(80).join("\n") !== firstFrame);
       const nextFrame = component.render(80).join("\n");
-      assert.match(firstFrame, /Forgetful: recalling/);
-      assert.match(nextFrame, /Forgetful: recalling/);
+      assert.match(firstFrame, /Forgetful · finding relevant memories… · \d+s/);
+      assert.match(nextFrame, /Forgetful · finding relevant memories… · \d+s/);
       assert.notEqual(firstFrame, nextFrame);
       const progressMessages = recallMessages(fixture);
       assert.equal(progressMessages.length, 0);
-      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"),
+        /Forgetful · finding relevant memories… · \d+s/);
 
       if (ending === "completion") {
         release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
         await pending;
       } else {
         // Pi removes/disposes widgets during clearing and reload, even while recall is pending.
-        fixture.ctx.ui.setWidget("forgetful-recall", undefined);
+        fixture.ctx.ui.setWidget("forgetful-activity", undefined);
         release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
         await pending;
       }
@@ -1158,6 +1181,7 @@ for (const ending of ["completion", "widget removal"]) {
       assert.equal(fixture.widgets.size, 0);
       assert.ok(fixture.widgetRenderRequests > 0, "The live counter must observe animation");
       const renderRequestsAfterClear = fixture.widgetRenderRequests;
+      // Observe a full animation interval after removal; this does not wait for completion.
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.equal(fixture.widgetRenderRequests, renderRequestsAfterClear);
     } finally {
@@ -1196,8 +1220,8 @@ for (const path of ["normal", "queued"]) {
       await reviewing;
 
       // Assert: the widget is above the editor, without becoming chat or model content.
-      assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
-      assert.equal(fixture.statuses.has("forgetful-recall"), false);
+      assert.equal(fixture.widgets.get("forgetful-activity")?.placement, "aboveEditor");
+      assert.equal(fixture.statuses.has("forgetful-activity"), false);
       assert.equal(fixture.notifications.length, 0);
       release({ summary: "Serving limit is 4096 tokens.", memoryIds: [42], reason: "Relevant." });
       if (path === "normal") {
@@ -1205,9 +1229,9 @@ for (const path of ["normal", "queued"]) {
         await waitForRecallTerminal(fixture);
       } else {
         await pending;
-        await waitForCondition(
+        await waitForFixtureEvent(
+          fixture, "widget",
           () => fixture.widgets.size === 0,
-          "queued recall should finish before activation",
         );
         fixture.entries.push(entry("queued-user", "root", "user", "Context size?"));
         const context = await fixture.emit("context", {
@@ -1219,7 +1243,8 @@ for (const path of ["normal", "queued"]) {
       assert.equal(fixture.widgets.size, 0);
       assert.equal(recallMessages(fixture).length, path === "normal" ? 3 : 1);
       assert.ok(recallMessages(fixture).every((message) => message.display === false));
-      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"),
+        /Forgetful · finding relevant memories… · \d+s/);
     } finally {
       release({ summary: "", memoryIds: [], reason: "Nothing relevant." });
       await pending;
@@ -1255,7 +1280,7 @@ for (const path of ["normal", "queued"]) {
           streamingBehavior: "followUp",
         });
         await reviewing;
-        assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
+        assert.equal(fixture.widgets.get("forgetful-activity")?.placement, "aboveEditor");
         if (path === "queued") {
           fixture.entries.push(entry("queued-user", "root", "user", "Context size?"));
           await fixture.emit("context", {
@@ -1272,9 +1297,9 @@ for (const path of ["normal", "queued"]) {
           release({ summary: "", memoryIds: [], reason: "Aborted." });
         }
         await pending;
-        await waitForCondition(
+        await waitForFixtureEvent(
+          fixture, "widget",
           () => fixture.widgets.size === 0,
-          `${path} ${outcome} recall should reach a terminal result`,
         );
 
         // Assert: no stale widget/status or unreviewed context survives,
@@ -1336,13 +1361,13 @@ test("overlapping recalls keep the editor widget until both finish", async () =>
     assert.doesNotMatch(JSON.stringify(progress), /terminal state:/);
 
     // Assert: finishing one recall cannot hide the other recall's widget.
-    assert.equal(fixture.widgets.get("forgetful-recall")?.placement, "aboveEditor");
+    assert.equal(fixture.widgets.get("forgetful-activity")?.placement, "aboveEditor");
     assert.equal(fixture.widgetCalls.filter(({ content }) => content !== undefined).length, 1);
     reviews[1].release(empty);
     await pending[1];
-    await waitForCondition(
+    await waitForFixtureEvent(
+      fixture, "widget",
       () => fixture.widgets.size === 0,
-      "the queued recall should clear the shared widget after finishing",
     );
     const context = await fixture.emit("context", {
       type: "context", messages: [{ role: "user", content: "And the serving limit?" }],
@@ -1379,7 +1404,8 @@ for (const mode of ["print", "json", "rpc"]) {
       // Assert: non-terminal modes have no widget work and start with pending state.
       assert.equal(fixture.widgetCalls.length, 0);
       assert.equal(fixture.statuses.size, 0);
-      assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
+      assert.doesNotMatch(fixture.modelInputs.join("\n"),
+        /Forgetful · finding relevant memories… · \d+s/);
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
       await waitForRecallTerminal(fixture);
       const terminal = latestRecallMessage(fixture, "completion");
@@ -3941,11 +3967,21 @@ test("tree navigation stops the old worker and drops old-branch queued recall", 
 
 test("startup recovery and escalation handoff stay on the originating branch", async () => {
   const fixture = await harness();
+  assert.ok(fixture.capture.checkpoint);
+  const checkpoint = fixture.capture.checkpoint.bind(fixture.capture);
+  const checkpointStarted = new Promise<void>((resolve) => {
+    fixture.capture.checkpoint = async (options) => {
+      const result = await checkpoint(options);
+      resolve();
+      return result;
+    };
+  });
   try {
     await fixture.emit("session_start", {
       type: "session_start",
       reason: "new",
     });
+    await checkpointStarted;
     assert.equal(fixture.capture.checkpoints.length, 1);
     fixture.capture.conflicts = [
       {
@@ -3966,7 +4002,7 @@ test("startup recovery and escalation handoff stay on the originating branch", a
       entry("assistant-1", "user-1", "assistant", "I need a decision", "stop"),
     );
     await fixture.emit("agent_settled", { type: "agent_settled" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.length > 0);
     assert.equal(fixture.sentMessages.length, 1);
     assert.deepEqual(fixture.sentMessages[0]?.options, {
       deliverAs: "nextTurn",
@@ -4110,6 +4146,8 @@ test("conflict handoff preserves full selected evidence and still redacts secret
     // Act: the extension supplies pending conflicts to Pi's next model turn.
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
+    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.some((item) =>
+      (item.message as { customType?: string }).customType === "forgetful_conflict"));
 
     // Assert: all three selected conflicts retain their tails, but the fourth is not selected.
     const handoff = fixture.sentMessages.find((item) =>
@@ -4142,6 +4180,7 @@ test("conflict handoff renders malformed claims as unknown", async () => {
   try {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
     await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
+    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.length > 0);
 
     assert.equal(fixture.sentMessages.length, 1);
     const content = (fixture.sentMessages[0]!.message as { content: string }).content;
@@ -4201,54 +4240,49 @@ test("a sibling branch cannot inherit a conflict from the shared baseline", asyn
   }
 });
 
-test("a resolver race cannot delegate after session tree navigation", async () => {
+test("a resolver waiting for recovery cannot delegate after session tree navigation", async () => {
   const fixture = await harness();
+  let release!: (value: unknown[]) => void;
+  const pending = new Promise<unknown[]>((resolve) => { release = resolve; });
+  let markLookupStarted!: () => void;
+  const lookupStarted = new Promise<void>((resolve) => { markLookupStarted = resolve; });
+  let resolving: Promise<unknown> | undefined;
+  let navigation: Promise<unknown> | undefined;
   try {
-    await fixture.emit("session_start", {
-      type: "session_start",
-      reason: "new",
-    });
-    let release!: (value: unknown[]) => void;
-    let started = false;
-    const pending = new Promise<unknown[]>((resolve) => {
-      release = resolve;
-    });
     fixture.capture.pendingConflicts = async () => {
-      started = true;
+      markLookupStarted();
       return pending;
     };
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await lookupStarted;
     const tool = fixture.tools.get("forgetful_resolve");
-    const resolving = tool.execute(
+    resolving = tool.execute(
       "resolve-race",
-      {
-        conflict_id: "race-conflict",
-        action: "skip",
-      },
+      { conflict_id: "race-conflict", action: "skip" },
       undefined,
       undefined,
       fixture.ctx,
     );
-    for (let attempt = 0; !started && attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    // Navigation may reject the tool before it is awaited. Observe that rejection immediately.
+    void resolving!.catch(() => undefined);
     fixture.setLeaf("branch-b");
-    await fixture.emit("session_tree", {
-      type: "session_tree",
-      oldLeafId: "root",
-      newLeafId: "branch-b",
+    navigation = fixture.emit("session_tree", {
+      type: "session_tree", oldLeafId: "root", newLeafId: "branch-b",
     });
-    release([
-      {
-        id: "race-conflict",
-        sessionId: "session-1",
-        branchId: "session-1:root",
-        sourceEntryIds: ["root"],
-        reason: "race",
-      },
-    ]);
-    await assert.rejects(resolving, /No pending Forgetful conflict can be resolved/);
+    void navigation.catch(() => undefined);
+    // Cancellation while recovery owns the checkpoint is an error, never a delegated resolution.
+    await assert.rejects(resolving!, /^Error: Forgetful conflict checkpoint wait ended\.$/);
+    assert.equal(fixture.capture.resolutions.length, 0);
+    release([{
+      id: "race-conflict", sessionId: "session-1", branchId: "session-1:root",
+      sourceEntryIds: ["root"], reason: "race",
+    }]);
+    await navigation;
     assert.equal(fixture.capture.resolutions.length, 0);
   } finally {
+    release([]);
+    await resolving?.catch(() => undefined);
+    await navigation;
     await fixture.cleanup();
   }
 });

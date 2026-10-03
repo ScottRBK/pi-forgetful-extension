@@ -171,6 +171,8 @@ async function fixture(t: TestContext) {
     } finally { session.dispose(); }
   };
   await session.bindExtensions({});
+  // Settle project discovery before exercising capture against the mapped project.
+  await session.prompt("/forgetful status");
   return { client, old, cwd, agentDir, settings, session, manager, shared, handoffs,
     inspectionResults, inspectionId: () => inspectionId,
     waitHandoff: () => bounded(handoff, "Inspected-source conflict did not reach Pi handoff"),

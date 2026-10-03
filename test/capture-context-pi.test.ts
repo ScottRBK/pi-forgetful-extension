@@ -91,6 +91,8 @@ for (const scenario of ["skip", "queued skip", "branched skip", "pinned settleme
       } finally { session.dispose(); }
     };
     await session.bindExtensions({});
+    // Settle project discovery before exercising capture against the mapped project.
+    await session.prompt("/forgetful status");
 
     if (scenario === "pinned settlement") {
       // Act: a later journal append happens while the settled callback is scheduling work.

@@ -234,9 +234,22 @@ jq 'select(.event == "capture.candidate_rejected")' .pi/forgetful/logs/*.jsonl*
 
 ### Recall and capture feedback
 
-During automatic recall, Pi shows `Forgetful: recalling...` with a small spinner above the prompt
-editor at every verbosity level. The widget clears when recall finishes, including on failure or
-cancellation. The main model starts with an explicit memory-decision-pending lifecycle message,
+Forgetful connects in the background after local configuration and queue setup. Pi can accept a
+prompt before project discovery finishes; that turn proceeds without automatic recall. Completed
+turns are still saved to the local queue and await discovery before capture processing.
+
+A single transient line above the prompt editor shows background work at every verbosity level:
+`Forgetful · starting…`, `resuming N queued tasks…`, `saving work locally…`,
+`finding relevant memories…`, `reviewing session…`, `saving to Forgetful…`, or
+`checking previous save…`. It combines concurrent activities with a spinner and total background
+elapsed time (not the duration of each phase), and clears when idle or cancelled. A non-spinning
+notice remains when queued work cannot proceed: `unavailable — queued work kept locally`,
+`capture retry pending — work kept locally`, or `previous save needs checking`. Local-storage
+notices are shown only after reading durable queue records. `/forgetful status` reports uncertain
+saves, or says that queue diagnostics are unavailable without hiding the remaining configuration.
+These UI updates never become conversation or compaction input.
+
+Once recall is ready, the main model starts with a memory-decision-pending lifecycle message,
 so independent work is not blocked. A single latest-state renderer shows retrieval progress or a
 bounded terminal result at later model-call boundaries; progress is passive and never creates a
 progress-only model turn.
@@ -399,8 +412,9 @@ Pi restarts recover the saved branch only when its latest handled entry is on th
 path. A divergent path without that entry gets a new branch; summaries never cross sessions.
 
 Completed jobs retain only small UI outcome records, not search results or full review payloads.
-Each started attempt counts, including a resume after capture permissions were withdrawn.
-On the third failed or paused attempt, the job, snapshots, working data and all associated conflicts
+Each failed or permission-paused attempt counts. Ordinary shutdown, reload and navigation cancel
+active model/read work without consuming a failure attempt or the interrupted model-call allowance.
+On the third failed or permission-paused attempt, the job, snapshots and all associated conflicts
 are discarded immediately, with a final outcome for the UI. Exhausted model-call budgets are
 failures, not resumable pauses. Its deduplication marker remains so work is not queued again.
 Failed work is abandoned; no manual queue cleanup is required. Existing failed jobs are cleaned on
@@ -508,8 +522,16 @@ Append policy text through `classification.md`, `recall.md`, and `capture.md` un
 Overlays supplement the protected schemas, evidence requirements, and limits; they cannot replace
 the extension's safety contracts.
 
-Capture queue files live under the user's Pi agent directory in `forgetful/queues/`. The queue is
-durable across normal restarts, but the MVP does not guarantee completion after Pi exits.
+Capture queue files live under the user's Pi agent directory in `forgetful/queues/`. On shutdown,
+active capture reads and model calls are cancelled. Already-dispatched writes get up to 500 ms to
+return a receipt; otherwise the request is aborted and its uncertain outcome stays pending locally.
+Confirmed writes are not replayed. Uncertain writes stay pending for manual service inspection;
+there is no automatic reconciliation or retry for those records. Repeatedly quitting does not
+discard their evidence. Local disk checkpoints and lock release are still awaited.
+Pi stops its TUI before shutdown hooks, so there is no exit spinner.
+
+The queue survives normal restarts. Work resumes on a later eligible start; no worker runs after Pi
+exits, and the MVP does not guarantee post-exit completion.
 
 Explicit stored-file reads return images to Pi or save other files under the agent directory in
 `forgetful/downloads/`. These private downloads remain available for normal Pi tools to inspect;

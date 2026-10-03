@@ -143,6 +143,8 @@ for (const [configured, failedRead] of [
       } finally { session.dispose(); }
     };
     await session.bindExtensions({});
+    // Startup returns before project discovery; recall assertions require a ready runtime.
+    await session.prompt("/forgetful status");
     const respond = (query: string) => {
       const id = Number(query.split("-")[1]) + (query.startsWith("review-") ? 100 : 0);
       if (query === `review-${failedRead}`) {

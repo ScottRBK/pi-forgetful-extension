@@ -90,6 +90,7 @@ interface Harness {
   baseUrl: string;
   control: {
     fact: string;
+    projectLookups: number;
     reviewCalls: number;
     plannerGate: Gate;
     plannerMode: "gate" | "no-context" | "failure";
@@ -113,6 +114,7 @@ async function openHarness(
   const server = createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url?.startsWith("/api/v1/projects")) {
+      control.projectLookups += 1;
       response.end(JSON.stringify({
         projects: [{ id: 7, name: "Persist extension", repo_name: "test/persist-extension" }],
         total: 1,
@@ -142,7 +144,7 @@ async function openHarness(
   }));
 
   const control: Harness["control"] = {
-    fact: SQLITE_FACT, reviewCalls: 0,
+    fact: SQLITE_FACT, projectLookups: 0, reviewCalls: 0,
     plannerGate: gate(), plannerMode: "gate", mainMode: "text", mainHold: gate(), mainCalls: 0,
   };
   const mainContexts: Context[] = [];
@@ -232,6 +234,8 @@ async function openHarness(
   });
   t.after(() => session.dispose());
   await session.bindExtensions({});
+  // Await discovery for both fresh and reopened sessions before testing automatic recall.
+  await session.prompt("/forgetful status");
   return {
     session, sessionManager, mainContexts, mainHistory, control, baseUrl,
     resultEntries: () => sessionManager.getEntries().flatMap((entry) =>
@@ -467,6 +471,7 @@ test("an old completion cannot publish into a replacement session",
     harness.sessionManager.newSession();
     harness.session.refreshContext();
     await harness.session.bindExtensions({});
+    await harness.session.prompt("/forgetful status");
     const callsBefore = harness.mainContexts.length;
     harness.control.plannerGate.finish();
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -475,4 +480,36 @@ test("an old completion cannot publish into a replacement session",
     assert.notEqual(harness.sessionManager.getSessionId(), oldId);
     assert.deepEqual(harness.resultEntries(), []);
     assert.equal(harness.mainContexts.length, callsBefore);
+  });
+
+test("tree navigation warms recall before the first prompt on the new branch",
+  { timeout: 20_000 }, async (t) => {
+    // Arrange: complete one ordinary turn with no recalled facts.
+    const root = await makeRoot(t);
+    const harness = await openHarness(t, root);
+    harness.control.plannerMode = "no-context";
+    await harness.session.prompt("Start a branch here.");
+    await harness.session.waitForIdle();
+    const userEntry = harness.sessionManager.getEntries()
+      .find((entry) => entry.type === "message" && entry.message.role === "user");
+    assert.ok(userEntry);
+    const before = harness.control.projectLookups;
+
+    // Act: navigation itself starts discovery, without using a prompt to create the runtime.
+    await harness.session.navigateTree(userEntry.id);
+    await waitFor(() => harness.control.projectLookups > before,
+      "navigation must start discovery before another user prompt");
+    await harness.session.prompt("/forgetful status");
+    harness.control.plannerMode = "gate";
+    harness.control.plannerGate = gate();
+    const prompt = harness.session.prompt("Which database did we choose?");
+    await harness.control.plannerGate.started;
+
+    // Assert: the first prompt has an automatic planner, and its result remains branch-local.
+    harness.control.plannerGate.finish();
+    await prompt;
+    await harness.session.waitForIdle();
+    assert.equal(harness.control.reviewCalls, 1);
+    assert.equal(harness.resultEntries().length, 1);
+    await harness.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
   });

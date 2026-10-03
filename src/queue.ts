@@ -18,6 +18,7 @@ import type {
   CompactedConversation,
   EvidenceEntry,
   MemoryInput,
+  Project,
   WorkContext,
 } from "./contracts.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
@@ -69,10 +70,19 @@ export interface QueueJob {
   candidateOutcomes: Record<string, unknown>;
   submissionRejections?: string[];
   lastError?: string;
+  /** An aborted accepted mutation requires reconciliation before any replay. */
+  uncertainWrite?: string;
+  supersession?: SupersessionReceipt;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
   ownerPid?: number;
+}
+
+export interface SupersessionReceipt {
+  oldMemoryId: number;
+  replacementId: number;
+  status: "started" | "completed" | "failed";
 }
 
 export interface QueueJobMetadata extends Omit<QueueJob, "snapshot"> {
@@ -100,6 +110,8 @@ export interface PendingConflict {
   reason: string;
   status: "pending" | "resolved" | "rejected";
   replacementId?: number;
+  uncertainWrite?: string;
+  supersession?: SupersessionReceipt;
   replacement?: {
     // Missing version identifies legacy implicit preservation plans; never execute as explicit.
     planVersion?: 1;
@@ -159,6 +171,7 @@ export interface QueueCheckpoint {
   submissionRejections?: string[];
   lastError?: string;
   startedAt?: string;
+  supersession?: SupersessionReceipt;
   /** Append-only source observations; inspection: IDs must never reuse session IDs. */
   inspectionEntries?: EvidenceEntry[];
   compactedConversation?: CompactedConversation;
@@ -256,6 +269,21 @@ function sanitizeOutcomeMap(
 function outcomeRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {};
+}
+
+function interruptedWrite(job: QueueJob): boolean {
+  if (job.supersession?.status === "started") return true;
+  return Object.values(job.candidateOutcomes).some((value) => {
+    const outcome = outcomeRecord(value);
+    if (outcome.uncertainWrite || outcomeRecord(outcome.creation).status === "started") return true;
+    // A stopped candidate keeps historical failed receipts, not instructions to try again.
+    if (outcome.stage === "execution-stopped") return false;
+    const pending = outcomeRecord(outcome.knowledgeState).pendingCreates;
+    if (Array.isArray(pending) && pending.length && !outcome.executionFailure) return true;
+    const results = outcomeRecord(outcome.linkReview).executionResults;
+    return Array.isArray(results) &&
+      results.some((item) => outcomeRecord(item).status === "started");
+  });
 }
 
 function releaseCompletedArtifacts(job: StoredQueueJob): void {
@@ -1080,6 +1108,27 @@ export class DurableQueueStore {
     return this.getWatermark(context.sessionId, context.branchId);
   }
 
+  /** Attach discovery results to work saved locally while the server was still pending. */
+  async completeProjectDiscovery(context: WorkContext & { projects?: Project[] }): Promise<void> {
+    if (context.projectDiscoveryPending ||
+        (context.project && context.project.repo_name !== context.repoName)) return;
+    await this.mutate((state) => {
+      let changed = false;
+      for (const job of state.jobs) {
+        if (!identityMatches(job, this.defaultIdentity()) ||
+            !job.snapshot.context.projectDiscoveryPending ||
+            job.snapshot.context.repoName !== context.repoName ||
+            (!context.repoName && job.snapshot.context.cwd !== context.cwd) ||
+            !["pending", "paused"].includes(job.status)) continue;
+        const { projectDiscoveryPending: _, ...previous } = job.snapshot.context;
+        job.snapshot.context = { ...previous, project: context.project,
+          ...("projects" in context ? { projects: context.projects } : {}) };
+        changed = true;
+      }
+      return { value: undefined, changed };
+    });
+  }
+
   async listPending(
     identity: QueueIdentity = this.defaultIdentity(),
   ): Promise<QueueJob[]> {
@@ -1129,9 +1178,11 @@ export class DurableQueueStore {
       const currentTime = this.now().getTime();
       const discarded: Array<{ jobId: string; error: string }> = [];
       let changed = false;
-      for (const job of state.jobs) {
-        if (!identityMatches(job, identity)) continue;
-        if (!this.matchesBranch(job, branch)) continue;
+      // No worker attempt is spent while discovery or an unknown save blocks a queued turn.
+      const eligible = state.jobs.filter((job) =>
+        identityMatches(job, identity) && this.matchesBranch(job, branch) &&
+        !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite);
+      for (const job of eligible) {
         if (job.status === "running") {
           if (!this.runningJobCanBeRecovered(job, currentTime)) continue;
           job.status = "pending";
@@ -1139,6 +1190,15 @@ export class DurableQueueStore {
           changed = true;
         }
         if (job.status !== "pending" && job.status !== "paused") continue;
+        // A pre-dispatch receipt with no recorded outcome cannot authorize automatic replay,
+        // even if the last worker could not persist its cancellation or exhausted its attempts.
+        if (interruptedWrite(job)) {
+          job.status = "paused";
+          job.uncertainWrite = "Earlier save outcome unknown; automatic retry blocked";
+          job.lastError = job.uncertainWrite;
+          changed = true;
+          continue;
+        }
         if (job.attempts >= this.maxAttempts) {
           job.status = "failed";
           discarded.push({ jobId: job.id,
@@ -1187,6 +1247,26 @@ export class DurableQueueStore {
     job.startedAt = nowIso(this.now);
     job.ownerPid = process.pid;
     job.updatedAt = job.startedAt;
+  }
+
+  /** Lifecycle cancellation releases a claim without consuming a failure attempt. */
+  async cancel(
+    jobId: string, interruptedModelCall = false, uncertainWrite?: string,
+  ): Promise<void> {
+    await this.mutate((state) => {
+      const job = state.jobs.find((item) => item.id === jobId);
+      if (job?.status !== "running") return { value: undefined, changed: false };
+      job.status = "paused";
+      job.attempts = Math.max(0, job.attempts - 1);
+      if (interruptedModelCall) job.callCount = Math.max(0, job.callCount - 1);
+      if (uncertainWrite !== undefined) {
+        job.uncertainWrite = scrubDiagnostic(uncertainWrite);
+        job.lastError = job.uncertainWrite;
+      }
+      job.ownerPid = undefined;
+      job.updatedAt = nowIso(this.now);
+      return { value: undefined };
+    });
   }
 
   async checkpoint(jobId: string, patch: QueueCheckpoint): Promise<QueueJob>;
@@ -1277,6 +1357,7 @@ export class DurableQueueStore {
   private applyCheckpointPatch(job: StoredQueueJob, patch: QueueCheckpoint): void {
     if (patch.status) job.status = patch.status;
     if (patch.callCount !== undefined) job.callCount = patch.callCount;
+    if (patch.supersession !== undefined) job.supersession = patch.supersession;
     if (patch.extractedCandidates !== undefined) {
       job.extractedCandidates = sanitizeValue(
         jsonSnapshot(patch.extractedCandidates),
@@ -1394,11 +1475,17 @@ export class DurableQueueStore {
       .digest("hex")
       .slice(0, 32);
     const workerPath = join(this.directory, `worker-${workerName}.lock`);
+    let lock: FileLock;
     try {
-      return await this.withFileLock(workerPath, operation);
+      lock = await this.acquireFileLock(workerPath);
     } catch (error) {
       if (error instanceof QueueBusyError) return undefined;
       throw error;
+    }
+    try {
+      return await operation();
+    } finally {
+      await lock.release();
     }
   }
 

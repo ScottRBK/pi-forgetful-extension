@@ -606,6 +606,9 @@ test(
     };
     await session.bindExtensions({});
 
+    // Startup returns before project discovery; recall assertions require a ready runtime.
+    await session.prompt("/forgetful status");
+
     // Act.
     await session.prompt("Which database did we choose?");
     await firstRecallWake;

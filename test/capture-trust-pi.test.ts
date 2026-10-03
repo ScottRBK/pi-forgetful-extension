@@ -225,6 +225,8 @@ test(
     });
     t.after(() => session.dispose());
     await session.bindExtensions({});
+    // Settle project discovery before exercising capture against the mapped project.
+    await session.prompt("/forgetful status");
 
     await session.prompt(
       "We decided to retain this trust revocation regression marker.",

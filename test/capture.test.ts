@@ -3154,7 +3154,12 @@ test("partial resolution never repeats a create whose outcome or ID checkpoint i
       instanceId: "instance-a", queue: new DurableQueueStore({ directory: f.directory,
         instanceId: "instance-a" }) });
     await assert.rejects(restarted.resolveConflict(f.conflict.id, f.input),
-      /connection lost after create/);
+      (error: Error) => {
+        assert.match(error.message, /Earlier save outcome unknown; automatic retry blocked/);
+        assert.ok(error.message.includes("connection lost after create"));
+        assert.equal((error.cause as Error)?.message, "connection lost after create");
+        return true;
+      });
     assert.equal(f.client.created.length, 1);
     assert.equal(f.client.superseded.length, 0);
     assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");

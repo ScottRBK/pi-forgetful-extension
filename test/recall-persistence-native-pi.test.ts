@@ -275,6 +275,8 @@ async function openHarness(t: TestContext, root: string): Promise<Harness> {
   });
   t.after(() => session.dispose());
   await session.bindExtensions({});
+  // Startup returns before project discovery; recall assertions require a ready runtime.
+  await session.prompt("/forgetful status");
   return {
     session, sessionManager, payloads, control,
     resultEntries: () => sessionManager.getEntries().flatMap((entry) =>

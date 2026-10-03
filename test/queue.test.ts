@@ -1117,3 +1117,26 @@ test("revisiting the same fork point cannot reuse an incompatible fallback branc
     assert.equal(await queue.resolveBranchId("session-1", ["root", "fork", "first-child"],
       "session-1:first-child"), forkBranchId);
   });
+
+test("stopping a failed candidate does not block other candidates after restart", async (t) => {
+  // Arrange: a definite resource failure was deliberately stopped, not left for another write.
+  const directory = await mkdtemp(join(tmpdir(), "queue-stopped-candidate-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const { jobId } = await queue.enqueue(snapshot());
+  await queue.claimNext();
+  await queue.checkpoint(jobId, { status: "paused", candidateOutcomes: {
+    stopped: { stage: "execution-stopped", executionFailure: null,
+      knowledgeState: { pendingCreates: [{ key: "entity", kind: "entity",
+        error: "The service rejected this create" }] } },
+    remaining: { stage: "planned" },
+  } });
+  // Act: the next worker uses only durable state, not the previous worker's objects.
+  const restarted = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const claimed = await restarted.claimNext();
+  // Assert: a final stop leaves the remaining candidate eligible without replaying the stopped one.
+  assert.equal(claimed?.id, jobId);
+  assert.equal(claimed?.uncertainWrite, undefined);
+  assert.equal((claimed?.candidateOutcomes.stopped as { stage: string }).stage,
+    "execution-stopped");
+});

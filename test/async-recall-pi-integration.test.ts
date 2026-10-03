@@ -445,6 +445,8 @@ test(
     });
     t.after(() => session.dispose());
     await session.bindExtensions({});
+    // Startup returns before project discovery; recall assertions require a ready runtime.
+    await session.prompt("/forgetful status");
     const priorDecision = `Important first decision. ${"Details. ".repeat(600)} Final detail.`;
     sessionManager.appendMessage({
       role: "user", content: priorDecision, timestamp: Date.now(),

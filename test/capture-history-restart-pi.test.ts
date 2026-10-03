@@ -203,6 +203,8 @@ test("real Pi restart reuses same-path capture summary branch", { timeout: 25_00
         }
       };
       await session.bindExtensions({});
+      // Await discovery for fresh and reopened sessions before capturing project history.
+      await session.prompt("/forgetful status");
       sessionFile = manager.getSessionFile();
       assert.ok(sessionFile);
       return { session, manager };

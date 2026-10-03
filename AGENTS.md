@@ -16,9 +16,13 @@ The intended experience requires no memory commands during normal work:
 - `forgetful_recall_wait` and foreground tool results use normal Pi tool-result persistence;
 - the main agent can search memories, inspect rich knowledge, initialise projects, and write
   evidenced repository knowledge through bounded tools;
+- startup does local setup only; project discovery and recovery run in the background, with one
+  transient activity widget; early settled turns are queued durably until discovery completes;
 - settled capture pins session/branch history, reusing a successful historical summary plus
-  recent messages; source evidence remains durable until success or three failed/paused attempts,
-  after which the job and associated conflicts are discarded with a final UI outcome;
+  recent messages; source evidence remains durable until success or three failed/permission-paused
+  attempts; ordinary lifecycle cancellation does not consume the failure allowance;
+- shutdown cancels capture models/reads and allows accepted writes a 500 ms receipt grace period;
+  uncertain mutations stay pending without replay; disk checkpoints and lock release are awaited;
 - snapshots remain separate from the 50 MiB queue index; watermarks prevent replay independently
   of context summarisation, and completed jobs retain only small outcome records;
 - capture can inspect sources read-only; recall can explore only stored Forgetful knowledge;

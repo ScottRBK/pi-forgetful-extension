@@ -271,6 +271,8 @@ export interface WorkContext {
   cwd: string;
   repoName?: string;
   project?: Project;
+  /** Local capture queued before the server could verify its project mapping. */
+  projectDiscoveryPending?: boolean;
   sessionId: string;
   branchId: string;
 }

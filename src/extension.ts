@@ -14,7 +14,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, UserMessage } from "@earendil-works/pi-ai";
-import { Loader, Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
+import { ForgetfulActivity } from "./activity.ts";
 import type {
   CaptureSnapshot,
   EvidenceEntry,
@@ -71,12 +72,6 @@ import {
   executeKnowledgeRead, executeKnowledgeWrite,
 } from "./knowledge-tools.ts";
 
-class RecallLoader extends Loader {
-  dispose(): void {
-    this.stop();
-  }
-}
-
 const FORGETFUL_SETUP_GUIDANCE = [
   "Need a running Forgetful endpoint?",
   "Ask your coding agent to read the Forgetful setup skill:",
@@ -102,6 +97,12 @@ const AUTOMATIC_RECALL_PENDING_CONTEXT = [
 ].join("\n");
 
 const RECALL_RESULT_CUSTOM_TYPE = "forgetful_recall_result";
+
+const CAPTURE_ACTIVITY_LABELS = {
+  reviewing: "reviewing session…",
+  saving: "saving to Forgetful…",
+  checking: "checking previous save…",
+};
 
 const RECALL_BACKGROUND_CONTINUATION = [
   "[Forgetful automatic recall background continuation]",
@@ -405,6 +406,7 @@ interface RecallActivity {
 
 interface Runtime {
   logger: FileLogger;
+  activity: ForgetfulActivity;
   sessionId: string;
   generation: number;
   cwd: string;
@@ -413,16 +415,21 @@ interface Runtime {
   model?: PiMemoryModel;
   recall?: RecallServicePort;
   capture?: CaptureServicePort;
+  queue: DurableQueueStore;
   context: ExtensionWorkContext;
   branchId: string;
   baselineEntryId: string | null;
   lastCaptureEntryId?: string;
   pendingCaptureJobs: Map<string, CaptureFeedbackState>;
+  recoveryResult?: CaptureCheckpointResult;
   captureFeedbackFlush?: Promise<void>;
   captureCheckpointTail?: Promise<void>;
   settledCaptureTail?: Promise<void>;
   activeResolutions: Set<Promise<unknown>>;
   lifecycleController: AbortController;
+  initialization?: Promise<void>;
+  ready: boolean;
+  discoveryError?: unknown;
   lastRecall?: RecallActivity;
   skipNextCapture: boolean;
   notifiedConflictIds: Set<string>;
@@ -1657,9 +1664,12 @@ export function createForgetfulExtension(
     const enrichRuntimeContext = async (
       context: ExtensionWorkContext,
       client: ForgetfulClient,
+      signal?: AbortSignal,
+      onUnavailable?: (error: unknown) => void,
     ): Promise<ExtensionWorkContext> => {
       try {
-        const projects = await client.listProjects(context.repoName);
+        signal?.throwIfAborted();
+        const projects = await client.listProjects(context.repoName, signal);
         const exact = context.repoName
           ? projects.filter((project) => project.repo_name === context.repoName)
           : [];
@@ -1667,19 +1677,22 @@ export function createForgetfulExtension(
         if (exact.length > 0) choices = exact;
         if (context.repoName && exact.length !== 1) {
           try {
-            choices = await client.listProjects();
+            signal?.throwIfAborted();
+            choices = await client.listProjects(undefined, signal);
           } catch {
             choices = projects;
           }
         }
+        const { projectDiscoveryPending: _, ...local } = context;
         const enriched: ExtensionWorkContext = {
-          ...context,
+          ...local,
           projects: choices.slice(0, 100),
         };
         if (exact.length === 1) enriched.project = exact[0];
         return enriched;
-      } catch {
-        // Global recall remains usable when project discovery is unavailable.
+      } catch (error) {
+        // Global recall remains usable; queued capture still awaits successful discovery.
+        if (!signal?.aborted) onUnavailable?.(error);
         return context;
       }
     };
@@ -1700,19 +1713,9 @@ export function createForgetfulExtension(
           context = await discoverWorkContext(pi, ctx, branchId);
         }
       }
-      if (memoryReady && !context.project && client) {
-        context = await enrichRuntimeContext(context, client);
-      }
-      if (memoryReady && config.scope === "project" && !context.project) {
-        showWarningOnce(
-          ctx,
-          config,
-          "missing-project",
-          "Forgetful project scope has no trusted project mapping; " +
-            "project recall and capture are paused.",
-        );
-      }
-      return context;
+      // Only local discovery here. Early turns can be queued before the server responds.
+      return memoryReady && !context.project
+        ? { ...context, projectDiscoveryPending: true } : context;
     };
 
     const resolveRuntimeRecall = (
@@ -1732,19 +1735,19 @@ export function createForgetfulExtension(
 
     const createRuntimeCapture = (
       ctx: ExtensionContext,
-      config: ForgetfulConfig,
-      client: ForgetfulClient | undefined,
-      model: PiMemoryModel | undefined,
-      instanceId: string,
-      queueDirectory: string,
-      logger: FileLogger,
+      prepared: PreparedRuntime,
+      activity: ForgetfulActivity,
     ): CaptureServicePort | undefined => {
+      const { config, client, model, queueDirectory, logger } = prepared;
+      const instanceId = makeInstanceId(config);
       if (dependencies.capture) return dependencies.capture;
       if (dependencies.createCapture)
         return dependencies.createCapture(config, client, model);
       if (!client || !model) return undefined;
       return new CaptureService({
         logger,
+        onActivity: (phase) => activity.set("capture",
+          phase ? CAPTURE_ACTIVITY_LABELS[phase] : undefined),
         queue: new DurableQueueStore({
           directory: queueDirectory,
           instanceId,
@@ -1772,12 +1775,61 @@ export function createForgetfulExtension(
       });
     };
 
+    const refreshQueueNotice = async (runtime: Runtime, ctx: ExtensionContext) => {
+      try {
+        const pending = (await runtime.queue.listJobMetadata()).filter((job) =>
+          ["pending", "paused", "running"].includes(job.status));
+        if (!isCurrentRuntime(runtime, ctx) || !runtime.ready) return pending;
+        const conflicts = await runtime.queue.pendingConflicts();
+        if (!isCurrentRuntime(runtime, ctx)) return pending;
+        if (pending.some((job) => job.uncertainWrite) ||
+            conflicts.some((conflict) => conflict.uncertainWrite)) {
+          runtime.activity.notice("previous save needs checking");
+          showWarningOnce(ctx, runtime.config, "uncertain-write",
+            "Forgetful could not confirm an earlier save. Work is kept locally and will not " +
+            "be repeated automatically. Check the service and /forgetful status.");
+        } else if (runtime.context.projectDiscoveryPending) {
+          runtime.activity.notice(pending.length > 0
+            ? "unavailable — queued work kept locally" : "project lookup unavailable");
+          showWarningOnce(ctx, runtime.config, "project-discovery-failed",
+            `Forgetful project lookup failed: ${boundedErrorDiagnostic(runtime.discoveryError)}. ` +
+            "Pi can continue; capture awaits discovery on a later start.");
+        } else {
+          const failed = pending.find((job) => job.status !== "running" && job.lastError);
+          runtime.activity.notice(failed ? "capture retry pending — work kept locally" : undefined);
+          if (failed) showWarningOnce(ctx, runtime.config, `capture-failed:${failed.id}`,
+            `Forgetful capture retry pending: ${boundedErrorDiagnostic(failed.lastError)}. ` +
+            "Queued work is kept locally.");
+        }
+        return pending;
+      } catch (error) {
+        runtime.logger.emit("debug", "activity.queue_unavailable", {
+          error: boundedErrorDiagnostic(error),
+        });
+        return [];
+      }
+    };
+
+    const reportDiscardedCapture = (
+      runtime: Runtime, ctx: ExtensionContext, result?: CaptureCheckpointResult,
+    ): void => {
+      const discarded = (result?.discardedJobs ?? []).filter((item) =>
+        runtime.config.verbosity !== "debug" || !runtime.pendingCaptureJobs.has(item.jobId));
+      // Debug live-job feedback already reports its final diagnostic once.
+      if (!discarded.length || !isCurrentRuntime(runtime, ctx)) return;
+      showWarningOnce(ctx, runtime.config,
+        `capture-discarded:${discarded.map((item) => item.jobId).join(",")}`,
+        `Forgetful capture discarded ${discarded.length} ` +
+        `${discarded.length === 1 ? "task" : "tasks"} after repeated failures. ` +
+        "That work was not fully saved to Forgetful; the original Pi conversation is unchanged.");
+    };
+
     const prepareRuntime = async (
       ctx: ExtensionContext,
     ): Promise<PreparedRuntime> => {
-      let config = await loadRuntimeConfig(ctx);
       const sessionId = ctx.sessionManager.getSessionId();
       const currentLeaf = ctx.sessionManager.getLeafId();
+      let config = await loadRuntimeConfig(ctx);
       const fallbackBranchId = `${sessionId}:${currentLeaf ?? "root"}`;
       const resolvedClient = await resolveRuntimeClient(ctx, config);
       config = resolvedClient.config;
@@ -1849,9 +1901,72 @@ export function createForgetfulExtension(
       };
     };
 
+    const waitForInitialization = async (
+      runtime: Runtime, ctx: ExtensionContext, signal?: AbortSignal,
+    ): Promise<void> => {
+      const signals = [signal, ctx.signal, runtime.lifecycleController.signal];
+      if (signals.some((value) => value?.aborted))
+        throw new Error("Forgetful initialization wait was cancelled.");
+      if (runtime.ready) return;
+      const outcome = await boundedWait(runtime.initialization ?? Promise.resolve(), signals,
+        runtime.config.instance.timeoutMs * 2 + 1_000);
+      if (outcome.kind === "completed") return;
+      if (outcome.kind === "failed") throw outcome.error;
+      throw new Error(outcome.kind === "aborted"
+        ? "Forgetful initialization wait was cancelled."
+        : "Forgetful initialization is still running in the background.");
+    };
+
+    const initializeRuntimeContext = async (
+      runtime: Runtime, ctx: ExtensionContext,
+    ): Promise<void> => {
+      if (runtime.context.projectDiscoveryPending && runtime.client) {
+        runtime.activity.set("startup", "starting…");
+        const context = await enrichRuntimeContext(
+          runtime.context, runtime.client, runtime.lifecycleController.signal,
+          (error) => { runtime.discoveryError = error; },
+        );
+        if (!isCurrentRuntime(runtime, ctx)) return;
+        runtime.context = context;
+        runtime.activity.set("startup");
+      }
+      if (!isCurrentRuntime(runtime, ctx)) return;
+      runtime.ready = true;
+      if (runtime.config.enabled && runtime.config.scope === "project" &&
+          !runtime.context.project && !runtime.context.projectDiscoveryPending) {
+        showWarningOnce(ctx, runtime.config, "missing-project",
+          "Forgetful project scope has no trusted project mapping; " +
+          "project recall and capture are paused.");
+      }
+    };
+
+    const recoverRuntimeCapture = async (
+      runtime: Runtime, ctx: ExtensionContext,
+    ): Promise<void> => {
+      if (!isCurrentRuntime(runtime, ctx) || !runtime.config.enabled) return;
+      await runtime.queue.completeProjectDiscovery(runtime.context);
+      if (!isCurrentRuntime(runtime, ctx)) return;
+      const pending = (await refreshQueueNotice(runtime, ctx)).filter((job) =>
+        !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite);
+      if (!isCurrentRuntime(runtime, ctx)) return;
+      if (pending.length > 0) runtime.activity.set("recovery",
+        `resuming ${pending.length} queued ${pending.length === 1 ? "task" : "tasks"}…`);
+      try {
+        const result = await runtime.capture?.checkpoint?.();
+        runtime.recoveryResult = result;
+        reportDiscardedCapture(runtime, ctx, result);
+        await handoffPendingConflicts(runtime, ctx);
+      } finally {
+        runtime.activity.set("recovery");
+        await refreshQueueNotice(runtime, ctx);
+      }
+    };
+
     const loadRuntime = async (
       ctx: ExtensionContext,
       sessionEvent?: SessionStartEvent,
+      waitForDiscovery = true,
+      signal?: AbortSignal,
     ): Promise<Runtime> => {
       if (state.runtime?.lifecycleController.signal.aborted)
         throw new Error("Forgetful runtime is shutting down");
@@ -1860,24 +1975,25 @@ export function createForgetfulExtension(
         !sessionEvent &&
         state.runtime.sessionId === ctx.sessionManager.getSessionId() &&
         state.runtime.cwd === ctx.cwd
-      )
-        return state.runtime;
-      if (state.loading) return state.loading;
+      ) {
+        const runtime = state.runtime;
+        if (waitForDiscovery) await waitForInitialization(runtime, ctx, signal);
+        return runtime;
+      }
+      if (state.loading) {
+        const runtime = await state.loading;
+        if (waitForDiscovery) await waitForInitialization(runtime, ctx, signal);
+        return runtime;
+      }
       const generation = state.generation;
       let loading: Promise<Runtime>;
       const operation = (async () => {
         const prepared = await prepareRuntime(ctx);
-        const capture = createRuntimeCapture(
-          ctx,
-          prepared.config,
-          prepared.client,
-          prepared.model,
-          makeInstanceId(prepared.config),
-          prepared.queueDirectory,
-          prepared.logger,
-        );
+        const activity = new ForgetfulActivity(ctx);
+        const capture = createRuntimeCapture(ctx, prepared, activity);
         const runtime: Runtime = {
           logger: prepared.logger,
+          activity,
           sessionId: prepared.sessionId,
           generation,
           cwd: ctx.cwd,
@@ -1886,6 +2002,12 @@ export function createForgetfulExtension(
           model: prepared.model,
           recall: prepared.recall,
           capture,
+          queue: new DurableQueueStore({
+            directory: prepared.queueDirectory,
+            instanceId: makeInstanceId(prepared.config),
+            endpoint: prepared.config.instance.baseUrl,
+            accountId: makeInstanceId(prepared.config),
+          }),
           context: prepared.context,
           branchId: prepared.branchId,
           baselineEntryId: prepared.currentLeaf,
@@ -1893,30 +2015,35 @@ export function createForgetfulExtension(
           pendingCaptureJobs: new Map(),
           activeResolutions: new Set(),
           lifecycleController: new AbortController(),
+          ready: !prepared.context.projectDiscoveryPending,
           notifiedConflictIds: new Set(),
         };
         if (state.generation !== generation) {
+          activity.close();
           await capture?.stop?.(prepared.sessionId, prepared.branchId);
+          await prepared.logger.close();
           throw new Error("Forgetful runtime superseded");
         }
         state.skipNextCapture = false;
         state.runtime = runtime;
         runtime.logger.emit("info", "session.started", { branchId: runtime.branchId });
-        if (prepared.config.enabled && capture?.checkpoint) {
-          runtime.captureCheckpointTail = Promise.resolve(capture.checkpoint())
-            .then(() => handoffPendingConflicts(runtime, ctx))
-            .catch((error) => {
-              if (!isCurrentRuntime(runtime, ctx)) return;
+        runtime.initialization = initializeRuntimeContext(runtime, ctx);
+        // Recovery and live checkpoints share one tail; neither blocks Pi startup.
+        runtime.captureCheckpointTail = runtime.initialization
+          .then(() => recoverRuntimeCapture(runtime, ctx))
+          .catch((error) => {
+            if (isCurrentRuntime(runtime, ctx))
               logFailure(ctx, runtime.config, "Forgetful recovery skipped", error);
-            });
-        }
+          });
         return runtime;
       })();
       loading = operation.finally(() => {
         if (state.loading === loading) state.loading = undefined;
       });
       state.loading = loading;
-      return loading;
+      const runtime = await loading;
+      if (waitForDiscovery) await waitForInitialization(runtime, ctx, signal);
+      return runtime;
     };
 
     const workContext = async (
@@ -1933,13 +2060,24 @@ export function createForgetfulExtension(
 
     const drainRuntime = async (runtime: Runtime): Promise<void> => {
       runtime.lifecycleController.abort();
+      runtime.activity.close();
       cancelAllRecallJobs(runtime);
       await runtime.capture?.stop?.(runtime.sessionId, runtime.branchId);
+      await runtime.initialization;
       // A settled callback may still enqueue a checkpoint, so read that tail after it settles.
       await runtime.settledCaptureTail;
       await runtime.captureCheckpointTail;
       await Promise.allSettled(runtime.activeResolutions);
       await stopFileLogging(runtime);
+    };
+
+    const warmRuntime = (ctx: ExtensionContext): void => {
+      const generation = state.generation;
+      void loadRuntime(ctx, undefined, false).catch((error) => {
+        if (state.generation === generation)
+          notify(ctx, `Forgetful background setup failed: ${boundedErrorDiagnostic(error)}`,
+            "warning");
+      });
     };
 
     const resetRuntime = async (
@@ -1990,7 +2128,6 @@ export function createForgetfulExtension(
       runtime.lastCaptureEntryId = finalEntryId ?? entryIds.at(-1);
     };
 
-    let visibleRecalls = 0;
     const runRecall = async (
       ctx: ExtensionContext,
       pending: RecallJob,
@@ -2007,22 +2144,8 @@ export function createForgetfulExtension(
           reason: "memory-model-not-configured",
         };
       }
-      const showWidget = ctx.mode === "tui";
-      if (showWidget) {
-        visibleRecalls += 1;
-        if (visibleRecalls === 1) {
-          ctx.ui.setWidget(
-            "forgetful-recall",
-            (tui, theme) => new RecallLoader(
-              tui,
-              (frame) => theme.fg("accent", frame),
-              (message) => theme.fg("muted", message),
-              "Forgetful: recalling...",
-            ),
-            { placement: "aboveEditor" },
-          );
-        }
-      }
+      const activityKey = `recall:${jobId}`;
+      runtime.activity.set(activityKey, "finding relevant memories…");
       try {
         const context = contextOverride ?? await workContext(ctx, runtime);
         return await runtime.recall.recall({
@@ -2053,8 +2176,7 @@ export function createForgetfulExtension(
           },
         });
       } finally {
-        if (showWidget && --visibleRecalls === 0)
-          ctx.ui.setWidget("forgetful-recall", undefined);
+        runtime.activity.set(activityKey);
       }
     };
 
@@ -2410,7 +2532,10 @@ export function createForgetfulExtension(
           }),
         });
         if (result.status === "ready") {
-          const enqueueResult = await capture.enqueue(result.snapshot);
+          runtime.activity.set("queue", "saving work locally…");
+          let enqueueResult: unknown;
+          try { enqueueResult = await capture.enqueue(result.snapshot); }
+          finally { runtime.activity.set("queue"); }
           const jobId = captureWasQueued(enqueueResult)
             ? captureJobId(enqueueResult)
             : undefined;
@@ -2422,16 +2547,26 @@ export function createForgetfulExtension(
             });
           }
           runtime.lastCaptureEntryId = result.snapshot.finalEntryId;
+          await refreshQueueNotice(runtime, ctx);
           const previousCheckpoint =
             runtime.captureCheckpointTail ?? Promise.resolve();
           const checkpoint = previousCheckpoint.then(async () => {
+            if (!isCurrentRuntime(runtime, ctx)) return;
+            // Recovery may already have attempted this turn while discovery was finishing.
+            if (jobId && runtime.recoveryResult?.processedJobIds.includes(jobId)) {
+              await reportCaptureOutcome(runtime, ctx, capture, runtime.recoveryResult);
+              return;
+            }
+            await runtime.queue.completeProjectDiscovery(runtime.context);
             if (!isCurrentRuntime(runtime, ctx)) return;
             const checkpointResult = await capture.checkpoint?.({
               sessionId: context.sessionId,
               branchId: context.branchId,
             });
+            reportDiscardedCapture(runtime, ctx, checkpointResult);
             await reportCaptureOutcome(runtime, ctx, capture, checkpointResult);
             await handoffPendingConflicts(runtime, ctx);
+            await refreshQueueNotice(runtime, ctx);
           });
           runtime.captureCheckpointTail = checkpoint.catch((error) => {
             if (!isCurrentRuntime(runtime, ctx)) return;
@@ -2476,16 +2611,15 @@ export function createForgetfulExtension(
       const previous = state.runtime;
       if (previous) await drainRuntime(previous);
       state.runtime = undefined;
-      const runtime = await loadRuntime(ctx, event);
-      runtime.baselineEntryId = ctx.sessionManager.getLeafId();
+      const runtime = await loadRuntime(ctx, event, false);
       runtime.lastCaptureEntryId = undefined;
       runtime.skipNextCapture = false;
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
       try {
-        const runtime = await loadRuntime(ctx);
-        if (!isCurrentRuntime(runtime, ctx)) return;
+        const runtime = await loadRuntime(ctx, undefined, false);
+        if (!isCurrentRuntime(runtime, ctx) || !runtime.ready) return;
         cancelQueuedRecalls(runtime);
         if (!runtime.config.enabled || !runtime.recall || !runtime.model) return;
         const pending = startAutomaticRecall(ctx, runtime, event.prompt);
@@ -2514,9 +2648,9 @@ export function createForgetfulExtension(
       if (!event.streamingBehavior) return { action: "continue" as const };
       const runtime = state.runtime;
       if (!runtime) {
-        void loadRuntime(ctx)
+        void loadRuntime(ctx, undefined, false)
           .then((loaded) => {
-            if (!isCurrentRuntime(loaded, ctx) || !loaded.config.enabled) return;
+            if (!isCurrentRuntime(loaded, ctx) || !loaded.ready || !loaded.config.enabled) return;
             startRecallJob(ctx, loaded, event.text, "queued");
           })
           .catch((error) => {
@@ -2525,7 +2659,7 @@ export function createForgetfulExtension(
           });
         return { action: "continue" as const };
       }
-      if (isCurrentRuntime(runtime, ctx) && runtime.config.enabled)
+      if (isCurrentRuntime(runtime, ctx) && runtime.ready && runtime.config.enabled)
         startRecallJob(ctx, runtime, event.text, "queued");
       return { action: "continue" as const };
     });
@@ -2585,11 +2719,13 @@ export function createForgetfulExtension(
       state.generation += 1;
       state.loading = undefined;
       const runtime = state.runtime;
-      if (!runtime) return;
-      await drainRuntime(runtime);
-      state.pendingQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
+      if (runtime) {
+        await drainRuntime(runtime);
+        state.pendingQueuedRecall.delete(sessionKey(ctx, runtime.branchId));
+      }
       state.skipNextCapture = false;
       state.runtime = undefined;
+      warmRuntime(ctx);
     });
 
     pi.on("session_shutdown", async (_event, ctx) => {
@@ -2607,7 +2743,7 @@ export function createForgetfulExtension(
     const foregroundKnowledge = async (
       ctx: ExtensionContext, signal: AbortSignal | undefined, writing: boolean,
     ) => {
-      const runtime = await loadRuntime(ctx);
+      const runtime = await loadRuntime(ctx, undefined, true, signal);
       const activeSignal = AbortSignal.any(
         [signal, ctx.signal].filter((value): value is AbortSignal => Boolean(value)),
       );
@@ -2769,7 +2905,7 @@ export function createForgetfulExtension(
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         try {
-          const runtime = await loadRuntime(ctx);
+          const runtime = await loadRuntime(ctx, undefined, true, signal);
           if (!runtime.client) {
             throw new Error("Forgetful project setup is unavailable.");
           }
@@ -2823,7 +2959,9 @@ export function createForgetfulExtension(
             repoName,
             project,
             projects: [project],
+            projectDiscoveryPending: false,
           };
+          await refreshQueueNotice(runtime, ctx);
           return {
             content: [
               {
@@ -2862,7 +3000,7 @@ export function createForgetfulExtension(
       },
       async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
         try {
-          const runtime = await loadRuntime(ctx);
+          const runtime = await loadRuntime(ctx, undefined, true, signal);
           const key = sessionKey(ctx, runtime.branchId);
           const boundary = latestBranchUserEntry(ctx);
           const latestPrompt = boundary?.prompt;
@@ -2985,7 +3123,7 @@ export function createForgetfulExtension(
         if (typeof params.query !== "string" || !params.query.trim())
           throw new Error("query must be non-empty text and cannot be whitespace only.");
         try {
-          const runtime = await loadRuntime(ctx);
+          const runtime = await loadRuntime(ctx, undefined, true, signal);
           if (!runtime.recall || !runtime.config.enabled) {
             throw new Error("Forgetful recall is unavailable.");
           }
@@ -3074,7 +3212,7 @@ export function createForgetfulExtension(
         ),
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        const runtime = await loadRuntime(ctx);
+        const runtime = await loadRuntime(ctx, undefined, true, signal);
         if (!runtime.capture?.resolveConflict) {
           throw new Error("No pending Forgetful conflict can be resolved.");
         }
@@ -3178,9 +3316,28 @@ export function createForgetfulExtension(
       if (!runtime.context.project && runtime.client) {
         const context = await discoverWorkContext(pi, ctx, runtime.branchId);
         if (context.repoName) {
-          const enriched = await enrichRuntimeContext(context, runtime.client);
-          if (state.runtime === runtime) runtime.context = enriched;
+          const enriched = await enrichRuntimeContext(
+            { ...context, projectDiscoveryPending: true }, runtime.client,
+            runtime.lifecycleController.signal,
+          );
+          if (isCurrentRuntime(runtime, ctx) && !enriched.projectDiscoveryPending) {
+            runtime.context = enriched;
+            await refreshQueueNotice(runtime, ctx);
+          }
         }
+      }
+      let uncertainText = "";
+      try {
+        const pending = await runtime.queue.listJobMetadata();
+        const conflicts = await runtime.queue.pendingConflicts();
+        const uncertain = [...pending, ...conflicts].filter((item) => item.uncertainWrite);
+        if (uncertain.length > 0)
+          uncertainText = `; uncertain saves ${uncertain.length} (automatic retry paused)`;
+      } catch (error) {
+        uncertainText = "; uncertain saves unavailable";
+        runtime.logger.emit("debug", "status.queue_unavailable", {
+          error: boundedErrorDiagnostic(error),
+        });
       }
       const conflictText = await pendingConflictStatus(ctx, runtime);
       const diagnosticText = await captureDiagnosticStatus(runtime);
@@ -3199,7 +3356,7 @@ export function createForgetfulExtension(
               : "unresolved (run /forgetful project init)"
           }; ` +
           `model ${modelToString(runtime.config.model) ?? "not configured"}` +
-          `${recallText}${conflictText}${diagnosticText}.`,
+          `${recallText}${conflictText}${diagnosticText}${uncertainText}.`,
       );
       for (const warning of runtime.config.warnings.slice(0, 4))
         notify(ctx, warning, "warning");
@@ -3232,6 +3389,7 @@ export function createForgetfulExtension(
       }
       await writeProjectScope(ctx.cwd, value);
       await resetRuntime(ctx, runtime);
+      warmRuntime(ctx);
       notify(ctx, `Forgetful recall scope set to ${value}.`);
     };
 
@@ -3272,6 +3430,7 @@ export function createForgetfulExtension(
       await updateUserSettings(runtime.config.paths.userSettings, {
         enabled: action === "on",
       });
+      warmRuntime(ctx);
       notify(ctx, `Forgetful ${action}.`);
     };
 
@@ -3358,6 +3517,7 @@ export function createForgetfulExtension(
       await updateUserSettings(runtime.config.paths.userSettings, {
         model: modelLabel(selection),
       });
+      warmRuntime(ctx);
       notify(ctx, `Forgetful memory model set to ${modelLabel(selection)}.`);
     };
 
@@ -3422,6 +3582,7 @@ export function createForgetfulExtension(
         return;
       }
       await invalidateRuntime(ctx);
+      warmRuntime(ctx);
       notify(ctx, "Forgetful connection saved.");
       if (!current.model)
         notify(ctx, "Choose a memory model next with /forgetful model.");
@@ -3492,7 +3653,9 @@ export function createForgetfulExtension(
           repoName: context.repoName,
           project,
           projects: [project],
+          projectDiscoveryPending: false,
         };
+        await refreshQueueNotice(runtime, ctx);
         notify(
           ctx,
           `Forgetful project ${sanitizeText(project.name)} (#${project.id}) ` +

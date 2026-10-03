@@ -147,6 +147,8 @@ for (const failure of ["provider", "submission"] as const) {
           } finally { session.dispose(); }
         };
         await session.bindExtensions({});
+        // Await discovery for fresh and reopened sessions before capturing project history.
+        await session.prompt("/forgetful status");
         sessionFile = manager.getSessionFile();
         assert.ok(sessionFile, "recovery must reopen the persisted Pi session");
         return session;

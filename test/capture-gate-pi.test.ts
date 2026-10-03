@@ -126,6 +126,8 @@ test("real Pi capture rechecks trust synchronously after final endpoint authoriz
       } finally { session.dispose(); }
     };
     await session.bindExtensions({});
+    // Settle project discovery before exercising capture against the mapped project.
+    await session.prompt("/forgetful status");
 
     // Act: real settled capture, then trust revocation while the final REST read is in flight.
     await session.prompt("Queue report generation to keep browser requests short.");

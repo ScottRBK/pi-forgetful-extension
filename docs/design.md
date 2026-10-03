@@ -359,8 +359,9 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    cursor without moving backwards; it is distinct from enqueue receipts and summary progress.
    A newer completion does not mark older pending jobs finished. Release bulky search/review
    payloads and retain small UI outcomes; troubleshooting details belong in opt-in logs.
-6. Each started attempt counts, including permission-driven pauses and resumes. The third failed
-   or paused attempt discards the job, source sidecars and all associated conflicts immediately,
+6. Failed and permission-driven paused attempts count. Ordinary lifecycle cancellation releases
+   the claim without spending a failure attempt or the interrupted model-call allowance. The third
+   failed or permission-paused attempt discards the job, sidecars and associated conflicts,
    returning a final outcome for UI reporting. Exhausted model-call budgets fail rather than pause.
    Abandon unfinished knowledge rather than retaining a manual cleanup backlog. Separate
    deduplication markers prevent replay. Successful jobs may retain evidence for pending conflicts.
@@ -377,8 +378,17 @@ it cannot prevent two independent clients from racing to create the same memory.
 
 The MVP worker runs inside the live Pi process. Durable pending records can be recovered on a
 later normal start, but capture completion after Pi exits is not an MVP guarantee. External
-workers remain deferred. Shutdown and navigation drain accepted in-process work and its receipts;
-this does not promise post-exit completion or remove snapshot, watermark and retry requirements.
+workers remain deferred. Shutdown and navigation abort capture model/read requests immediately.
+Already-dispatched writes get a 500 ms response grace period before transport cancellation. Returned
+receipts are checkpointed; unacknowledged mutations stay pending with an uncertain-outcome marker
+that blocks automatic replay. Local queue writes, worker lock release and receipt checkpoints are
+awaited before teardown completes. This does not promise post-exit completion.
+
+Session loading performs only local setup before returning. Remote project discovery and recovery
+run asynchronously. Prompts do not wait for discovery, and automatic recall skips an unready turn.
+Settled turns are queued locally with a pending-discovery marker. A successful discovery updates
+only matching repository/service queue records before workers claim them. Discovery failure leaves
+those records unclaimed, without consuming attempts. No second queue or post-exit worker is added.
 
 Queue files live under the user's Pi agent directory, in `forgetful/queues/`. The directory key
 separates repository and service/account identity. Repository-controlled settings cannot redirect
@@ -576,7 +586,8 @@ The default verbosity is `warning`, showing warnings and errors:
 - lifecycle text is bounded and untrusted where it contains recalled historical context;
 - a `forgetful_recall` tool result may appear in normal Pi session history;
 - no success or empty-result popup;
-- a transient animated recall widget above the prompt editor in terminal UI mode;
+- one transient activity widget above the editor, combining startup, recall, queue and capture
+  phases with a spinner and elapsed time; it is never saved in conversation history;
 - compact rendering for agent-initiated deeper recall.
 
 `/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting

@@ -16,7 +16,7 @@ import {
 import { createForgetfulExtension } from "../src/extension.ts";
 import { decodeProviderContext, providerTools } from "./provider-context.ts";
 
-test("public Pi shutdown drains capture before the queue directory can be removed",
+test("public Pi shutdown aborts held capture without needing a model response",
   { timeout: 15_000 }, async (t) => {
     // Arrange: real Pi and disk queue; only the external REST/model services are scripted.
     const root = await mkdtemp(join(tmpdir(), "pi-capture-shutdown-"));
@@ -59,10 +59,12 @@ test("public Pi shutdown drains capture before the queue directory can be remove
     assert.ok(address && typeof address !== "string");
     await writeFile(join(agentDir, "forgetful/settings.json"), JSON.stringify({
       base_url: `http://127.0.0.1:${address.port}/api/v1`, model: "test/memory",
-      capture_mode: "auto", timeout_ms: 2000,
+      capture_mode: "auto", timeout_ms: 60_000,
     }));
     let captureStarted!: () => void;
     const held = new Promise<void>((resolve) => { captureStarted = resolve; });
+    let captureAborted!: () => void;
+    const aborted = new Promise<void>((resolve) => { captureAborted = resolve; });
     const runtime = await ModelRuntime.create({
       authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
     });
@@ -72,7 +74,7 @@ test("public Pi shutdown drains capture before the queue directory can be remove
         id, name: id, reasoning: false, input: ["text"], contextWindow: 32_000,
         maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       })),
-      streamSimple(model, context) {
+      streamSimple(model, context, options) {
         const submission = providerTools(context)[0]?.name;
         const capture = model.id === "memory" && submission === "submit_capture_candidates";
         const plan = model.id === "memory" && submission === "submit_recall_plan";
@@ -103,6 +105,12 @@ test("public Pi shutdown drains capture before the queue directory can be remove
         };
         if (capture) {
           releaseCapture = emit;
+          options?.signal?.addEventListener("abort", () => {
+            captureAborted();
+            const cancelled = { ...message, content: [], stopReason: "aborted" as const };
+            stream.push({ type: "error", reason: "aborted", error: cancelled });
+            stream.end(cancelled);
+          }, { once: true });
           captureStarted();
         } else queueMicrotask(emit);
         return stream;
@@ -135,6 +143,7 @@ test("public Pi shutdown drains capture before the queue directory can be remove
       } finally { session.dispose(); }
     };
     await session.bindExtensions({});
+    await session.prompt("/forgetful status");
     const prompt = session.prompt("We decided to use local storage for this repo.");
     await held;
     await prompt;
@@ -144,21 +153,22 @@ test("public Pi shutdown drains capture before the queue directory can be remove
 
     // Act: invoke the public lifecycle while the external capture response is still held.
     await session.abort();
-    let shutdownReturned = false;
-    shutdown = session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" })
-      .then(() => { shutdownReturned = true; });
-    await session.extensionRunner.emit({ type: "agent_settled" });
-    // Real disk I/O gives the shutdown handler a turn without a timing-based sleep.
-    const activeQueue = JSON.parse(await readFile(queueFile, "utf8"));
-    assert.equal(activeQueue.jobs[0].status, "running");
+    shutdown = session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      assert.equal(shutdownReturned, false, "shutdown must wait for the held capture worker");
-    } finally { releaseCapture?.(); }
-    await shutdown;
+      await Promise.race([
+        Promise.all([aborted, shutdown]),
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(new Error(
+            "shutdown did not abort and drain held capture")), 5_000);
+        }),
+      ]);
+    } finally { clearTimeout(deadline); }
 
     // Assert: the queue is settled and no worker locks survive the awaited shutdown.
     const settledQueue = JSON.parse(await readFile(queueFile, "utf8"));
     assert.equal(settledQueue.jobs[0].status, "paused");
+    assert.equal(settledQueue.jobs[0].attempts, 0, "lifecycle stop is not a failed attempt");
     assert.deepEqual((await readdir(join(queues, directory!)))
       .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
     assert.deepEqual(extensionErrors, []);
@@ -168,7 +178,7 @@ test("public Pi shutdown drains capture before the queue directory can be remove
     await assert.rejects(readdir(root), { code: "ENOENT" });
   });
 
-for (const outcome of ["shutdown", "navigation", "validation"] as const) {
+for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as const) {
   test(`real Pi resolution retains its receipt and service diagnostics during ${outcome}`,
     { timeout: 15_000 }, async (t) => {
       const root = await mkdtemp(join(tmpdir(), "pi-resolution-shutdown-"));
@@ -199,6 +209,8 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
         msg: "service validation details ".repeat(200) + "RAW_VALIDATION_TAIL" }] });
       let writeStarted!: () => void;
       const heldWrite = new Promise<void>((resolve) => { writeStarted = resolve; });
+      let writeAborted!: () => void;
+      const abortedWrite = new Promise<void>((resolve) => { writeAborted = resolve; });
       const server = createServer(async (request, response) => {
         response.setHeader("content-type", "application/json");
         const path = request.url ?? "";
@@ -220,6 +232,9 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           for await (const chunk of request) body += chunk;
           mutations.push("create");
           const input = JSON.parse(body);
+          response.on("close", () => {
+            if (!response.writableEnded) writeAborted();
+          });
           releaseWrite = () => {
             releaseWrite = undefined;
             if (outcome === "validation") {
@@ -253,7 +268,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
       assert.ok(address && typeof address !== "string");
       await writeFile(join(agentDir, "forgetful/settings.json"), JSON.stringify({
         base_url: `http://127.0.0.1:${address.port}/api/v1`, model: "test/memory",
-        capture_mode: "auto", timeout_ms: 2000,
+        capture_mode: "auto", timeout_ms: 60_000,
       }));
       const runtime = await ModelRuntime.create({
         authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
@@ -349,6 +364,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
         } finally { session.dispose(); }
       };
       await session.bindExtensions({});
+      await session.prompt("/forgetful status");
       await session.prompt("We decided to use local storage for this repo.");
       await handoff;
       resolveOnNextMain = true;
@@ -362,7 +378,7 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
       // Act: stop the runtime with an accepted REST write still awaiting its response.
       let navigationReturned = false;
       if (outcome !== "validation") {
-        navigation = session.extensionRunner.emit(outcome === "shutdown"
+        navigation = session.extensionRunner.emit(outcome !== "navigation"
           ? { type: "session_shutdown", reason: "quit" }
           : { type: "session_tree", oldLeafId: null, newLeafId: null })
           .then(() => { navigationReturned = true; });
@@ -373,16 +389,32 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
         assert.equal(pending.conflicts[0].replacement.creationAttempted, true);
         if (outcome !== "validation") assert.equal(navigationReturned, false,
           "teardown must await an accepted resolution and its durable receipt");
-      } finally { releaseWrite?.(); }
+      } finally { if (outcome !== "unknown") releaseWrite?.(); }
+      if (outcome === "unknown") {
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([Promise.all([abortedWrite, navigation]),
+            new Promise((_, reject) => {
+              deadline = setTimeout(() => reject(new Error(
+                "shutdown did not abort an unacknowledged resolution write")), 5_000);
+            })]);
+        } finally { clearTimeout(deadline); }
+      }
       await navigation;
       // Inspect disk immediately at the lifecycle boundary, before awaiting the main agent.
       const saved = JSON.parse(await readFile(queueFile, "utf8"));
       if (outcome !== "validation") {
-        assert.equal(saved.conflicts[0].replacementId, 99);
-        assert.equal(saved.conflicts[0].replacement.memoryId, 99);
+        if (outcome === "unknown") {
+          assert.ok(saved.conflicts[0].uncertainWrite);
+          assert.equal(saved.conflicts[0].replacement.creationAttempted, true);
+          assert.equal(saved.conflicts[0].replacement.memoryId, undefined);
+        } else {
+          assert.equal(saved.conflicts[0].replacementId, 99);
+          assert.equal(saved.conflicts[0].replacement.memoryId, 99);
+        }
         assert.equal(saved.conflicts[0].status, "pending");
         assert.deepEqual((await readdir(join(queues, directory!)))
-      .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
+          .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
       }
       await resolving;
       assert.deepEqual(mutations, ["create"], "stopped resolution must not dispatch supersession");
@@ -394,6 +426,17 @@ for (const outcome of ["shutdown", "navigation", "validation"] as const) {
           .map((part) => part.type === "text" ? part.text : "").join("\n");
         assert.ok(text.includes(validationBody), "the main model must receive the complete body");
         assert.doesNotMatch(text, /Forgetful conflict could not be resolved:/);
+        resolveOnNextMain = true;
+        await session.prompt("Check the previous resolution without duplicating a save.");
+        const blocked = session.messages.findLast((message) =>
+          message.role === "toolResult" && message.toolName === "forgetful_resolve");
+        assert.ok(blocked && blocked.role === "toolResult" && blocked.isError);
+        const blockedText = blocked.content.filter((part) => part.type === "text")
+          .map((part) => part.type === "text" ? part.text : "").join("\n");
+        assert.match(blockedText, /automatic retry blocked/);
+        assert.ok(blockedText.includes(validationBody),
+          "a blocked retry must still expose the original service diagnostic to the model");
+        assert.deepEqual(mutations, ["create"]);
       }
     });
 }

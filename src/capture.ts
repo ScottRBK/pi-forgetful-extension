@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { sanitizeCaptureConversation, sanitizeCaptureSnapshot } from "./snapshot.ts";
 import { SourceInspector } from "./source-inspection.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -18,6 +19,7 @@ import type {
   CaptureSnapshot,
   EvidenceEntry,
   ForgetfulClient,
+  KnowledgeClient,
   Memory,
   MemoryInput,
   MemoryCreateResult,
@@ -61,6 +63,7 @@ import {
   type QueueIdentity,
   type QueueJob,
   type QueueJobStatus,
+  type SupersessionReceipt,
 } from "./queue.ts";
 
 export type CaptureAction = "create" | "skip" | "supersede" | "escalate";
@@ -144,8 +147,11 @@ export interface CaptureDecision {
   entityMemoryKeys?: string[];
 }
 
+type CaptureActivityPhase = "reviewing" | "saving" | "checking";
+
 export interface CaptureServiceOptions {
   logger?: DiagnosticLogger;
+  onActivity?: (phase: CaptureActivityPhase | undefined) => void;
   queue: DurableQueueStore;
   client: ForgetfulClient;
   model: MemoryModelClient;
@@ -292,6 +298,24 @@ class InvalidCaptureOutput extends Error {
   }
 }
 
+class CaptureUncertainWrite extends CapturePause {}
+
+function blockedSave(diagnostic: string): Error {
+  // Pi forwards error.message, not cause: keep the original diagnostic visible to the model.
+  return new Error(`Earlier save outcome unknown; automatic retry blocked: ${diagnostic}`, {
+    cause: new Error(diagnostic),
+  });
+}
+
+/** Receipt errors may replace a transport error; its outcome must stay local to this operation. */
+interface CaptureOperation {
+  jobId?: string;
+  conflictId?: string;
+  uncertainWrite?: CaptureUncertainWrite;
+  supersession?: SupersessionReceipt;
+}
+
+const MUTATION_STOP_GRACE_MS = 500;
 const FINAL_STAGES = new Set([
   "created",
   "skipped",
@@ -1726,6 +1750,7 @@ function trustedAdditionalEntries(value: unknown): EvidenceEntry[] {
 export class CaptureService {
   private readonly queue: DurableQueueStore;
   private readonly client: ForgetfulClient;
+  private readonly readSavedMemory: (id: number) => Promise<Memory>;
   private readonly model: MemoryModelClient;
   private readonly identity: QueueIdentity;
   private readonly sessionId?: string;
@@ -1742,19 +1767,42 @@ export class CaptureService {
   private readonly knowledgeWriter?: KnowledgeWriter;
   private readonly logger?: DiagnosticLogger;
   private stopped = false;
+  private readonly cancellation = new AbortController();
+  private readonly interruptedModelJobs = new Set<string>();
+  private readonly operations = new AsyncLocalStorage<CaptureOperation>();
+  private readonly onActivity: CaptureServiceOptions["onActivity"];
+  private readonly activities = new Map<symbol, CaptureActivityPhase>();
+  private activityPhase?: CaptureActivityPhase;
 
   constructor(options: CaptureServiceOptions) {
     this.logger = options.logger;
+    this.onActivity = options.onActivity;
     this.queue = options.queue;
-    this.client = options.client;
-    this.knowledgeWriter = options.client.knowledge
+    this.readSavedMemory = (id) =>
+      this.read((signal) => options.client.get(id, signal), undefined, "checking");
+    this.client = this.cancellableClient(options.client);
+    this.knowledgeWriter = this.client.knowledge
       ? new KnowledgeWriter(
-          options.client.knowledge,
-          (id, signal) => options.client.get(id, signal),
+          this.client.knowledge,
+          (id, signal) => this.client.get(id, signal),
           () => this.assertWriteAllowedNow(),
         )
       : undefined;
-    this.model = options.model;
+    this.model = {
+      complete: async (request) => {
+        const signal = request.signal
+          ? AbortSignal.any([request.signal, this.cancellation.signal])
+          : this.cancellation.signal;
+        try {
+          return await this.activity("reviewing", () =>
+            options.model.complete({ ...request, signal }));
+        } catch (error) {
+          const jobId = request.diagnosticContext?.jobId;
+          if (this.stopped && jobId) this.interruptedModelJobs.add(jobId);
+          throw error;
+        }
+      },
+    };
     this.identity = {
       instanceId: options.instanceId,
       endpoint: options.endpoint,
@@ -1776,6 +1824,137 @@ export class CaptureService {
     );
     this.maxJobsPerCheckpoint = Math.max(1, options.maxJobsPerCheckpoint ?? 8);
     this.now = options.now ?? (() => new Date());
+  }
+
+  private readSignal(signal?: AbortSignal): AbortSignal {
+    const combined = signal
+      ? AbortSignal.any([signal, this.cancellation.signal]) : this.cancellation.signal;
+    combined.throwIfAborted();
+    return combined;
+  }
+
+  private async activity<T>(
+    phase: CaptureActivityPhase, operation: () => Promise<T>,
+  ): Promise<T> {
+    const token = Symbol();
+    this.activities.set(token, phase);
+    this.publishActivity();
+    try { return await operation(); }
+    finally {
+      this.activities.delete(token);
+      this.publishActivity();
+    }
+  }
+
+  private publishActivity(): void {
+    const phase = [...this.activities.values()].at(-1);
+    if (phase === this.activityPhase) return;
+    this.activityPhase = phase;
+    try { this.onActivity?.(phase); } catch {
+      // UI failures must not change capture or durable receipt handling.
+    }
+  }
+
+  private read<T>(
+    operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal,
+    phase: "reviewing" | "checking" = "reviewing",
+  ): Promise<T> {
+    return this.activity(phase, () => operation(this.readSignal(signal)));
+  }
+
+  private async mutate<T>(
+    operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal,
+  ): Promise<T> {
+    this.assertWriteAllowedNow();
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancelAfterGrace = () => {
+      timer = setTimeout(() => controller.abort(new CapturePause("capture stopped")),
+        MUTATION_STOP_GRACE_MS);
+    };
+    this.cancellation.signal.addEventListener("abort", cancelAfterGrace, { once: true });
+    try {
+      return await this.activity("saving", () => operation(signal
+        ? AbortSignal.any([signal, controller.signal]) : controller.signal));
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const uncertain = new CaptureUncertainWrite(
+          error instanceof Error ? error.message : String(error));
+        uncertain.cause = error;
+        const operation = this.operations.getStore();
+        if (operation) operation.uncertainWrite = uncertain;
+        throw uncertain;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.cancellation.signal.removeEventListener("abort", cancelAfterGrace);
+    }
+  }
+
+  /** Keep cancellation on the existing ports, including reads inside knowledge/link helpers. */
+  private cancellableClient(client: ForgetfulClient): ForgetfulClient {
+    const read = this.read.bind(this);
+    const wrapKnowledge = this.cancellableKnowledge.bind(this);
+    return {
+      search: (input, signal) => this.read((s) => client.search(input, s), signal),
+      get: (id, signal) => this.read((s) => client.get(id, s), signal),
+      listProjects: (repo, signal) => this.read((s) => client.listProjects(repo, s), signal),
+      get queryMemory(): ForgetfulClient["queryMemory"] {
+        return client.queryMemory ? (input, signal) =>
+          read((s) => client.queryMemory!(input, s), signal) : undefined;
+      },
+      get getMemoryEntityIds(): ForgetfulClient["getMemoryEntityIds"] {
+        return client.getMemoryEntityIds ? (id, signal) =>
+          read((s) => client.getMemoryEntityIds!(id, s), signal) : undefined;
+      },
+      create: (input, signal) => this.mutate((s) => client.create(input, s), signal),
+      createProject: (input, signal) => this.mutate((s) => client.createProject(input, s), signal),
+      linkProject: (id, repo, signal) =>
+        this.mutate((s) => client.linkProject(id, repo, s), signal),
+      supersede: (id, replacement, reason, signal) =>
+        this.mutate((s) => client.supersede(id, replacement, reason, s), signal),
+      get knowledge() {
+        return client.knowledge ? wrapKnowledge(client.knowledge) : undefined;
+      },
+    };
+  }
+
+  private cancellableKnowledge(client: KnowledgeClient): KnowledgeClient {
+    return {
+      searchEntities: (query, limit, signal) =>
+        this.read((s) => client.searchEntities(query, limit, s), signal),
+      getEntity: (id, signal) => this.read((s) => client.getEntity(id, s), signal),
+      getEntityMemories: (id, signal) => this.read((s) => client.getEntityMemories(id, s), signal),
+      getRelationships: (id, signal) => this.read((s) => client.getRelationships(id, s), signal),
+      listDocuments: (id, signal) => this.read((s) => client.listDocuments(id, s), signal),
+      getDocument: (id, signal) => this.read((s) => client.getDocument(id, s), signal),
+      listCodeArtifacts: (id, signal) => this.read((s) => client.listCodeArtifacts(id, s), signal),
+      getCodeArtifact: (id, signal) => this.read((s) => client.getCodeArtifact(id, s), signal),
+      listFiles: (id, signal) => this.read((s) => client.listFiles(id, s), signal),
+      getFile: (id, signal) => this.read((s) => client.getFile(id, s), signal),
+      createEntity: (input, signal) => this.mutate((s) => client.createEntity(input, s), signal),
+      updateEntity: (id, input, signal) =>
+        this.mutate((s) => client.updateEntity(id, input, s), signal),
+      linkEntityMemory: (id, memory, signal) =>
+        this.mutate((s) => client.linkEntityMemory(id, memory, s), signal),
+      createRelationship: (input, signal) =>
+        this.mutate((s) => client.createRelationship(input, s), signal),
+      createDocument: (input, signal) =>
+        this.mutate((s) => client.createDocument(input, s), signal),
+      updateDocument: (id, input, signal) =>
+        this.mutate((s) => client.updateDocument(id, input, s), signal),
+      createCodeArtifact: (input, signal) =>
+        this.mutate((s) => client.createCodeArtifact(input, s), signal),
+      updateCodeArtifact: (id, input, signal) =>
+        this.mutate((s) => client.updateCodeArtifact(id, input, s), signal),
+      updateMemory: (id, input, signal) =>
+        this.mutate((s) => client.updateMemory(id, input, s), signal),
+      linkMemories: (id, related, signal) =>
+        this.mutate((s) => client.linkMemories(id, related, s), signal),
+      ...(client.unlinkMemories ? { unlinkMemories: (id, target, signal) =>
+        this.mutate((s) => client.unlinkMemories!(id, target, s), signal) } : {}),
+    };
   }
 
   private correlation(job: QueueJob, candidateId?: string) {
@@ -1989,6 +2168,7 @@ export class CaptureService {
     candidateId: string,
     outcome: unknown,
   ): Promise<QueueJob> {
+    const uncertain = this.operations.getStore()?.uncertainWrite;
     const previousOutcome = record((await this.queue.getJob(job.id))?.candidateOutcomes[candidateId]
       ?? job.candidateOutcomes[candidateId]);
     outcome = { ...(previousOutcome?.decision ? { decision: previousOutcome.decision } : {}),
@@ -2000,7 +2180,8 @@ export class CaptureService {
       ...(previousOutcome?.creation ? { creation: previousOutcome.creation } : {}),
       ...(previousOutcome?.autoLinkedMemoryIds
         ? { autoLinkedMemoryIds: previousOutcome.autoLinkedMemoryIds } : {}),
-      ...record(outcome) };
+      ...record(outcome),
+      ...(uncertain ? { uncertainWrite: uncertain.message } : {}) };
     const updated = await this.queue.checkpoint(job.id, candidateId, clone(outcome));
     const value = record(outcome);
     const previous = record(job.candidateOutcomes[candidateId]);
@@ -2226,18 +2407,42 @@ export class CaptureService {
     replacementId: number,
     reason: string,
   ): Promise<"applied" | "already"> {
+    const operation = this.operations.getStore()!;
+    const previous = operation.supersession;
+    if (previous?.status === "completed" && previous.oldMemoryId === oldMemory.id &&
+        previous.replacementId === replacementId) return "already";
+    if (previous?.status === "started")
+      throw new CaptureUncertainWrite("Earlier save outcome unknown; automatic retry blocked");
     await this.ensureWriteAllowed(job.snapshot.mode);
     const current = await this.client.get(oldMemory.id);
     if (current.is_obsolete && current.superseded_by === replacementId) return "already";
-    const replacement = await this.client.get(replacementId);
+    const replacement = await this.readSavedMemory(replacementId);
     const destination = oldMemory.project_ids[0];
     if (!destination || current.project_ids.length !== 1 ||
         current.project_ids[0] !== destination || replacement.project_ids.length !== 1 ||
         replacement.project_ids[0] !== destination)
       throw new Error("Supersession endpoints are outside the exclusive destination project");
-    this.assertWriteAllowedNow();
-    await this.client.supersede(oldMemory.id, replacementId, reason);
+    const receipt: SupersessionReceipt = { oldMemoryId: oldMemory.id, replacementId,
+      status: "started" };
+    await this.recordSupersession(receipt);
+    try {
+      this.assertWriteAllowedNow();
+      await this.client.supersede(oldMemory.id, replacementId, reason);
+    } catch (error) {
+      if (!operation.uncertainWrite)
+        await this.recordSupersession({ ...receipt, status: "failed" });
+      throw error;
+    }
+    await this.recordSupersession({ ...receipt, status: "completed" });
     return "applied";
+  }
+
+  private async recordSupersession(receipt: SupersessionReceipt): Promise<void> {
+    const operation = this.operations.getStore()!;
+    if (operation.conflictId)
+      await this.queue.updateConflict(operation.conflictId, { supersession: receipt });
+    else await this.queue.checkpoint(operation.jobId!, { supersession: receipt });
+    operation.supersession = receipt;
   }
 
   private async finishSupersession(
@@ -3230,6 +3435,14 @@ export class CaptureService {
     currentJob: QueueJob, candidate: CaptureCandidate, error: unknown,
     result: CaptureCheckpointResult,
   ): Promise<void> {
+    const uncertain = this.operations.getStore()?.uncertainWrite ??
+      (error instanceof CaptureUncertainWrite ? error : undefined);
+    if (this.stopped || uncertain) {
+      await this.queue.cancel(currentJob.id, this.interruptedModelJobs.delete(currentJob.id),
+        uncertain?.message);
+      result.paused = true;
+      return;
+    }
     this.emit("info", error instanceof CapturePause ? "paused" : "error", {
       ...this.correlation(currentJob, candidate.id),
     });
@@ -3482,6 +3695,8 @@ export class CaptureService {
   }
 
   private async processJob(job: QueueJob, result: CaptureCheckpointResult): Promise<void> {
+    // Cancellation cannot prove an accepted mutation failed; preserve receipts for reconciliation.
+    if (job.uncertainWrite) throw new CaptureUncertainWrite(job.uncertainWrite);
     if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
     const loaded = await this.loadCandidates(job);
     let currentJob = loaded.job;
@@ -3533,7 +3748,8 @@ export class CaptureService {
       if (!job) break;
       result.processed += 1;
       result.processedJobIds.push(job.id);
-      if (!(await this.processBranchJob(job, result))) break;
+      if (!(await this.operations.run({ jobId: job.id, supersession: job.supersession },
+        () => this.processBranchJob(job, result)))) break;
     }
   }
 
@@ -3569,6 +3785,20 @@ export class CaptureService {
     error: unknown,
     started: number,
   ): Promise<void> {
+    const uncertain = this.operations.getStore()?.uncertainWrite ??
+      (error instanceof CaptureUncertainWrite ? error : undefined);
+    if (this.stopped || uncertain) {
+      try {
+        await this.queue.cancel(job.id, this.interruptedModelJobs.delete(job.id),
+          uncertain?.message);
+      } catch (checkpointError) {
+        if (!uncertain) throw checkpointError;
+        throw new AggregateError([uncertain, checkpointError],
+          "Could not persist the unknown save outcome", { cause: checkpointError });
+      }
+      result.paused = true;
+      return;
+    }
     const message = scrubError(error);
     this.emit("info", "error", {
       ...this.correlation(job), elapsedMs: performance.now() - started,
@@ -4148,7 +4378,7 @@ export class CaptureService {
       conversation: origin.snapshot.sourceConversation ?? origin.snapshot.conversation,
     }) : undefined);
     const priorId = conflict.replacement?.memoryId ?? conflict.replacementId;
-    const previous = priorId ? await this.client.get(priorId) : undefined;
+    const previous = priorId ? await this.readSavedMemory(priorId) : undefined;
     if (previous && (previous.project_ids.length !== 1 ||
         previous.project_ids[0] !== conflict.destinationProjectId))
       throw new Error("Prior replacement is outside the permitted resolution destination");
@@ -4339,7 +4569,9 @@ export class CaptureService {
     } catch (error) {
       conflict.replacement = { ...conflict.replacement!, creationAttempted: dispatched,
         creationError: error instanceof Error ? error.message : String(error) };
-      await this.queue.updateConflict(conflict.id, { replacement: conflict.replacement })
+      const uncertain = this.operations.getStore()?.uncertainWrite;
+      await this.queue.updateConflict(conflict.id, { replacement: conflict.replacement,
+        ...(uncertain ? { uncertainWrite: uncertain.message } : {}) })
         .catch(() => undefined);
       throw error;
     }
@@ -4401,16 +4633,18 @@ export class CaptureService {
     conversation?: readonly unknown[],
   ): Promise<CaptureResolveResult> {
     const requestKey = createHash("sha256").update(requestPayload).digest("hex");
+    if (conflict.uncertainWrite) throw blockedSave(conflict.uncertainWrite);
+    if (conflict.supersession?.status === "started")
+      throw blockedSave("Supersession has no recorded outcome");
+    const prior = conflict.replacement;
+    if (prior?.creationAttempted && !(prior.memoryId ??
+        (prior.requestKey ? undefined : conflict.replacementId)))
+      throw blockedSave(prior.creationError ?? "Replacement creation has no recorded outcome");
     try {
       if ((conflict.replacement && conflict.replacement.planVersion !== 1) ||
           (conflict.replacementId && !conflict.replacement))
         throw new Error(
           "Legacy implicit replacement requires model review; conflict remains pending");
-      const prior = conflict.replacement;
-      if (prior?.creationAttempted && !(prior.memoryId ??
-          (prior.requestKey ? undefined : conflict.replacementId)))
-        throw new Error(prior.creationError ??
-          "Replacement creation outcome is unknown; reconcile before retrying");
       await this.ensureWriteAllowed("auto");
       const current = await this.client.get(conflict.oldMemoryId!);
       this.validateConflictMemory(conflict, current);
@@ -4437,16 +4671,33 @@ export class CaptureService {
         throw new Error("Replacement supersession was not applied");
       return this.markConflictResolved(conflict.id, resolution);
     } catch (error) {
-      // Retain the actual failure with the accepted plan; a changed request can review it.
-      await (async () => {
-        const latest = await this.queue.getConflict(conflict.id);
-        if (latest?.replacement) await this.queue.updateConflict(conflict.id, {
-          replacement: { ...latest.replacement,
-            executionError: error instanceof Error ? error.message : String(error) },
-        });
-      })().catch(() => undefined);
-      throw error;
+      return this.failConflictResolution(conflict.id, error);
     }
+  }
+
+  private async failConflictResolution(conflictId: string, error: unknown): Promise<never> {
+    // Retain the actual failure with the accepted plan; a changed request can review it.
+    const uncertain = this.operations.getStore()?.uncertainWrite ??
+      (error instanceof CaptureUncertainWrite ? error : undefined);
+    if (uncertain) {
+      try {
+        await this.queue.updateConflict(conflictId, { uncertainWrite: uncertain.message });
+      } catch (checkpointError) {
+        throw new AggregateError([uncertain, checkpointError],
+          "Could not persist the unknown save outcome", { cause: checkpointError });
+      }
+    }
+    await (async () => {
+      const latest = await this.queue.getConflict(conflictId);
+      if (latest?.replacement) await this.queue.updateConflict(conflictId, {
+        replacement: { ...latest.replacement,
+          executionError: error instanceof Error ? error.message : String(error) },
+      });
+    })().catch(() => undefined);
+    if (uncertain && error !== uncertain)
+      throw new AggregateError([uncertain, error], "Save receipt checkpoint failed",
+        { cause: error });
+    throw error;
   }
 
   private async resolveConflictOwned(
@@ -4454,6 +4705,7 @@ export class CaptureService {
     input: ResolveConflictInput,
   ): Promise<CaptureResolveResult> {
     const conflict = await this.ownedConflict(conflictId);
+    this.operations.getStore()!.supersession = conflict.supersession;
     if (
       input.action !== "defer" &&
       input.action !== "skip" &&
@@ -4489,7 +4741,7 @@ export class CaptureService {
         sessionId: conflict.sessionId,
         branchId: conflict.branchId,
       },
-      () => this.resolveConflictOwned(conflictId, input),
+      () => this.operations.run({ conflictId }, () => this.resolveConflictOwned(conflictId, input)),
     );
     if (result === undefined)
       throw new Error("Capture worker is busy for this session");
@@ -4519,5 +4771,6 @@ export class CaptureService {
 
   stop(_sessionId?: string, _branchId?: string): void {
     this.stopped = true;
+    this.cancellation.abort(new CapturePause("capture stopped"));
   }
 }

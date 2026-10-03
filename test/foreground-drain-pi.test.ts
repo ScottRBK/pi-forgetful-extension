@@ -90,6 +90,8 @@ for (const outcome of ["shutdown", "navigation"] as const) {
       }));
       let captureStarted!: () => void;
       const held = new Promise<void>((resolve) => { captureStarted = resolve; });
+      let captureAborted!: () => void;
+      const aborted = new Promise<void>((resolve) => { captureAborted = resolve; });
       const runtime = await ModelRuntime.create({
         authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
       });
@@ -100,7 +102,7 @@ for (const outcome of ["shutdown", "navigation"] as const) {
           id, name: id, reasoning: false, input: ["text"], contextWindow: 32_000,
           maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         })),
-        streamSimple(model, context) {
+        streamSimple(model, context, options) {
           const submission = providerTools(context)[0]?.name;
           const capture = model.id === "memory" && submission === "submit_capture_candidates";
           const plan = model.id === "memory" && submission === "submit_recall_plan";
@@ -137,6 +139,10 @@ for (const outcome of ["shutdown", "navigation"] as const) {
           };
           if (capture) {
             releaseCapture = emit;
+            options?.signal?.addEventListener("abort", () => {
+              captureAborted();
+              stream.end({ ...message, content: [], stopReason: "aborted" });
+            }, { once: true });
             captureStarted();
           } else queueMicrotask(emit);
           return stream;
@@ -166,6 +172,7 @@ for (const outcome of ["shutdown", "navigation"] as const) {
         } finally { session.dispose(); }
       };
       await session.bindExtensions({});
+      await session.prompt("/forgetful status");
       const prompt = session.prompt("We decided to use local storage for this repo.");
       await held;
       await prompt;
@@ -178,19 +185,18 @@ for (const outcome of ["shutdown", "navigation"] as const) {
       writing = session.prompt("Update the storage memory to say use local storage instead.");
       void writing.catch(() => undefined);
       await heldAuthorization;
-      let navigationReturned = false;
       navigation = session.extensionRunner.emit(outcome === "shutdown"
         ? { type: "session_shutdown", reason: "quit" }
-        : { type: "session_tree", oldLeafId: null, newLeafId: null })
-        .then(() => { navigationReturned = true; });
+        : { type: "session_tree", oldLeafId: null, newLeafId: null });
       void navigation.catch(() => undefined);
-      // Public queue disk I/O lets the lifecycle handler enter its capture drain.
-      const activeQueue = JSON.parse(await readFile(queueFile, "utf8"));
-      assert.equal(activeQueue.jobs[0].status, "running");
-      assert.equal(navigationReturned, false, "held capture must keep lifecycle drain pending");
+      // The provider's abort is a reliable gate that lifecycle revocation has happened.
+      await aborted;
       releaseAuthorization?.();
       await writing;
-      assert.equal(navigationReturned, false, "capture must still hold the lifecycle drain");
+      await navigation;
+      const saved = JSON.parse(await readFile(queueFile, "utf8"));
+      assert.equal(saved.jobs[0].status, "paused");
+      assert.equal(saved.jobs[0].attempts, 0);
       assert.deepEqual(mutations, [], "stopped runtime must not dispatch a foreground update");
       assert.equal(storedMemory.content, "Use SQLite for this repo.");
       const result = session.messages.find((message) =>

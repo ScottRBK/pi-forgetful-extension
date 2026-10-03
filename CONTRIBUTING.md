@@ -45,6 +45,32 @@ The integration suite also covers graph and artifact recall, interrupted rich ca
 scope, and repeated `/forgetful encode` runs through Pi's real command and tool boundaries.
 Stored-file fixtures are created only in the isolated server; the extension exposes no upload tool.
 
+### Controlled lifecycle and terminal checks
+
+Ordinary checks cover nonblocking discovery, early-turn persistence, cancellation, write receipts
+and repeated restarts. The external model and HTTP responses are held at explicit gates; tests do
+not depend on a model choosing the right action or taking a particular amount of time.
+
+To exercise actual Ctrl-D and progress rendering in disposable tmux sessions:
+
+```bash
+FORGETFUL_TEST_TMUX=1 node --import tsx --test test/background-ui-pi.test.ts
+
+FORGETFUL_TEST_TMUX=1 FORGETFUL_TEST_HIDE_TOOLS=/path/to/pi-hide-tools-extension/index.ts \
+  node --import tsx --test test/background-ui-pi.test.ts
+```
+
+These tests load this checkout explicitly, isolate settings and sessions, use a localhost scripted
+provider with no credentials, print terminal evidence, and remove their temporary tmux servers.
+They check startup, combined recall/capture, idle cleanup, service failure and uncertain-save
+recovery. There are no paid model calls. Optional native compaction coverage also uses controlled
+provider replies with the actual installed compaction extension:
+
+```bash
+FORGETFUL_TEST_CODEX_COMPACTION=/path/to/pi-codex-compaction/index.ts \
+  node --import tsx --test test/recall-persistence-native-pi.test.ts
+```
+
 ### Live recall submission checks
 
 This opt-in test spends model credits using the configured Forgetful memory model and Pi's normal
