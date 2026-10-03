@@ -32,7 +32,7 @@ architecture is available in [Excalidraw](docs/code-architecture.excalidraw).
 ## Requirements
 
 - Node.js 22.19 or newer
-- Pi **0.85.1**
+- Pi **1.0.1** (current tested release)
 - An already-running Forgetful REST service
 - An authenticated Pi model for memory planning and capture
 - HTTPS for remote Forgetful services; local HTTP endpoints are supported
@@ -267,15 +267,21 @@ Extraction validation skips identify the failed check, such as assistant-only ev
 field, an unknown evidence entry, sensitive data, or an invalid destination.
 Overlapping results are combined into one notice; observe mode reports observed candidates, and a
 later retry reports completion without counting an earlier partial write twice.
-The context hook renders one latest recall state for the current model call and removes stale
-recall rows from that boundary. That rendered state, including the reviewed summary, is transient;
-it is not a persisted session entry. The automatic hook's initial pending marker and its generic
-background-completion marker are hidden Pi custom entries and are persisted normally. They are not
-a privacy boundary: later model calls may receive them, so lifecycle text must contain no secrets.
-Queued lifecycle states are rendered transiently. `forgetful_recall_wait` returns an ordinary Pi
-tool result and follows normal tool-result persistence. Capture excludes lifecycle entries and
-memory-operation results from eligible evidence. Conflict messages follow normal Pi persistence;
-`/forgetful status` reports the verbosity and latest recall result.
+The context hook renders the latest pending or retrieval state and removes stale recall control
+messages from that boundary. Each useful reviewed result is saved once as a hidden Pi conversation
+message for its matching request, including queued input. It remains in that branch's history after
+restart and is handled by normal compaction. This also lets native-compaction extensions read the
+result from saved history instead of relying on temporary context injection. Older recalled facts
+may appear in later requests; treat them as historical context, not current instructions or truth.
+The useful result itself continues the turn, so it reaches saved history before its fact-carrying
+model request; no separate background wake message is saved. Policy instructions remain local to
+the current request and are not copied into each saved result. The initial pending marker also
+persists normally. Hidden display is not a privacy boundary: recalled text is bounded and redacted
+before delivery. No-context and failure states remain transient. `forgetful_recall_wait` returns an
+ordinary Pi tool result and follows normal tool-result persistence. Capture excludes recall messages
+and memory-operation results from eligible evidence.
+Conflict messages follow normal Pi persistence; `/forgetful status` reports the verbosity and latest
+recall result.
 
 Recoverable recall failures, including timeouts, are warnings; invalid endpoint configuration and
 capture enqueue failures are errors. Debug failure warnings name the failing step and exception.

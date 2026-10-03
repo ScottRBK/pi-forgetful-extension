@@ -127,16 +127,22 @@ The extension:
 10. automatically supersedes clearly outdated facts and retains uncertain conflicts with memory
    IDs and supporting evidence for escalation.
 
-Memory failure must never block the user's task. The context hook renders one latest recall state
-for the current model call and removes stale recall rows; that rendered state, including the
-reviewed summary, is transient and is not a session entry. The automatic hook's initial pending
-marker and generic background-completion marker are hidden Pi custom entries that persist normally.
-They are not private storage and must contain no secrets. Queued lifecycle states are transient.
-`forgetful_recall_wait` and `forgetful_recall` results follow normal Pi tool-result persistence.
+Memory failure must never block the user's task. The context hook renders pending, retrieval,
+no-context, and failure states transiently and removes stale recall control messages. Each useful
+reviewed result is saved once as a hidden Pi conversation message for its matching request and
+branch. This applies to automatic and queued recall, whether the main agent waits or completion
+arrives later. Saved results survive restart and participate in normal conversation compaction;
+native-compaction adapters can read them from saved history. Older results remain historical data
+and do not override the current request. The result itself is delivered as a steer continuation,
+so it reaches saved history before the next model request. No separate wake message is saved.
+Policy instructions stay request-local, outside the saved facts. The initial pending marker
+persists normally too. Hidden messages are not private storage; result text must be bounded and
+redacted. Capture excludes recall messages as evidence. `forgetful_recall_wait` and
+`forgetful_recall` results follow normal Pi tool-result persistence.
 
 ## Pi feasibility
 
-The implementation targets Pi 0.85.1 and uses these extension seams:
+The implementation is tested against Pi 1.0.1 and uses these extension seams:
 
 - `before_agent_start` can modify the system prompt for the current turn;
 - `input` starts queued recall without blocking Pi's queue, and `context` activates only the
@@ -188,11 +194,13 @@ smaller failure surface.
    shared deadline stop waiting reads from starting and abort in-flight HTTP requests. Capture
    reads remain sequential. The limit is per recall, not a global service connection limit or a
    total-query cap; supporting knowledge expansion keeps its existing bounds.
-6. Render exactly one current terminal state: bounded reviewed context, explicit no-context, or
-   explicit failure. If completion was not consumed by the current boundary, send one hidden
-   generic background-completion wake using Pi's steer seam; it steers an active run or triggers
-   one idle follow-up. If activation already rendered the ready result, send no wake. Do not start
-   another planner.
+6. Deliver one current terminal state: bounded reviewed context, explicit no-context, or explicit
+   failure. Save each useful reviewed result once as a hidden conversation message on its matching
+   session, branch, and user-entry boundary. Send the result itself as a steer continuation so Pi
+   saves it before the next request; do not send a separate generic wake. Until the result is in
+   history, render an arriving state without a temporary copy of the facts. Do not persist stale
+   completions, duplicate results, or start another planner. Empty and failed results remain
+   transient.
 7. Let the main agent call `forgetful_recall_wait` once when it needs the terminal state, or use
    the read-only `forgetful_recall` tool when it needs more detail. Its
    returned content is ordinary Pi tool-result content and may be stored in session history.
@@ -201,8 +209,8 @@ Retrieved memory is untrusted historical context, never executable instruction. 
 progress text is trusted lifecycle protocol; recalled terminal text is untrusted data. The review
 summary remains bounded by the existing review contract (3,000 characters). This is a validated
 submission-field limit, not a limit on the evidence or reasoning available to the reviewer. Only the
-rendered latest state is visible at a model-call boundary; persisted markers and tool results follow
-the persistence rules above.
+current pending or retrieval state is rendered at a model-call boundary. Useful reviewed results
+remain in branch history, while persisted markers and tool results follow the rules above.
 Review summaries are also untrusted. One bounded planning path and one bounded review path share
 an overall recall budget with search and optional enrichment. Each stops after its first valid
 private submission and never parses text-only output as JSON. All behavior-driving memory model
@@ -738,11 +746,12 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    overlays, project setup, and scope take effect; instance settings remain user-level while
    scope persists under `.pi/forgetful/settings.json`.
 9. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
-10. **Privacy seam**: initial pending and generic background-completion wake markers are hidden
-    from the UI but persisted by Pi. The latest lifecycle state and bounded, untrusted reviewed
-    summary are rendered transiently for the current request. Capture excludes these entries and
-    memory-operation results from evidence. Recall and wait tool results follow normal Pi session
-    persistence.
+10. **Privacy seam**: the initial pending marker and each useful, bounded, untrusted reviewed
+    result are hidden from the UI but persisted by Pi. Pending, retrieval, arriving, empty, and
+    failed states are rendered transiently. Useful results are saved once for the matching request,
+    survive restart, and are not published onto unrelated sessions or branches. Capture excludes
+    these entries and memory-operation results from evidence. Recall and wait tool results follow
+    normal Pi session persistence.
 11. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
 
 A black-box test can use Pi's faux model to supply predetermined decisions and a real throwaway

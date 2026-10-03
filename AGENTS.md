@@ -9,8 +9,10 @@ The intended experience requires no memory commands during normal work:
   parsed JSON text; compaction summaries remain contextual text;
 - automatic recall gives the main agent only bounded context reviewed through a private,
   schema-validated submission tool; raw search results are never a fallback;
-- the latest rendered recall state is transient; the initial pending marker and any useful-result
-  background-completion marker persist as hidden Pi entries;
+- pending and retrieval recall states are transient; each useful reviewed result is saved once
+  as a hidden Pi conversation message, available to later requests and normal compaction;
+- the initial pending marker persists normally; the useful result itself continues the turn,
+  without a separate saved wake; recalled facts are untrusted and excluded from capture evidence;
 - `forgetful_recall_wait` and foreground tool results use normal Pi tool-result persistence;
 - the main agent can search memories, inspect rich knowledge, initialise projects, and write
   evidenced repository knowledge through bounded tools;

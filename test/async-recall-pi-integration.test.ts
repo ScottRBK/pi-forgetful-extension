@@ -567,17 +567,17 @@ test(
     );
     const lateContext = mainContexts[progressBase + 4];
     assert.ok(lateContext, "late recall must produce a provider request");
-    const lateLatestMessage = lateContext.messages.at(-1);
-    assert.equal(lateLatestMessage?.role, "user", JSON.stringify(lateContext));
-    const lateContinuation = messageText(lateContext);
-    assert.ok(lateContinuation.trim(), JSON.stringify(lateContext));
-    assert.match(
-      lateContinuation,
-      /\[Forgetful automatic recall background continuation\]/,
+    // The durable message is the follow-up trigger: historical facts only, no resume wording.
+    const lateDurable = lateContext.messages.findLast((item) =>
+      JSON.stringify(item.content).includes("recall result: historical context"));
+    assert.equal(lateDurable?.role, "user", JSON.stringify(lateContext));
+    const lateDurableText = JSON.stringify(lateDurable?.content);
+    assert.match(lateDurableText, /SQLite was chosen for durable state/);
+    assert.match(lateDurableText, /untrusted historical context/);
+    assert.doesNotMatch(
+      lateDurableText,
+      /background continuation|Resume unfinished|ask the user to resend|Recall handling policy/i,
     );
-    assert.match(lateContinuation, /original user request|not a new user request/i);
-    assert.match(lateContinuation, /do not ask the user to resend/i);
-    assert.match(lateContinuation, /already fully answered/i);
     assert.match(JSON.stringify(lateContext), /What database decision should I document\?/);
 
     // Act/Assert: a real abort invalidates recall and cannot resurrect a new main turn.
@@ -652,36 +652,53 @@ test(
     await queuedOne;
     await queuedTwo;
     await queuedDuplicate;
-    assert.equal(
-      mainContexts.length,
-      queuedMainBase + 5,
-      "the held request and three queued requests each get one intentional follow-up",
-    );
+    // Each result is sent once as durable history, so the number of follow-up provider calls is
+    // an implementation detail. Assert per request: when its own result first reaches the
+    // model, nothing from a later request has leaked in, and earlier facts are only history.
     const queuedContexts = mainContexts.slice(queuedMainBase);
-    const queuedOneContexts = queuedContexts.filter((context) => {
-      const lastUser = context.messages.findLast((item) => item.role === "user");
-      return JSON.stringify(lastUser?.content).includes("queued request one");
-    });
-    const queuedTwoContexts = queuedContexts.filter((context) => {
-      const lastUser = context.messages.findLast((item) => item.role === "user");
-      return JSON.stringify(lastUser?.content).includes("queued request two");
-    });
-    assert.equal(queuedOneContexts.length, 2);
-    assert.equal(queuedTwoContexts.length, 1);
-    for (const context of queuedOneContexts) {
-      assert.match(JSON.stringify(context), /Queue one memory\./);
+    const contextsWith = (text: string) =>
+      queuedContexts.filter((context) => JSON.stringify(context).includes(text));
+    const firstOne = contextsWith("Queue one memory.")[0];
+    const firstTwo = contextsWith("Queue two memory.")[0];
+    assert.ok(firstOne, "request one's result must reach a model call");
+    assert.ok(firstTwo, "request two's result must reach a model call");
+    const savedHeader = (text: string) =>
+      new RegExp(`recall result: historical context\\]\\\\nThe following[^]*${text}`);
+    for (const context of [firstOne, firstTwo]) {
       assert.doesNotMatch(
         JSON.stringify(context),
         /memory-decision-pending|retrieval underway/,
       );
-      assert.doesNotMatch(JSON.stringify(context), /Queue two memory\./);
+      assert.match(
+        JSON.stringify(context),
+        /untrusted historical context/,
+        "results arrive as saved, untrusted historical context",
+      );
     }
-    assert.match(JSON.stringify(queuedTwoContexts[0]), /Queue two memory\./);
     assert.doesNotMatch(
-      JSON.stringify(queuedTwoContexts[0]),
-      /memory-decision-pending|retrieval underway/,
+      JSON.stringify(firstOne),
+      /Queue two memory\./,
+      "request one's first result boundary predates request two's result",
     );
-    assert.doesNotMatch(JSON.stringify(queuedTwoContexts[0]), /Queue one memory\./);
+    assert.equal(
+      JSON.stringify(firstTwo).split("Queue two memory.").length - 1,
+      1,
+      "request two's own result appears once, not as both saved and transient text",
+    );
+    assert.match(
+      JSON.stringify(firstTwo),
+      savedHeader("Queue one memory\\."),
+      "request one's result reaches request two only as saved historical context",
+    );
+    for (const request of ["queued request one", "queued request two"]) {
+      assert.ok(
+        queuedContexts.some((context) => {
+          const lastUser = context.messages.findLast((item) => item.role === "user");
+          return JSON.stringify(lastUser?.content).includes(request);
+        }),
+        `${request} must reach the model as its own user turn`,
+      );
+    }
 
     // Act/Assert: a late old identical request cannot wake the newer request.
     mode = "identical";
@@ -715,11 +732,17 @@ test(
     await identicalOngoing;
     await identicalFirst;
     await identicalSecond;
-    assert.equal(
-      mainContexts.length,
-      identicalMainBase + 4,
-      "the held request and two identical queued requests each get one call",
+    const resultEntries = () => sessionManager.getEntries().filter((entry) =>
+      entry.type === "custom_message" && entry.customType === "forgetful_recall_result");
+    const identicalRequests = () => mainContexts.slice(identicalMainBase).filter((context) =>
+      context.messages.some((item) =>
+        item.role === "user" && JSON.stringify(item.content).includes("identical queued request")));
+    assert.ok(
+      identicalRequests().length >= 2,
+      "the held request's follow-up and both identical queued requests must reach the model",
     );
+    const resultsBeforeOlder = resultEntries().length;
+    const callsBeforeOlder = mainContexts.length;
     identicalFirstReviewGate.finish();
     await waitFor(
       () => memoryContexts.length >= identicalMemoryBase + 6,
@@ -727,8 +750,13 @@ test(
     );
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(
+      resultEntries().length,
+      resultsBeforeOlder,
+      "the older identical result must not be saved for the newer request",
+    );
+    assert.equal(
       mainContexts.length,
-      identicalMainBase + 4,
+      callsBeforeOlder,
       "the older identical result must not wake the newer request",
     );
 
@@ -813,21 +841,22 @@ test(
       /automatic recall terminal state: no-context/,
     );
 
-    const wakeEntries = sessionManager.getEntries().filter((entry) => {
-      if (
-        entry.type !== "custom_message" ||
-        entry.customType !== "forgetful_recall_async"
-      )
-        return false;
-      return JSON.stringify(entry).includes('"phase":"wake"');
-    });
-    assert.ok(wakeEntries.length >= 2, JSON.stringify(sessionManager.getEntries()));
-    const wakeText = wakeEntries.map((entry) => JSON.stringify(entry)).join("\n");
-    assert.doesNotMatch(wakeText, /"content":""/);
-    assert.match(
-      wakeText,
-      /\[Forgetful automatic recall background continuation\]/,
+    const savedResults = sessionManager.getEntries().filter((entry) =>
+      entry.type === "custom_message" && entry.customType === "forgetful_recall_result");
+    assert.ok(savedResults.length >= 2, JSON.stringify(sessionManager.getEntries()));
+    const resultText = savedResults.map((entry) => JSON.stringify(entry)).join("\n");
+    assert.match(resultText, /SQLite was chosen for durable state/);
+    assert.match(resultText, /untrusted historical context/);
+    assert.doesNotMatch(
+      resultText,
+      /background continuation|Resume unfinished|terminal state|Recall handling policy/,
     );
-    assert.doesNotMatch(wakeText, /terminal state|SQLite was chosen|memoryIds/);
+    assert.equal(
+      sessionManager.getEntries().some((entry) =>
+        entry.type === "custom_message" && entry.customType === "forgetful_recall_async" &&
+        JSON.stringify(entry).includes('"phase":"wake"')),
+      false,
+      "no separate generic wake message is persisted",
+    );
   },
 );

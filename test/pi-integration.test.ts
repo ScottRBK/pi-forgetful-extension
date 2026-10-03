@@ -70,7 +70,7 @@ async function shutdownSession(session: AgentSession): Promise<void> {
 }
 
 test(
-  "real Pi receives transient same-turn recall and exposes the bounded tools",
+  "real Pi receives saved reviewed recall and exposes the bounded tools",
   {
     timeout: 20_000,
   },
@@ -277,7 +277,8 @@ test(
         name: id,
         reasoning: false,
         input: ["text"],
-        contextWindow: 32000,
+        // This lifecycle fixture accumulates saved results; compaction has its own tests.
+        contextWindow: 200000,
         maxTokens: 2048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       })),
@@ -576,9 +577,7 @@ test(
           pi.sendMessage = (message, options) => {
             handoffs.push(message);
             sendMessage(message, options);
-            if (message.customType === "forgetful_recall_async" &&
-                (message.details as { phase?: string } | undefined)?.phase === "wake")
-              markFirstRecallWake();
+            if (message.customType === "forgetful_recall_result") markFirstRecallWake();
           };
           return createForgetfulExtension({ agentDir })(pi);
         },
@@ -639,19 +638,18 @@ test(
           entry.type === "custom_message" &&
           entry.customType === "forgetful_recall_async",
         );
-        assert.equal(recallEntries.length, 2);
+        assert.equal(recallEntries.length, 1);
         const persistedLifecycle = recallEntries.map((entry) => JSON.stringify(entry));
         assert.ok(persistedLifecycle.some((text) => text.includes("memory-decision-pending")));
         const wakeLifecycle = persistedLifecycle.filter((text) =>
           text.includes('"phase":"wake"'),
         );
-        assert.equal(wakeLifecycle.length, 1);
-        assert.ok(
-          wakeLifecycle.every((text) =>
-            text.includes("[Forgetful automatic recall background continuation]"),
-          ),
-        );
-        assert.doesNotMatch(wakeLifecycle.join("\n"), /terminal state|SQLite was chosen|memoryIds/);
+        assert.equal(wakeLifecycle.length, 0, "the result itself replaces the generic wake");
+        const savedRecall = sessionManager.getEntries().filter((entry) =>
+          entry.type === "custom_message" && entry.customType === "forgetful_recall_result");
+        assert.equal(savedRecall.length, 1);
+        assert.match(JSON.stringify(savedRecall[0]), /SQLite was chosen/);
+        assert.doesNotMatch(JSON.stringify(savedRecall[0]), /Resume unfinished original work/);
         assert.doesNotMatch(persistedLifecycle.join("\n"), /retrieval underway|SQLite was chosen/);
     assert.ok(
       recallEntries.every(
@@ -1161,7 +1159,7 @@ test(
     );
 
     await t.test(
-      "queued prompts each receive transient recall in their continuation",
+      "queued prompts each receive their saved recall in a safe continuation",
       async () => {
         // Arrange: hold an external provider response while the user queues two requests.
         await session.prompt("/forgetful capture off");
@@ -1189,11 +1187,10 @@ test(
         }
         await ongoing;
 
-        // Assert: both topics reach the model alongside their request without entering
-        // saved history.
+        // Assert: both topics reach their safe, fact-carrying continuations and saved history.
         assert.equal(
           mainContexts.length,
-          firstContext + 4,
+          firstContext + 5,
           JSON.stringify(mainContexts.slice(firstContext).map((context) => context.messages)),
         );
         assert.equal(memoryContexts.length, firstMemoryContext + 6);
@@ -1201,7 +1198,7 @@ test(
         const continuations = mainContexts
           .slice(firstContext + 1)
           .map((c) => JSON.stringify(c.messages));
-        assert.equal(continuations.length, 3);
+        assert.equal(continuations.length, 4);
         assert.ok(
           continuations.some(
             (text) =>
@@ -1287,26 +1284,27 @@ test(
         const secondRecallContexts = secondRequestContexts.filter((context) =>
           JSON.stringify(context.messages).includes("Queue two memory."),
         );
-        assert.equal(secondRequestContexts.length, 1);
+        assert.equal(secondRequestContexts.length, 2,
+          "a ready result is saved before the intentional fact-carrying continuation");
         assert.equal(secondRecallContexts.length, 1, "queued request two must reach one boundary");
         assert.ok(
           secondRecallContexts.every((context) =>
-            !JSON.stringify(context.messages).includes("Queue one memory."),
+            JSON.stringify(context.messages).includes("Queue one memory."),
           ),
-          "queued request two must retain only its own recall",
+          "earlier results remain normal history, not a replacement for request two's result",
         );
         const queuedRecallEntries = sessionManager.getEntries().filter((entry) => {
           if (
             entry.type !== "custom_message" ||
-            entry.customType !== "forgetful_recall_async"
+            entry.customType !== "forgetful_recall_result"
           )
             return false;
           const text = JSON.stringify(entry);
           return text.includes("Queue one memory.") ||
             text.includes("Queue two memory.");
         });
-        assert.equal(queuedRecallEntries.length, 0,
-          "reviewed summaries are transient context overlays");
+        assert.equal(queuedRecallEntries.length, 2,
+          "each reviewed summary is saved once as conversation history");
       },
     );
 

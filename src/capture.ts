@@ -3246,7 +3246,8 @@ export class CaptureService {
       });
       if (exhausted) {
         result.errors.push(message);
-        (result.discardedJobs ??= []).push({ jobId: currentJob.id, error: message });
+        result.discardedJobs ??= [];
+        result.discardedJobs.push({ jobId: currentJob.id, error: message });
       } else result.paused = true;
       return;
     }
@@ -3260,9 +3261,10 @@ export class CaptureService {
       executionFailure: error instanceof Error ? error.message : String(error),
     });
     await this.queue.checkpoint(currentJob.id, { status, lastError: message });
-    if (status === "failed") (result.discardedJobs ??= []).push({
-      jobId: currentJob.id, error: message,
-    });
+    if (status === "failed") {
+      result.discardedJobs ??= [];
+      result.discardedJobs.push({ jobId: currentJob.id, error: message });
+    }
   }
 
   private async processCandidates(
@@ -3519,7 +3521,8 @@ export class CaptureService {
         break;
       }
       const job = await this.queue.claimNext(this.identity, branch, (discarded) => {
-        (result.discardedJobs ??= []).push(...discarded);
+        result.discardedJobs ??= [];
+        result.discardedJobs.push(...discarded);
         result.processedJobIds.push(...discarded.map((item) => item.jobId));
         result.errors.push(...discarded.map((item) => item.error));
         for (const outcome of discarded) {
@@ -3555,22 +3558,33 @@ export class CaptureService {
       });
       return after?.status !== "pending" && after?.status !== "paused";
     } catch (error) {
-      this.emit("info", "error", {
-        ...this.correlation(job), elapsedMs: performance.now() - started,
-      });
-      this.emit("debug", "error_detail", { ...this.correlation(job), error: scrubError(error) });
-      result.errors.push(scrubError(error));
-      const latest = await this.queue.getJob(job.id);
-      if (latest) {
-        const status = latest.attempts >= 3 ? "failed"
-          : error instanceof CapturePause ? "paused" : "pending";
-        if (status === "paused") result.paused = true;
-        await this.queue.checkpoint(job.id, { status, lastError: scrubError(error) });
-        if (status === "failed") (result.discardedJobs ??= []).push({
-          jobId: job.id, error: scrubError(error),
-        });
-      }
+      await this.recordBranchFailure(job, result, error, started);
       return false;
+    }
+  }
+
+  private async recordBranchFailure(
+    job: QueueJob,
+    result: CaptureCheckpointResult,
+    error: unknown,
+    started: number,
+  ): Promise<void> {
+    const message = scrubError(error);
+    this.emit("info", "error", {
+      ...this.correlation(job), elapsedMs: performance.now() - started,
+    });
+    this.emit("debug", "error_detail", { ...this.correlation(job), error: message });
+    result.errors.push(message);
+    const latest = await this.queue.getJob(job.id);
+    if (!latest) return;
+    let status: QueueJobStatus = "pending";
+    if (latest.attempts >= 3) status = "failed";
+    else if (error instanceof CapturePause) status = "paused";
+    if (status === "paused") result.paused = true;
+    await this.queue.checkpoint(job.id, { status, lastError: message });
+    if (status === "failed") {
+      result.discardedJobs ??= [];
+      result.discardedJobs.push({ jobId: job.id, error: message });
     }
   }
 
@@ -3654,8 +3668,10 @@ export class CaptureService {
       const result = await this.checkpointBranch(branch, remaining);
       total.processed += result.processed;
       total.processedJobIds.push(...result.processedJobIds);
-      if (result.discardedJobs?.length)
-        (total.discardedJobs ??= []).push(...result.discardedJobs);
+      if (result.discardedJobs?.length) {
+        total.discardedJobs ??= [];
+        total.discardedJobs.push(...result.discardedJobs);
+      }
       total.paused ||= result.paused;
       total.errors.push(...result.errors);
       remaining -= result.processed;

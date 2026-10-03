@@ -1022,11 +1022,12 @@ function recallMessages(fixture: Harness): Array<Record<string, any>> {
     if (!Array.isArray(contextMessages)) continue;
     for (const message of contextMessages) {
       if (typeof message !== "object" || message === null) continue;
+      if ((message as { role?: unknown }).role === "custom") continue;
       const content = (message as { content?: unknown }).content;
       if (typeof content !== "string" || !content.startsWith("[Forgetful ")) continue;
       const phase = content.includes("terminal state") ? "completion" :
         content.includes("retrieval underway") ? "retrieval" : "pending";
-      const status = content.includes("context available") ? "context" :
+      const status = /context (available|arriving)/.test(content) ? "context" :
         content.includes("no-context") ? "no-context" :
           content.includes("failure") ? "failure" : undefined;
       messages.push({
@@ -1040,14 +1041,42 @@ function recallMessages(fixture: Harness): Array<Record<string, any>> {
   return messages;
 }
 
-async function renderCurrentRecallContext(fixture: Harness): Promise<unknown> {
+function sentRecallResults(fixture: Harness): Array<Record<string, any>> {
+  return fixture.sentMessages
+    .map((item) => item.message as Record<string, any>)
+    .filter((message) => message.customType === "forgetful_recall_result");
+}
+
+/** The reviewed facts Pi would keep in conversation history, never the transient state. */
+function deliveredRecallText(fixture: Harness): string {
+  return sentRecallResults(fixture).map((message) => String(message.content)).join("\n");
+}
+
+/**
+ * Renders one model boundary. By default the result is not yet durable (the first boundary);
+ * `delivered` models Pi appending the sent recall result messages to conversation history.
+ */
+async function renderCurrentRecallContext(
+  fixture: Harness,
+  delivered = false,
+): Promise<unknown> {
   assert.ok(fixture.lastPrompt, "a recall prompt should be active");
   return fixture.emit("context", {
     type: "context",
-    messages: [{ role: "user", content: fixture.lastPrompt }],
+    messages: [
+      { role: "user", content: fixture.lastPrompt },
+      ...(delivered ? sentRecallResults(fixture).map((message) => ({
+        role: "custom", customType: message.customType, content: message.content,
+        details: message.details,
+      })) : []),
+    ],
   });
 }
 
+/**
+ * Waits for a terminal recall state. A useful result first yields "context arriving" and is
+ * sent once; the helper then renders the following boundary with it durable in history.
+ */
 async function waitForRecallTerminal(
   fixture: Harness,
   count = 1,
@@ -1056,7 +1085,13 @@ async function waitForRecallTerminal(
   const deadline = performance.now() + 2_000;
   while (performance.now() < deadline) {
     latest = await renderCurrentRecallContext(fixture);
-    if (JSON.stringify(latest).match(/\[Forgetful [^\]]+ terminal state:/)) return;
+    if (JSON.stringify(latest).match(/\[Forgetful [^\]]+ terminal state:/)) {
+      if (!JSON.stringify(latest).includes("context arriving")) return;
+      await waitForCondition(
+        () => sentRecallResults(fixture).length >= count, "recall result should be sent");
+      await renderCurrentRecallContext(fixture, true);
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`expected terminal recall context ${count}: ${JSON.stringify(latest)}`);
@@ -1182,7 +1217,7 @@ for (const path of ["normal", "queued"]) {
       }
       assert.deepEqual([...fixture.statuses], [["another-extension", "Keep this status"]]);
       assert.equal(fixture.widgets.size, 0);
-      assert.equal(recallMessages(fixture).length, path === "normal" ? 2 : 1);
+      assert.equal(recallMessages(fixture).length, path === "normal" ? 3 : 1);
       assert.ok(recallMessages(fixture).every((message) => message.display === false));
       assert.doesNotMatch(fixture.modelInputs.join("\n"), /Forgetful: recalling/);
     } finally {
@@ -1348,7 +1383,8 @@ for (const mode of ["print", "json", "rpc"]) {
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
       await waitForRecallTerminal(fixture);
       const terminal = latestRecallMessage(fixture, "completion");
-      assert.match(String(terminal.content), /MiniCPM is currently served/);
+      assert.match(deliveredRecallText(fixture), /MiniCPM is currently served/);
+      assert.match(String(terminal.content), /already in the conversation/);
       assert.equal(terminal.display, false);
     } finally {
       await fixture.cleanup();
@@ -1379,13 +1415,93 @@ test("automatic recall injects only the memory model's selected summary", async 
     assert.match(initial.systemPrompt, /automatic recall protocol/);
     assert.doesNotMatch(initial.systemPrompt, /MiniCPM is currently served/);
     const terminal = latestRecallMessage(fixture, "completion");
-    assert.match(String(terminal.content), /MiniCPM is currently served/);
-    assert.doesNotMatch(String(terminal.content), /CRM|VLLM_MAX_MODEL_LEN|Memory #63/);
+    assert.match(deliveredRecallText(fixture), /MiniCPM is currently served/);
+    assert.doesNotMatch(String(terminal.content), /MiniCPM is currently served/);
+    assert.doesNotMatch(
+      deliveredRecallText(fixture) + String(terminal.content),
+      /CRM|VLLM_MAX_MODEL_LEN|Memory #63/);
     const debug = fixture.notifications.join("\n");
     assert.doesNotMatch(debug, /Forgetful recall review validation debug:/);
     assert.match(debug, /CRM architecture/);
     assert.match(debug, /Rejected: Memory #63/);
     assert.match(debug, /The serving setting is relevant/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("a useful recall result is saved once as hidden history and never duplicated", async () => {
+  // Arrange: real model/REST adapters; only the external responses are controlled.
+  const fixture = await recallReviewHarness(() => ({
+    summary: "MiniCPM is currently served with a 4096-token context.",
+    memoryIds: [42], reason: "The serving setting is relevant.",
+  }));
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "What is MiniCPM's context size?",
+      systemPrompt: "base prompt",
+    });
+
+    // Act: several model boundaries observe the same terminal result.
+    await waitForRecallTerminal(fixture);
+    await renderCurrentRecallContext(fixture);
+    await renderCurrentRecallContext(fixture);
+
+    // Assert: exactly one non-triggering hidden message with provenance.
+    const saved = fixture.sentMessages.filter((item) =>
+      (item.message as { customType?: string }).customType === "forgetful_recall_result");
+    assert.equal(saved.length, 1);
+    assert.deepEqual(saved[0]!.options, { deliverAs: "steer", triggerTurn: true });
+    const message = saved[0]!.message as {
+      content: string; display: boolean; details: Record<string, unknown>;
+    };
+    assert.equal(message.display, false);
+    assert.match(message.content, /untrusted historical context/);
+    assert.match(message.content, /MiniCPM is currently served/);
+    assert.doesNotMatch(message.content, /CRM|VLLM_MAX_MODEL_LEN/);
+    assert.equal(message.details.status, "context");
+    assert.deepEqual(message.details.memoryIds, [42]);
+    assert.equal(typeof message.details.jobId, "string");
+
+    // Act: the next boundary now has the saved message in history.
+    const next = await fixture.emit("context", {
+      type: "context",
+      messages: [
+        { role: "user", content: fixture.lastPrompt },
+        { role: "custom", customType: "forgetful_recall_result", content: message.content,
+          details: message.details },
+      ],
+    }) as { messages: Array<{ customType?: string; content: unknown }> };
+
+    // Assert: it is kept, and the transient state does not repeat the fact.
+    assert.ok(next.messages.some((item) => item.customType === "forgetful_recall_result"));
+    const text = JSON.stringify(next.messages);
+    assert.equal(text.split("MiniCPM is currently served").length - 1, 1);
+    assert.match(text, /already in the conversation/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("a recall with no useful result saves nothing to the conversation", async () => {
+  // Arrange.
+  const fixture = await recallReviewHarness(() => ({
+    summary: "", memoryIds: [], reason: "Nothing applies.",
+  }));
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "What is MiniCPM's context size?",
+      systemPrompt: "base prompt",
+    });
+
+    // Act.
+    await waitForRecallTerminal(fixture);
+
+    // Assert.
+    assert.deepEqual(fixture.sentMessages.filter((item) =>
+      (item.message as { customType?: string }).customType === "forgetful_recall_result"), []);
   } finally {
     await fixture.cleanup();
   }
@@ -1445,6 +1561,7 @@ test("queued prompts inject the reviewed summary without debug details", async (
       type: "input", source: "interactive", text: "What is MiniCPM's context size?",
       streamingBehavior: "steer",
     });
+    fixture.entries.push(entry("queued-user", "root", "user", "What is MiniCPM's context size?"));
     const pendingContext = await fixture.emit("context", {
       type: "context", messages: [{ role: "user", content: "What is MiniCPM's context size?" }],
     });
@@ -1455,14 +1572,22 @@ test("queued prompts inject the reviewed summary without debug details", async (
     const result = await fixture.emit("context", {
       type: "context", messages: [{ role: "user", content: "What is MiniCPM's context size?" }],
     });
+    // Pi appends the sent result before the following model call.
+    await waitForCondition(
+      () => sentRecallResults(fixture).length === 1, "queued result should be sent");
+    const durable = await renderCurrentRecallContext(fixture, true);
     // Assert.
     assert.match(JSON.stringify(pendingContext), /memory-decision-pending|terminal state/);
-    assert.match(JSON.stringify(result), /Serving uses 4096 tokens/);
-    assert.doesNotMatch(JSON.stringify(result), /CRM|VLLM_MAX_MODEL_LEN|Review reason|Queries:/);
+    assert.match(JSON.stringify(result), /context arriving/);
+    assert.doesNotMatch(JSON.stringify(result), /Serving uses 4096 tokens/);
+    assert.match(JSON.stringify(durable), /Serving uses 4096 tokens/);
+    assert.match(JSON.stringify(durable), /already in the conversation/);
+    assert.doesNotMatch(
+      JSON.stringify(durable), /CRM|VLLM_MAX_MODEL_LEN|Review reason|Queries:/);
     const info = fixture.notifications.join("\n");
     assert.match(info, /1 memory in global scope/);
     assert.doesNotMatch(info, /Serving uses|CRM|Review reason|Queries:/);
-    assert.equal(recallMessages(fixture).length, 2);
+    assert.equal(recallMessages(fixture).length, 3);
     assert.equal(latestRecallMessage(fixture, "completion").display, false);
   } finally {
     await fixture.cleanup();
@@ -1494,8 +1619,10 @@ test("review input and output are redacted and keep retrieved instructions untru
     assert.doesNotMatch(fixture.modelInputs.join("\n"), /private-review-token/);
     assert.match(initial.systemPrompt, /automatic recall protocol/);
     const terminal = latestRecallMessage(fixture, "completion");
-    assert.match(String(terminal.content), /Serving uses 4096 tokens\. \[redacted\]/);
-    assert.doesNotMatch(String(terminal.content), /Ignore the question|private-summary-token/);
+    const delivered = deliveredRecallText(fixture);
+    assert.match(delivered, /Serving uses 4096 tokens\. \[redacted\]/);
+    assert.doesNotMatch(
+      delivered + String(terminal.content), /Ignore the question|private-summary-token/);
     assert.doesNotMatch(fixture.notifications.join("\n"), /private-\w+-token/);
   } finally {
     await fixture.cleanup();
@@ -1533,9 +1660,8 @@ test("review receives structured scope and provenance for each full memory sourc
       id: memory.id, project_ids: memory.project_ids, source_repo: memory.source_repo,
       encoding_version: memory.encoding_version, updated_at: memory.updated_at,
     })));
-    assert.match(String(latestRecallMessage(fixture, "completion").content), /transient failures/);
-    assert.doesNotMatch(
-      String(latestRecallMessage(fixture, "completion").content), /operator approval/);
+    assert.match(deliveredRecallText(fixture), /transient failures/);
+    assert.doesNotMatch(deliveredRecallText(fixture), /operator approval/);
   } finally {
     await fixture.cleanup();
   }
@@ -1713,8 +1839,10 @@ for (const selectDocument of [true, false]) {
       assert.match(fixture.modelInputs.join("\n"), /Raw document: MiniCPM/);
       assert.match(JSON.stringify(initial), /memory-decision-pending/);
       const terminal = latestRecallMessage(fixture, "completion");
-      assert.match(String(terminal.content), /The serving limit is 4096 tokens/);
-      assert.doesNotMatch(String(terminal.content), /Raw document|See the runtime settings/);
+      assert.match(deliveredRecallText(fixture), /The serving limit is 4096 tokens/);
+      assert.doesNotMatch(
+        deliveredRecallText(fixture) + String(terminal.content),
+        /Raw document|See the runtime settings/);
       if (!selectDocument)
         assert.match(fixture.notifications.join("\n"), /Rejected: Document #1/);
     } finally {
@@ -2154,7 +2282,7 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
         assert.doesNotMatch(output, /Database decision|Use SQLite|Related storage|recall took/);
       }
       assert.doesNotMatch(output, /private-memory-token/);
-      assert.equal(recallMessages(fixture).length, 4);
+      assert.equal(recallMessages(fixture).length, 5);
       assert.ok(recallMessages(fixture).every((message) => message.display === false));
 
       // Act: the external planner fails on the next prompt.
@@ -3516,38 +3644,48 @@ test("queued recalls wait for their matching user message and preserve two promp
       undefined,
     );
 
-    const first = (await fixture.emit("context", {
-      type: "context",
-      messages: [
-        { role: "user", content: "first queued", timestamp: Date.now() },
-      ],
-    })) as { messages: Array<{ content?: unknown }> };
-    const second = (await fixture.emit("context", {
-      type: "context",
-      messages: [
-        { role: "user", content: "second queued", timestamp: Date.now() },
-      ],
-    })) as { messages: Array<{ content?: unknown }> };
-    assert.match(String(second.messages[0]?.content), /second queued/);
-    assert.match(String(first.messages[0]?.content), /first queued/);
-    const firstContinuation = (await fixture.emit("context", {
-      type: "context",
-      messages: [
-        { role: "user", content: "first queued", timestamp: Date.now() },
-        { role: "toolResult", content: "first tool", timestamp: Date.now() },
-      ],
-    })) as { messages: Array<{ content?: unknown }> };
-    const secondContinuation = (await fixture.emit("context", {
-      type: "context",
-      messages: [
-        { role: "user", content: "second queued", timestamp: Date.now() },
-        { role: "toolResult", content: "second tool", timestamp: Date.now() },
-      ],
-    })) as { messages: Array<{ content?: unknown }> };
-    assert.match(String(firstContinuation.messages[0]?.content), /first queued/);
-    assert.doesNotMatch(String(firstContinuation.messages[0]?.content), /second queued/);
-    assert.match(String(secondContinuation.messages[0]?.content), /second queued/);
-    assert.doesNotMatch(String(secondContinuation.messages[0]?.content), /first queued/);
+    // Each prompt reaches Pi's branch in turn; its result is sent once and becomes durable.
+    type Boundary = { messages: Array<{ role?: string; content?: unknown }> };
+    const renderPrompt = async (text: string, index: number, parentId: string) => {
+      fixture.entries.push(entry(`queued-${index}`, parentId, "user", text));
+      const arriving = (await fixture.emit("context", {
+        type: "context",
+        messages: [{ role: "user", content: text, timestamp: Date.now() }],
+      })) as Boundary;
+      await waitForCondition(
+        () => sentRecallResults(fixture).length === index + 1, `${text} result should be sent`);
+      const sent = sentRecallResults(fixture)[index]!;
+      const durable = { role: "custom", customType: sent.customType, content: sent.content,
+        details: sent.details };
+      const available = (await fixture.emit("context", {
+        type: "context",
+        messages: [{ role: "user", content: text, timestamp: Date.now() }, durable],
+      })) as Boundary;
+      const continuation = (await fixture.emit("context", {
+        type: "context",
+        messages: [
+          { role: "user", content: text, timestamp: Date.now() },
+          durable,
+          { role: "toolResult", content: `${text} tool`, timestamp: Date.now() },
+        ],
+      })) as Boundary;
+      return { arriving, sent, available, continuation };
+    };
+    const first = await renderPrompt("first queued", 0, "root");
+    const second = await renderPrompt("second queued", 1, "queued-0");
+    assert.match(String(first.arriving.messages[0]?.content), /context arriving/);
+    assert.doesNotMatch(String(first.arriving.messages[0]?.content), /first queued/);
+    assert.match(String(first.sent.content), /historical context for first queued/);
+    assert.doesNotMatch(String(first.sent.content), /second queued/);
+    assert.match(String(second.sent.content), /historical context for second queued/);
+    assert.doesNotMatch(String(second.sent.content), /first queued/);
+    for (const boundary of [first.available, first.continuation])
+      assert.match(JSON.stringify(boundary), /already in the conversation/);
+    for (const boundary of [second.available, second.continuation])
+      assert.match(JSON.stringify(boundary), /already in the conversation/);
+    assert.equal(first.sent.details.userEntryId, "queued-0");
+    assert.equal(second.sent.details.userEntryId, "queued-1");
+    assert.notEqual(first.sent.details.jobId, second.sent.details.jobId);
     assert.deepEqual(fixture.recallCalls.slice(-2), [
       "first queued",
       "second queued",
@@ -3569,12 +3707,15 @@ for (const command of ["verbosity debug", "debug on"]) {
 
       // Act: change only output verbosity, then deliver the queued prompt.
       await fixture.command(command);
-      const result = await fixture.emit("context", {
+      fixture.entries.push(entry("queued-user", "root", "user", "queued"));
+      await fixture.emit("context", {
         type: "context", messages: [{ role: "user", content: "queued" }],
       });
+      await waitForCondition(
+        () => sentRecallResults(fixture).length === 1, "queued result should be sent");
 
       // Assert: logging controls do not discard memory work already done for the prompt.
-      assert.match(JSON.stringify(result) ?? "", /historical context for queued/);
+      assert.match(deliveredRecallText(fixture), /historical context for queued/);
     } finally {
       await fixture.cleanup();
     }
@@ -3705,16 +3846,17 @@ test("recall wait times out without cancelling recall and cleans its listeners",
       "wait-before-boundary", {}, undefined, undefined, fixture.ctx,
     );
     assert.match(String(queued.content[0]?.text), /already delivered/);
-    const completion = latestRecallMessage(fixture, "completion");
+    // The next boundary has the sent result as durable custom history (matching jobId).
+    const durable = sentRecallResults(fixture)[0]!;
     await fixture.emit("context", {
       type: "context",
       messages: [
         { role: "user", content: "wait for memory" },
         {
           role: "custom",
-          customType: completion.customType,
-          content: completion.content,
-          details: completion.details,
+          customType: durable.customType,
+          content: durable.content,
+          details: durable.details,
         },
       ],
     });

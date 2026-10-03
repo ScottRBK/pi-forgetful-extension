@@ -2,13 +2,13 @@
 
 ## Development setup
 
-The extension requires Node.js 22.19 or newer, Pi **0.85.1**, and an already-running Forgetful
-service for manual use.
+Development uses Node.js 22.19 or newer and Pi **1.0.1**, pinned in the development dependencies.
+An already-running Forgetful service is required for manual use.
 
 Install the development dependencies and load the local source into Pi:
 
 ```bash
-npm install
+npm ci
 pi -e ./index.ts
 ```
 

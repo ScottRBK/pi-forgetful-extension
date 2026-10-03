@@ -1209,74 +1209,10 @@ export class DurableQueueStore {
       if (!job) throw new Error(`Unknown capture job: ${jobId}`);
       if (patch.inspectionEntries) await this.appendInspections(job, patch.inspectionEntries);
       if (patch.compactedConversation) {
-        const compacted = compactCaptureSnapshot((await this.hydrateJob(job)).snapshot,
-          patch.compactedConversation);
-        const { entries, conversation, sourceConversation, historySummary, ...metadata } =
-          compacted;
-        // Inspections have their own immutable sidecar; do not duplicate them in the base payload.
-        const sourceEntries = entries.filter((entry) => !entry.id.startsWith("inspection:"));
-        job.snapshotDigest = await this.storeSnapshot({ entries: sourceEntries,
-          conversation, sourceConversation, historySummary });
-        job.snapshot = { ...metadata, entries: [] };
+        await this.compactJobSnapshot(job, patch.compactedConversation);
       }
-      if (patch.status === "complete") {
-        const completedSnapshot = (await this.hydrateJob(job)).snapshot;
-        const key = contextKey(job.snapshot.context.sessionId, job.snapshot.context.branchId);
-        const watermark = state.watermarks[key];
-        const sourceIds = orderedSourceEntryIds(completedSnapshot);
-        if (watermark && sourceIds?.includes(completedSnapshot.finalEntryId)) {
-          const comparison = cursorComparison({ throughEntryId: completedSnapshot.finalEntryId,
-            entryIds: sourceIds }, { throughEntryId: watermark.capturedThroughEntryId,
-            entryIds: watermark.consideredEntryIds });
-          if (!watermark.capturedThroughEntryId ||
-              (comparison !== undefined && comparison > 0)) {
-            watermark.capturedThroughEntryId = completedSnapshot.finalEntryId;
-          }
-          watermark.updatedAt = nowIso(this.now);
-        }
-        const history = completedSnapshot.historySummary;
-        const cursor = summaryCursor(completedSnapshot);
-        if (history && cursor) {
-          const comparison = watermark ? cursorComparison(cursor, {
-            throughEntryId: watermark.historyThroughEntryId,
-            entryIds: watermark.historyEntryIds,
-          }) : undefined;
-          const shouldPublish = watermark && (!watermark.historyDigest ||
-            (comparison !== undefined && comparison > 0));
-          if (shouldPublish) {
-            watermark.historyDigest = await this.storeSnapshot({
-              entries: [],
-              historySummary: history,
-            });
-            watermark.historyThroughEntryId = cursor.throughEntryId;
-            watermark.historyEntryIds = cursor.entryIds.slice(-2_000);
-            watermark.updatedAt = nowIso(this.now);
-          }
-        }
-      }
-      if (patch.status) job.status = patch.status;
-      if (patch.callCount !== undefined) job.callCount = patch.callCount;
-      if (patch.extractedCandidates !== undefined) {
-        job.extractedCandidates = sanitizeValue(
-          jsonSnapshot(patch.extractedCandidates),
-        ) as unknown[];
-      }
-      if (patch.candidateOutcomes) {
-        job.candidateOutcomes = {
-          ...job.candidateOutcomes,
-          ...sanitizeOutcomeMap(jsonSnapshot(patch.candidateOutcomes)),
-        };
-      }
-      if (patch.submissionRejections !== undefined) {
-        job.submissionRejections = patch.submissionRejections
-          .map(scrubDiagnostic)
-          .slice(-3);
-      }
-      if (patch.lastError !== undefined)
-        job.lastError = scrubDiagnostic(patch.lastError);
-      if (patch.startedAt !== undefined) job.startedAt = patch.startedAt;
-      if (patch.status && patch.status !== "running") job.ownerPid = undefined;
-      job.updatedAt = nowIso(this.now);
+      if (patch.status === "complete") await this.recordCompletedCapture(state, job);
+      this.applyCheckpointPatch(job, patch);
       if (job.status === "complete" || job.status === "failed") {
         const { conversation: _conversation, sourceConversation: _sources, ...metadata } =
           job.snapshot;
@@ -1287,6 +1223,81 @@ export class DurableQueueStore {
       }
       return { value: await this.hydrateJob(job) };
     });
+  }
+
+  private async compactJobSnapshot(
+    job: StoredQueueJob,
+    conversation: CompactedConversation,
+  ): Promise<void> {
+    const compacted = compactCaptureSnapshot((await this.hydrateJob(job)).snapshot, conversation);
+    const { entries, conversation: compactedConversation, sourceConversation,
+      historySummary, ...metadata } = compacted;
+    // Inspections have their own immutable sidecar; do not duplicate them in the base payload.
+    const sourceEntries = entries.filter((entry) => !entry.id.startsWith("inspection:"));
+    job.snapshotDigest = await this.storeSnapshot({ entries: sourceEntries,
+      conversation: compactedConversation, sourceConversation, historySummary });
+    job.snapshot = { ...metadata, entries: [] };
+  }
+
+  private async recordCompletedCapture(state: QueueState, job: StoredQueueJob): Promise<void> {
+    const completedSnapshot = (await this.hydrateJob(job)).snapshot;
+    const key = contextKey(job.snapshot.context.sessionId, job.snapshot.context.branchId);
+    const watermark = state.watermarks[key];
+    const sourceIds = orderedSourceEntryIds(completedSnapshot);
+    if (watermark && sourceIds?.includes(completedSnapshot.finalEntryId)) {
+      const comparison = cursorComparison({ throughEntryId: completedSnapshot.finalEntryId,
+        entryIds: sourceIds }, { throughEntryId: watermark.capturedThroughEntryId,
+        entryIds: watermark.consideredEntryIds });
+      if (!watermark.capturedThroughEntryId ||
+          (comparison !== undefined && comparison > 0)) {
+        watermark.capturedThroughEntryId = completedSnapshot.finalEntryId;
+      }
+      watermark.updatedAt = nowIso(this.now);
+    }
+    const history = completedSnapshot.historySummary;
+    const cursor = summaryCursor(completedSnapshot);
+    if (!history || !cursor) return;
+    const comparison = watermark ? cursorComparison(cursor, {
+      throughEntryId: watermark.historyThroughEntryId,
+      entryIds: watermark.historyEntryIds,
+    }) : undefined;
+    const shouldPublish = watermark && (!watermark.historyDigest ||
+      (comparison !== undefined && comparison > 0));
+    if (shouldPublish) {
+      watermark.historyDigest = await this.storeSnapshot({
+        entries: [],
+        historySummary: history,
+      });
+      watermark.historyThroughEntryId = cursor.throughEntryId;
+      watermark.historyEntryIds = cursor.entryIds.slice(-2_000);
+      watermark.updatedAt = nowIso(this.now);
+    }
+  }
+
+  private applyCheckpointPatch(job: StoredQueueJob, patch: QueueCheckpoint): void {
+    if (patch.status) job.status = patch.status;
+    if (patch.callCount !== undefined) job.callCount = patch.callCount;
+    if (patch.extractedCandidates !== undefined) {
+      job.extractedCandidates = sanitizeValue(
+        jsonSnapshot(patch.extractedCandidates),
+      ) as unknown[];
+    }
+    if (patch.candidateOutcomes) {
+      job.candidateOutcomes = {
+        ...job.candidateOutcomes,
+        ...sanitizeOutcomeMap(jsonSnapshot(patch.candidateOutcomes)),
+      };
+    }
+    if (patch.submissionRejections !== undefined) {
+      job.submissionRejections = patch.submissionRejections
+        .map(scrubDiagnostic)
+        .slice(-3);
+    }
+    if (patch.lastError !== undefined)
+      job.lastError = scrubDiagnostic(patch.lastError);
+    if (patch.startedAt !== undefined) job.startedAt = patch.startedAt;
+    if (patch.status && patch.status !== "running") job.ownerPid = undefined;
+    job.updatedAt = nowIso(this.now);
   }
 
   async complete(jobId: string): Promise<QueueJob> {
