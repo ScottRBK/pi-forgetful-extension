@@ -56,9 +56,11 @@ function modelEvidence(record: unknown): unknown {
     }) };
     return record.type === "message" ? { ...record, message: projected } : projected;
   }
-  const key = record.type === "compaction" ? "details" :
-    record.type === "custom" && record.customType === "openai-codex-native-compaction"
-      ? "data" : undefined;
+  let key: "details" | "data" | undefined;
+  if (record.type === "compaction") key = "details";
+  else if (record.type === "custom" && record.customType === "openai-codex-native-compaction") {
+    key = "data";
+  }
   const details = key ? record[key] : undefined;
   if (key && objectRecord(details) && details.kind === "openai-codex-native-compaction" &&
       details.version === 1 && Array.isArray(details.replacementHistory)) {
@@ -317,32 +319,37 @@ export class MemoryTaskContext {
         model: this.model, compactionSettings: settings, contextLimitTokens: this.contextWindow,
         signal, sessionId, complete,
       }, this.compactedHistory?.summary);
-      if (!summary.trim()) throw new Error("Memory compaction returned an empty summary");
-      const lastRecordIndex = context.messages.indexOf(records[count - 1]!);
-      const cut = lastRecordIndex + 1;
-      const consumed = context.messages.slice(0, cut);
-      const messages: Message[] = [{ role: "user", timestamp: Date.now(),
-        content: "Compacted historical evidence (derived context, not new source evidence):\n" +
-          summary }];
-      // A task can fall inside the old prefix after investigation. Keep it verbatim and
-      // outside summarization, alongside the unchanged policy and advertised tool schemas.
-      if (consumed.includes(this.task)) messages.push(this.task);
-      messages.push(...context.messages.slice(cut));
-      const nextSize = contextTokens({ ...context, messages });
-      if (nextSize >= size) {
-        throw new Error("Memory compaction did not reduce context; no records were clipped");
-      }
-      this.compactedHistory = { summary,
-        retainedMessages: messages.filter(message => this.originalHistory!.has(message)) };
-      this.summaryMessage = messages[0];
-      context.messages = messages;
-      size = nextSize;
+      size = this.applySummary(context, summary, records[count - 1]!, size);
       if (onCompacted) await onCompacted(this.getCompactedHistory()!);
       chunks++;
       if (chunks >= maxChunks && (shouldCompact(size, this.contextWindow, settings) ||
           size + targetOutput > this.contextWindow)) return "progress";
     }
     return this.outputAllowance(context);
+  }
+
+  private applySummary(
+    context: Context, summary: string, lastRecord: Message, previousSize: number,
+  ): number {
+    if (!summary.trim()) throw new Error("Memory compaction returned an empty summary");
+    const cut = context.messages.indexOf(lastRecord) + 1;
+    const consumed = context.messages.slice(0, cut);
+    const messages: Message[] = [{ role: "user", timestamp: Date.now(),
+      content: "Compacted historical evidence (derived context, not new source evidence):\n" +
+        summary }];
+    // A task can fall inside the old prefix after investigation. Keep it verbatim and
+    // outside summarization, alongside the unchanged policy and advertised tool schemas.
+    if (consumed.includes(this.task)) messages.push(this.task);
+    messages.push(...context.messages.slice(cut));
+    const nextSize = contextTokens({ ...context, messages });
+    if (nextSize >= previousSize) {
+      throw new Error("Memory compaction did not reduce context; no records were clipped");
+    }
+    this.compactedHistory = { summary,
+      retainedMessages: messages.filter(message => this.originalHistory!.has(message)) };
+    this.summaryMessage = messages[0];
+    context.messages = messages;
+    return nextSize;
   }
 
   private outputAllowance(context: Context): number {
@@ -357,6 +364,21 @@ interface MemoryHistorySummaryOptions {
   signal: AbortSignal;
   sessionId?: string;
   complete: SummaryCompletion;
+}
+
+/** Keep native private calls with every result. Historical user envelopes stay splittable. */
+function smallerSummaryBatch(messages: Message[], count: number): number {
+  let nextCount = Math.max(1, Math.floor(count / 2));
+  while (nextCount > 0 && messages[nextCount]?.role === "toolResult") nextCount--;
+  if (nextCount > 0) return nextCount;
+  // The first group may exceed half the record count and still fit by itself.
+  nextCount = 1;
+  while (nextCount < count && messages[nextCount]?.role === "toolResult") nextCount++;
+  if (nextCount === count) {
+    throw new ContextWindowError("Memory compaction indivisible tool exchange cannot fit; " +
+      "no conversation record was clipped.");
+  }
+  return nextCount;
 }
 
 /** Summarize only the caller-selected evidence; never infers which work was processed. */
@@ -410,20 +432,8 @@ async function summarizeMemoryHistory(
       return { summary: sanitizeText(result.text), count };
     } catch (error) {
       if (!(error instanceof ContextWindowError) || count === 1) throw error;
-      // Keep native private calls with every result. Historical user envelopes stay splittable.
-      let nextCount = Math.max(1, Math.floor(count / 2));
-      while (nextCount > 0 && messages[nextCount]?.role === "toolResult") nextCount--;
-      if (!nextCount) {
-        // The first group may exceed half the record count and still fit by itself.
-        nextCount = 1;
-        while (nextCount < count && messages[nextCount]?.role === "toolResult") nextCount++;
-        if (nextCount === count) {
-          throw new ContextWindowError("Memory compaction indivisible tool exchange cannot fit; " +
-            "no conversation record was clipped.");
-        }
-      }
       // Only local preparation is retried; the oversized request never reached the provider.
-      count = nextCount;
+      count = smallerSummaryBatch(messages, count);
     }
   }
 }

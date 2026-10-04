@@ -1945,6 +1945,62 @@ export function createForgetfulExtension(
       }
     };
 
+    const runCapturePass = async (
+      runtime: Runtime, ctx: ExtensionContext, options: CaptureCheckpointOptions,
+    ): Promise<CaptureCheckpointResult | undefined> => {
+      if (!isCurrentRuntime(runtime, ctx) || !runtime.config.enabled ||
+          runtime.config.captureMode === "off") return undefined;
+      const pending = await refreshQueueNotice(runtime, ctx);
+      if (!isCurrentRuntime(runtime, ctx)) return undefined;
+      if (pending.length > 0) runtime.activity.set("capture-queue",
+        `processing queued work · ${pending.length} remaining…`);
+      // Give an already-waiting foreground resolution the gap between bounded passes.
+      // Its evidence lookup needs the same protection as the eventual write.
+      while (runtime.activeResolutions.size > 0) {
+        await Promise.allSettled(runtime.activeResolutions);
+      }
+      if (!isCurrentRuntime(runtime, ctx)) return undefined;
+      const pass = runtime.capture?.checkpoint?.(options);
+      if (!pass) return undefined;
+      runtime.capturePass = pass;
+      try { return await pass; }
+      finally { if (runtime.capturePass === pass) runtime.capturePass = undefined; }
+    };
+
+    const recordCapturePassResult = (
+      runtime: Runtime, total: CaptureCheckpointResult, result: CaptureCheckpointResult,
+      processed: Set<string>,
+    ): void => {
+      total.processed += result.processed;
+      for (const id of result.processedJobIds) processed.add(id);
+      total.paused ||= result.paused;
+      total.errors.push(...result.errors);
+      runtime.logger.emit("info", "capture.batch_completed", {
+        processed: result.processed, continuation: result.continuation ?? "none",
+        deferredBranches: result.deferredBranches?.length ?? 0,
+      });
+      if (result.discardedJobs?.length) {
+        total.discardedJobs ??= [];
+        total.discardedJobs.push(...result.discardedJobs);
+      }
+    };
+
+    const waitForCaptureContinuation = async (
+      runtime: Runtime, continuation: CaptureCheckpointResult["continuation"],
+    ): Promise<boolean> => {
+      if (!continuation) return false;
+      // Yield between ready batches; a live worker's lock gets a slower, cancellable recheck.
+      try {
+        await delay(continuation === "busy" ? 1_000 : 0, undefined, {
+          signal: runtime.lifecycleController.signal, ref: false,
+        });
+        return true;
+      } catch (error) {
+        if (!runtime.lifecycleController.signal.aborted) throw error;
+        return false;
+      }
+    };
+
     const runCapturePasses = async (
       runtime: Runtime, ctx: ExtensionContext, options?: CaptureCheckpointOptions,
     ): Promise<CaptureCheckpointResult> => {
@@ -1958,36 +2014,12 @@ export function createForgetfulExtension(
         ? runtime.captureDeferrals?.throughTriggerId ?? runtime.captureTriggerId
         : runtime.captureTriggerId;
       try {
-        while (isCurrentRuntime(runtime, ctx) && runtime.config.enabled &&
-            runtime.config.captureMode !== "off") {
-          const pending = await refreshQueueNotice(runtime, ctx);
-          if (!isCurrentRuntime(runtime, ctx)) break;
-          if (pending.length > 0) runtime.activity.set("capture-queue",
-            `processing queued work · ${pending.length} remaining…`);
-          // Give an already-waiting foreground resolution the gap between bounded passes.
-          // Its evidence lookup needs the same protection as the eventual write.
-          while (runtime.activeResolutions.size > 0) {
-            await Promise.allSettled([...runtime.activeResolutions]);
-          }
-          if (!isCurrentRuntime(runtime, ctx)) break;
-          const pass = runtime.capture?.checkpoint?.({
+        for (;;) {
+          const result = await runCapturePass(runtime, ctx, {
             ...options, excludeBranches: [...deferred.values()],
           });
-          if (!pass) break;
-          runtime.capturePass = pass;
-          let result: CaptureCheckpointResult;
-          try { result = await pass; }
-          finally { if (runtime.capturePass === pass) runtime.capturePass = undefined; }
-          total.processed += result.processed;
-          for (const id of result.processedJobIds) processed.add(id);
-          total.paused ||= result.paused;
-          total.errors.push(...result.errors);
-          runtime.logger.emit("info", "capture.batch_completed", {
-            processed: result.processed, continuation: result.continuation ?? "none",
-            deferredBranches: result.deferredBranches?.length ?? 0,
-          });
-          if (result.discardedJobs?.length)
-            (total.discardedJobs ??= []).push(...result.discardedJobs);
+          if (!result) break;
+          recordCapturePassResult(runtime, total, result, processed);
           for (const branch of result.deferredBranches ?? [])
             deferred.set(`${branch.sessionId}\u0000${branch.branchId}`, branch);
           // Freeze the cutoff before reporting failure: a user responding to that report is
@@ -1997,16 +2029,7 @@ export function createForgetfulExtension(
           reportDiscardedCapture(runtime, ctx, result);
           if (runtime.capture) await reportCaptureOutcome(runtime, ctx, runtime.capture, result);
           await handoffPendingConflicts(runtime, ctx);
-          if (!result.continuation) break;
-          // Yield between ready batches; a live worker's lock gets a slower, cancellable recheck.
-          try {
-            await delay(result.continuation === "busy" ? 1_000 : 0, undefined, {
-              signal: runtime.lifecycleController.signal, ref: false,
-            });
-          } catch (error) {
-            if (!runtime.lifecycleController.signal.aborted) throw error;
-            break;
-          }
+          if (!(await waitForCaptureContinuation(runtime, result.continuation))) break;
         }
       } finally {
         if (isCurrentRuntime(runtime, ctx)) runtime.captureDeferrals = {

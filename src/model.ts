@@ -519,7 +519,6 @@ export class PiMemoryModel implements MemoryModelClient {
           initialPreparation ? persistHistory : undefined,
         );
         // Persist only initial source history, never private task replies or read continuations.
-        if (!initialPreparation) return maxTokens;
         initialPreparation = false;
         return maxTokens;
       };

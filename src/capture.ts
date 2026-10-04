@@ -3904,12 +3904,9 @@ export class CaptureService {
     return result;
   }
 
-  /** Run a bounded worker checkpoint. `agent_settled` should call this without awaiting it. */
-  async checkpoint(
+  private async checkpointBranches(
     options?: CaptureSnapshot | CaptureCheckpointOptions,
-  ): Promise<CaptureCheckpointResult> {
-    if (!(await this.enabled()))
-      return { processed: 0, processedJobIds: [], paused: true, errors: [] };
+  ): Promise<CaptureBranch[]> {
     const requestedSessionId =
       options && "context" in options
         ? options.context.sessionId
@@ -3927,7 +3924,6 @@ export class CaptureService {
     } else if (this.sessionId && this.branchId) {
       requestedBranch = { sessionId: this.sessionId, branchId: this.branchId };
     }
-    const excluded = options && "excludeBranches" in options ? options.excludeBranches ?? [] : [];
     const jobs = (await this.queue.listJobMetadata(this.identity))
       .filter((job) => ["pending", "running", "paused"].includes(job.status) &&
         !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite);
@@ -3942,7 +3938,7 @@ export class CaptureService {
         ]),
       ).values(),
     ];
-    const branches = requestedBranch && allBranches.some((branch) =>
+    return requestedBranch && allBranches.some((branch) =>
       branch.sessionId === requestedBranch.sessionId &&
       branch.branchId === requestedBranch.branchId)
       ? [
@@ -3954,6 +3950,33 @@ export class CaptureService {
           ),
         ]
       : allBranches;
+  }
+
+  private appendCheckpointResult(
+    total: CaptureCheckpointResult, result: CaptureCheckpointResult,
+  ): void {
+    total.processed += result.processed;
+    total.processedJobIds.push(...result.processedJobIds);
+    if (result.discardedJobs?.length) {
+      total.discardedJobs ??= [];
+      total.discardedJobs.push(...result.discardedJobs);
+    }
+    total.paused ||= result.paused;
+    total.errors.push(...result.errors);
+    if (result.deferredBranches?.length) {
+      total.deferredBranches ??= [];
+      total.deferredBranches.push(...result.deferredBranches);
+    }
+  }
+
+  /** Run a bounded worker checkpoint. `agent_settled` should call this without awaiting it. */
+  async checkpoint(
+    options?: CaptureSnapshot | CaptureCheckpointOptions,
+  ): Promise<CaptureCheckpointResult> {
+    if (!(await this.enabled()))
+      return { processed: 0, processedJobIds: [], paused: true, errors: [] };
+    const excluded = options && "excludeBranches" in options ? options.excludeBranches ?? [] : [];
+    const branches = await this.checkpointBranches(options);
     const total: CaptureCheckpointResult = {
       processed: 0,
       processedJobIds: [],
@@ -3967,18 +3990,7 @@ export class CaptureService {
       if (excluded.some((item) => item.sessionId === branch.sessionId &&
           item.branchId === branch.branchId)) continue;
       const result = await this.checkpointBranch(branch, remaining);
-      total.processed += result.processed;
-      total.processedJobIds.push(...result.processedJobIds);
-      if (result.discardedJobs?.length) {
-        total.discardedJobs ??= [];
-        total.discardedJobs.push(...result.discardedJobs);
-      }
-      total.paused ||= result.paused;
-      total.errors.push(...result.errors);
-      if (result.deferredBranches?.length) {
-        total.deferredBranches ??= [];
-        total.deferredBranches.push(...result.deferredBranches);
-      }
+      this.appendCheckpointResult(total, result);
       if (result.continuation === "busy") busyBranches.push(branch);
       remaining -= result.processed;
     }
