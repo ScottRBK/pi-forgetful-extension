@@ -1167,6 +1167,20 @@ export class DurableQueueStore {
     });
   }
 
+  /** Check eligibility from the index without loading source sidecars or claiming an attempt. */
+  async hasClaimableWork(
+    identity: QueueIdentity,
+    excludeBranches: Array<{ sessionId: string; branchId: string }> = [],
+  ): Promise<boolean> {
+    return this.mutate((state) => ({ changed: false,
+      value: state.jobs.some((job) => identityMatches(job, identity) &&
+        !excludeBranches.some((branch) => this.matchesBranch(job, branch)) &&
+        !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite &&
+        !interruptedWrite(job) && (["pending", "paused"].includes(job.status) ||
+          (job.status === "running" && this.runningJobCanBeRecovered(job, this.now().getTime())))),
+    }));
+  }
+
   async claimNext(
     identity: QueueIdentity = this.defaultIdentity(),
     branch?: { sessionId: string; branchId: string },
@@ -1247,6 +1261,19 @@ export class DurableQueueStore {
     job.startedAt = nowIso(this.now);
     job.ownerPid = process.pid;
     job.updatedAt = job.startedAt;
+  }
+
+  /** A durable preparation slice advances context without spending a failure attempt. */
+  async releaseProgress(jobId: string): Promise<void> {
+    await this.mutate((state) => {
+      const job = state.jobs.find((item) => item.id === jobId);
+      if (job?.status !== "running") return { value: undefined, changed: false };
+      job.status = "pending";
+      job.attempts = Math.max(0, job.attempts - 1);
+      job.ownerPid = undefined;
+      job.updatedAt = nowIso(this.now);
+      return { value: undefined };
+    });
   }
 
   /** Lifecycle cancellation releases a claim without consuming a failure attempt. */

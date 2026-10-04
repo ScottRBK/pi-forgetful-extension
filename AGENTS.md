@@ -19,8 +19,13 @@ The intended experience requires no memory commands during normal work:
 - startup does local setup only; project discovery and recovery run in the background, with one
   transient activity widget; early settled turns are queued durably until discovery completes;
 - settled capture pins session/branch history, reusing a successful historical summary plus
-  recent messages; source evidence remains durable until success or three failed/permission-paused
-  attempts; ordinary lifecycle cancellation does not consume the failure allowance;
+  recent messages; initial preparation checkpoints each summary chunk with its exact source
+  boundary before yielding, separately from extraction's call allowance; partial summaries stay
+  job-local, and provider replay fields are omitted only from the model-facing view;
+- eight-claim capture passes automatically continue eligible work while Pi remains open; failed
+  branches are deferred for the drain cycle and busy worker locks get cancellable delayed checks;
+  source evidence remains durable until success or three failed/permission-paused attempts;
+  preparation-only progress and ordinary lifecycle cancellation do not consume that allowance;
 - shutdown cancels capture models/reads and allows accepted writes a 500 ms receipt grace period;
   uncertain mutations stay pending without replay; disk checkpoints and lock release are awaited;
 - snapshots remain separate from the 50 MiB queue index; watermarks prevent replay independently

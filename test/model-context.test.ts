@@ -11,6 +11,8 @@ import { Type } from "typebox";
 import type { Context, Message } from "@earendil-works/pi-ai";
 import { PiMemoryModel, type PiMemoryModelOptions } from "../src/model.ts";
 import * as memoryContext from "../src/model-context.ts";
+import type { CaptureSnapshot, CompactedConversation, ModelRequest } from "../src/contracts.ts";
+import { DurableQueueStore } from "../src/queue.ts";
 
 type WireRequest = {
   messages: Array<{ role: string; tool_call_id?: string;
@@ -99,7 +101,7 @@ async function fixture(
   const model = new PiMemoryModel(registry, {
     provider: "opencode", id: selection,
   }, options);
-  return { model, requests, headers, registry, selected };
+  return { model, requests, headers, registry, selected, directory };
 }
 
 const submission = {
@@ -341,10 +343,12 @@ test("read continuations compact complete outcomes and keep the task and correct
     return accepted;
   }, { compactionSettings: settings }, "small");
   const inspected: number[] = [];
+  let savedHistory = 0;
 
   // Act.
   const result = await model.complete({ purpose: "capture", policy: "CURRENT_POLICY",
     input: { task: "CURRENT_TASK" }, submission,
+    onConversationCompacted: async () => { savedHistory++; },
     readTools: [{ name: "inspect_source", description: "Read actual source evidence.",
       parameters: Type.Object({ id: Type.Integer() }, { additionalProperties: false }),
       execute: async (input) => {
@@ -360,6 +364,7 @@ test("read continuations compact complete outcomes and keep the task and correct
   assert.deepEqual(result, { answer: "Recorded." });
   assert.deepEqual(inspected, [1, 2, 3, 4, 5, 6]);
   assert.equal(taskCalls, 9);
+  assert.equal(savedHistory, 0, "private investigation summaries must not become reusable history");
   const summaries = requests.filter((request) => !request.tools?.length);
   assert.ok(summaries.length > 0);
   const firstSummary = summaries[0]!.messages.map(messageText).join("\n");
@@ -725,4 +730,604 @@ test("private history summarization carries a prior summary and preserves whole 
       assert.ok(received.includes(` END_${index}`));
     }
     assert.deepEqual(records, original);
+  });
+
+test("model evidence omits native provider replay without altering arbitrary payloads", async t => {
+  // Arrange: signatures occur both in SDK content and inside unrelated source payloads.
+  const payload = { thinkingSignature: "PAYLOAD_THINKING", textSignature: "PAYLOAD_TEXT",
+    thoughtSignature: "PAYLOAD_TOOL_THOUGHT",
+    replacementHistory: [{ encrypted_content: "PAYLOAD_ENCRYPTED" }] };
+  const conversation = [
+    { type: "message", id: "assistant-source", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "Readable reasoning.", thinkingSignature: "NATIVE_THINKING" },
+      { type: "text", text: "Readable answer.", textSignature: "NATIVE_TEXT" },
+      { type: "toolCall", id: "call", name: "inspect", arguments: payload,
+        thoughtSignature: "NATIVE_TOOL_THOUGHT" },
+    ] } },
+    { type: "compaction", id: "native-summary", summary: "Readable native summary.",
+      details: { kind: "openai-codex-native-compaction", version: 1,
+        modelKey: "openai-codex:openai-codex-responses:model",
+        replacementHistory: [{ type: "compaction", encrypted_content: "NATIVE_ENCRYPTED" }],
+        readableMetadata: "Keep this metadata." } },
+    { type: "message", id: "user-source", message: { role: "user", content: [payload] } },
+    { type: "message", id: "tool-source", message: { role: "toolResult", details: payload } },
+    { type: "compaction", id: "unknown-version", details: {
+      kind: "openai-codex-native-compaction", version: 2, ...payload } },
+  ];
+  const original = structuredClone(conversation);
+  const { model, requests } = await fixture(t, () => accepted);
+
+  // Act.
+  await model.complete({ purpose: "capture", policy: "Submit.", input: payload,
+    conversation, submission });
+
+  // Assert: only fields at known SDK/plugin locations are projected out.
+  const wire = JSON.stringify(requests[0]);
+  assert.doesNotMatch(wire, /NATIVE_THINKING|NATIVE_TEXT|NATIVE_ENCRYPTED|NATIVE_TOOL_THOUGHT/);
+  assert.match(wire, /Readable reasoning\.|Readable answer\.|Readable native summary\./);
+  assert.match(wire, /Keep this metadata\./);
+  for (const marker of ["PAYLOAD_THINKING", "PAYLOAD_TEXT", "PAYLOAD_ENCRYPTED",
+    "PAYLOAD_TOOL_THOUGHT"]) {
+    assert.match(wire, new RegExp(marker));
+  }
+  assert.deepEqual(conversation, original);
+});
+
+test("initial capture summaries checkpoint each cumulative chunk before another provider call",
+  async t => {
+    // Arrange: several whole-record chunks are necessary to fit the private window.
+    const saved: CompactedConversation[] = [];
+    const observedCheckpoints: number[] = [];
+    const { model, requests } = await fixture(t, (request, index) => {
+      observedCheckpoints.push(saved.length);
+      return request.tools?.length ? accepted : `CUMULATIVE_SUMMARY_${index}`;
+    }, { compactionSettings: settings }, "small");
+    const conversation = longConversation();
+
+    // Act.
+    await model.complete({ purpose: "capture", policy: "Submit.", input: "PRIVATE_TASK",
+      conversation, submission, onConversationCompacted: async view => {
+        await delay(5);
+        saved.push(view);
+      } });
+
+    // Assert: every checkpoint names exactly the original prefix and leaves the raw tail intact.
+    const summaries = requests.filter(request => !request.tools?.length);
+    assert.ok(summaries.length > 1);
+    assert.equal(saved.length, summaries.length);
+    assert.deepEqual(observedCheckpoints, requests.map((_, index) => index));
+    let previousCut = 0;
+    for (const [index, view] of saved.entries()) {
+      const cut = conversation.length - view.retainedConversation.length;
+      assert.ok(cut > previousCut);
+      assert.equal(view.summarizedThroughEntryId, conversation[cut - 1]!.id);
+      assert.equal(view.summary, `CUMULATIVE_SUMMARY_${index + 1}`);
+      assert.deepEqual(view.retainedConversation, conversation.slice(cut));
+      assert.ok(view.retainedConversation.every((record, tailIndex) =>
+        record === conversation[cut + tailIndex]));
+      if (index > 0) assert.match(JSON.stringify(summaries[index]),
+        new RegExp(`CUMULATIVE_SUMMARY_${index}`));
+      previousCut = cut;
+    }
+  });
+
+test("capture preflight yields one durable chunk then resumes to ready before extraction",
+  async t => {
+  // Arrange: persistence rebuilds the next request from a cumulative summary and raw tail.
+  let conversation: readonly unknown[] = longConversation();
+  const original = structuredClone(conversation);
+  const saved: CompactedConversation[] = [];
+  const { model, requests } = await fixture(t, (request, index) => request.tools?.length
+    ? accepted : `PERSISTED_SUMMARY_${index}`, { compactionSettings: settings }, "small");
+  const request = () => ({ purpose: "capture" as const, policy: "Submit.", input: "EXTRACT_TASK",
+    conversation, submission, onConversationCompacted: async (
+      view: CompactedConversation,
+    ) => {
+      await delay(5);
+      saved.push(view);
+      conversation = [{ type: "capture_history_summary",
+        id: `capture-summary:${view.summarizedThroughEntryId}`,
+        throughEntryId: view.summarizedThroughEntryId, summary: view.summary },
+      ...view.retainedConversation];
+    } });
+
+  // Act: every slice is a new public request, as after a capture queue pass/restart.
+  const first = await model.prepareCapture(request());
+  assert.equal(first, "progress");
+  assert.equal(requests.length, 1);
+  assert.equal(saved.length, 1);
+  let outcome: "ready" | "progress" = first;
+  for (let slice = 0; outcome === "progress" && slice < 10; slice++) {
+    const before = requests.length;
+    outcome = await model.prepareCapture(request());
+    assert.ok(requests.length - before <= 1);
+  }
+  const beforeExtraction = requests.length;
+  await model.complete(request());
+
+  // Assert: no preparation request advertises the extraction tools or repeats saved originals.
+  assert.equal(outcome, "ready");
+  assert.ok(saved.length > 1);
+  assert.equal(requests.length, beforeExtraction + 1);
+  assert.ok(requests.slice(0, beforeExtraction).every(request => !request.tools?.length));
+  assert.ok(requests.at(-1)!.tools?.length);
+  assert.match(JSON.stringify(requests[1]), /PERSISTED_SUMMARY_1/);
+  assert.doesNotMatch(JSON.stringify(requests[1]), /BEGIN_0 /);
+  assert.deepEqual(original, longConversation());
+});
+
+test("capture preparation rejects an empty provider summary without saving or yielding",
+  async t => {
+  // Arrange: a successful transport response contains no usable summary.
+  let checkpoints = 0;
+  const { model, requests } = await fixture(t, () => "   ", {
+    compactionSettings: settings,
+  }, "small");
+
+  // Act.
+  await assert.rejects(model.prepareCapture({ purpose: "capture", policy: "Submit.", input: {},
+    conversation: longConversation(), submission,
+    onConversationCompacted: async () => { checkpoints++; } }), (error: Error) => {
+    assert.match(String(error.cause), /empty summary/);
+    return true;
+  });
+
+  // Assert.
+  assert.equal(requests.length, 1);
+  assert.equal(checkpoints, 0);
+});
+
+test("capture preparation fails before summaries when the unsummarised task cannot fit",
+  async t => {
+  // Arrange: historical summaries cannot shrink the extraction task itself.
+  let checkpoints = 0;
+  const { model, requests } = await fixture(t, () => "Small source summary.", {
+    compactionSettings: settings,
+  }, "small");
+
+  // Act.
+  await assert.rejects(model.prepareCapture({ purpose: "capture", policy: "Submit.",
+    input: "UNSUMMARISED_TASK ".repeat(10_000), conversation: longConversation(), submission,
+    onConversationCompacted: async () => { checkpoints++; } }), (error: Error) => {
+    assert.match(String(error.cause), /cannot fit/);
+    return true;
+  });
+
+  // Assert: source history is not repeatedly summarised for an irreparable input.
+  assert.equal(requests.length, 0);
+  assert.equal(checkpoints, 0);
+});
+
+test("interrupted cumulative chunks resume from the saved boundary after actual queue restart",
+  async t => {
+    // Arrange: original source history needs more than two summaries.
+    const controller = new AbortController();
+    const { model, requests, directory, registry } = await fixture(t, (_request, index) =>
+      `DURABLE_CUMULATIVE_${index}`, { compactionSettings: settings }, "small");
+    const conversation = Array.from({ length: 36 }, (_, index) => ({
+      id: `source-${index}`, role: "user" as const,
+      text: `ORIGINAL_${index} ${"Historical source details. ".repeat(140)} END_${index}`,
+    }));
+    const snapshot: CaptureSnapshot = { id: "interrupted-model", instanceId: "isolated-test",
+      context: { cwd: directory, sessionId: "session", branchId: "branch" },
+      entries: conversation, conversation, conversationCoverage: "complete",
+      finalEntryId: "source-35", mode: "observe", scope: "global", policy: "Submit.",
+      modelVersion: model.version, createdAt: new Date().toISOString() };
+    const queue = new DurableQueueStore({ directory, instanceId: "isolated-test" });
+    const queued = await queue.enqueue(snapshot);
+    let checkpoints = 0;
+    const request: ModelRequest = { purpose: "capture", policy: "Submit.", input: "TASK",
+      conversation, submission, signal: controller.signal,
+      onConversationCompacted: async view => {
+        await queue.checkpoint(queued.jobId, { compactedConversation: view });
+        if (++checkpoints === 2) controller.abort();
+      } };
+
+    // Act: interrupt after the second durable checkpoint, reopen the real queue and adapter.
+    await assert.rejects(model.complete(request), /aborted/);
+    const reopened = new DurableQueueStore({ directory, instanceId: "isolated-test" });
+    const job = await reopened.getJob(queued.jobId);
+    assert.ok(job);
+    const resumed = new PiMemoryModel(registry, { provider: "opencode", id: "small" }, {
+      compactionSettings: settings,
+    });
+    await resumed.prepareCapture({ ...request, signal: undefined,
+      conversation: job.snapshot.conversation,
+      onConversationCompacted: async view => {
+        await reopened.checkpoint(queued.jobId, { compactedConversation: view });
+      } });
+
+    // Assert: the saved summary is used, covered originals are not replayed, raw sources survive.
+    assert.equal(checkpoints, 2);
+    assert.equal(requests.length, 3);
+    assert.equal(job.snapshot.historySummary?.text, "DURABLE_CUMULATIVE_2");
+    const boundary = Number(job.snapshot.historySummary!.throughEntryId.split("-")[1]);
+    const nextRequest = JSON.stringify(requests[2]);
+    assert.match(nextRequest, /DURABLE_CUMULATIVE_2/);
+    for (let index = 0; index <= boundary; index++) {
+      assert.ok(!nextRequest.includes(`ORIGINAL_${index} `));
+    }
+    assert.deepEqual(job.snapshot.sourceConversation, conversation);
+    assert.deepEqual(job.snapshot.conversation?.slice(1), conversation.slice(boundary + 1));
+  });
+
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+for (const interruption of ["timeout", "cancellation"] as const) {
+  test(`capture preparation ${interruption} throws without checkpointing or yielding`, async t => {
+    // Arrange: hold a real HTTP summary response while the model's deadline/signal fires.
+    const arrived = barrier();
+    const blocked = barrier();
+    const controller = new AbortController();
+    let checkpoints = 0;
+    const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+    const { model, requests } = await fixture(t, async () => {
+      arrived.release();
+      await blocked.promise;
+      return "Late summary.";
+    }, { compactionSettings: settings,
+      logger: { emit: (_level, event, data) => { events.push({ event, data }); },
+        flush: async () => {} } }, "small");
+    t.after(blocked.release);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+
+    // Act.
+    const rejected = assert.rejects(model.prepareCapture({ purpose: "capture", policy: "Submit.",
+      input: {}, conversation: longConversation(), submission, signal: controller.signal,
+      onConversationCompacted: async () => { checkpoints++; } }), (error: Error) => {
+      assert.match(interruption === "timeout" ? String(error.cause) : error.message,
+        interruption === "timeout" ? /timeout/ : /aborted/);
+      return true;
+    });
+    await arrived.promise;
+    if (interruption === "timeout") t.mock.timers.tick(180_000);
+    else controller.abort();
+    await rejected;
+
+    // Assert: the real attempted summary is counted, with no fake refund or progress result.
+    assert.equal(requests.length, 1);
+    assert.equal(checkpoints, 0);
+    assert.equal(events.find(entry => entry.event === "model.calls")?.data?.providerCalls, 1);
+    assert.equal(events.find(entry => entry.event === "model.calls")?.data?.compactionCalls, 1);
+  });
+}
+
+test("each preparation slice gets a bounded deadline independent of the next slice", async t => {
+  // Arrange: two 120-second provider chunks exceed a single shared 180-second allowance.
+  const arrived = [barrier(), barrier()];
+  const blocked = [barrier(), barrier()];
+  let conversation: readonly unknown[] = longConversation();
+  const { model, requests } = await fixture(t, async (_request, index) => {
+    arrived[index - 1]!.release();
+    await blocked[index - 1]!.promise;
+    return `TIMED_SUMMARY_${index}`;
+  }, { compactionSettings: settings }, "small");
+  t.after(() => blocked.forEach(gate => gate.release()));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const request = (): ModelRequest => ({ purpose: "capture", policy: "Submit.", input: {},
+    conversation, submission, onConversationCompacted: async view => {
+      conversation = [{ type: "capture_history_summary",
+        id: `capture-summary:${view.summarizedThroughEntryId}`,
+        throughEntryId: view.summarizedThroughEntryId, summary: view.summary },
+      ...view.retainedConversation];
+    } });
+
+  // Act.
+  const first = model.prepareCapture(request());
+  await arrived[0]!.promise;
+  t.mock.timers.tick(120_000);
+  blocked[0]!.release();
+  assert.equal(await first, "progress");
+  const second = model.prepareCapture(request());
+  await arrived[1]!.promise;
+  t.mock.timers.tick(120_000);
+  blocked[1]!.release();
+  const outcome = await second;
+
+  // Assert: both completed chunks remain real provider work, without a carryover timeout.
+  assert.equal(requests.length, 2);
+  assert.equal(outcome, "ready");
+  assert.match(JSON.stringify(conversation[0]), /TIMED_SUMMARY_2/);
+});
+
+test("capture read continuation retains the extraction deadline after preparation", async t => {
+  // Arrange: the first task response consumes 120 seconds, then a read is held open.
+  const arrived = barrier();
+  const responseGate = barrier();
+  const readStarted = barrier();
+  const readGate = barrier();
+  const { model, requests } = await fixture(t, async () => {
+    arrived.release();
+    await responseGate.promise;
+    return { name: "inspect_source", arguments: {} };
+  });
+  t.after(() => { responseGate.release(); readGate.release(); });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const request: ModelRequest = { purpose: "capture", policy: "Submit.", input: {}, submission,
+    readTools: [{ name: "inspect_source", description: "Read source.",
+      parameters: Type.Object({}), execute: async (_input, signal) => {
+        readStarted.release();
+        await readGate.promise;
+        assert.equal(signal.aborted, true);
+        return "Late evidence.";
+      } }] };
+
+  // Act: preparation fits immediately; extraction and its reads share one new deadline.
+  assert.equal(await model.prepareCapture(request), "ready");
+  const rejected = assert.rejects(model.complete(request), (error: Error) => {
+    assert.match(String(error.cause), /timeout/);
+    return true;
+  });
+  await arrived.promise;
+  t.mock.timers.tick(120_000);
+  responseGate.release();
+  await readStarted.promise;
+  t.mock.timers.tick(60_000);
+  await rejected;
+  readGate.release();
+
+  // Assert: timeout stops the read continuation instead of resetting its allowance.
+  assert.equal(requests.length, 1);
+});
+
+for (const failure of ["oversized record", "nonreducing summary", "oversized saved summary",
+  "failed persistence", "missing persistence"] as const) {
+  test(`capture preparation fails on ${failure} instead of returning progress`, async t => {
+    // Arrange: each failure must leave the caller with an error, not a resumable yield.
+    let checkpoints = 0;
+    const { model, requests } = await fixture(t, () => failure === "nonreducing summary"
+      ? "Bloated nonreducing summary. ".repeat(4_000) : "Small summary.", {
+      compactionSettings: { ...settings,
+        keepRecentTokens: failure === "oversized saved summary" ? 0 : settings.keepRecentTokens },
+    }, "small");
+    const conversation = failure === "oversized record" ? [
+      { id: "oversized", text: "Readable source history. ".repeat(10_000) },
+    ] : failure === "oversized saved summary" ? [
+      { type: "capture_history_summary", id: "capture-summary:old", throughEntryId: "old",
+        summary: "Previous derived history. ".repeat(500) },
+    ] : longConversation();
+    const expected = failure === "oversized record" ? /cannot fit/ :
+      failure === "nonreducing summary" ? /did not reduce/ :
+      failure === "oversized saved summary" ? /cannot fit/ :
+      failure === "failed persistence" ? /CHECKPOINT_FAILED/ : /requires durable progress/;
+
+    // Act.
+    await assert.rejects(model.prepareCapture({ purpose: "capture", input: {}, conversation,
+      policy: failure === "oversized saved summary" ? "p".repeat(22_000) : "Submit.", submission,
+      onConversationCompacted: failure === "missing persistence" ? undefined : async () => {
+        checkpoints++;
+        throw new Error("CHECKPOINT_FAILED");
+      } }), (error: Error) => {
+      assert.match(String(error.cause), expected);
+      return true;
+    });
+
+    // Assert: no further summary or extraction follows a failed chunk.
+    assert.equal(requests.length,
+      failure === "oversized record" || failure === "oversized saved summary" ||
+        failure === "missing persistence" ? 0 : 1);
+    assert.equal(checkpoints, failure === "failed persistence" ? 1 : 0);
+  });
+}
+
+test("large native replay cannot force compaction of small readable evidence", async t => {
+  // Arrange: encrypted replay is huge, while useful source text and a native image are small.
+  const conversation = [
+    { type: "message", id: "reasoning", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "Readable source reasoning.",
+        thinkingSignature: "OPAQUE_THINKING_REPLAY".repeat(10_000) },
+      { type: "text", text: "Readable source outcome.",
+        textSignature: "OPAQUE_TEXT_REPLAY".repeat(10_000) },
+    ] } },
+    { type: "custom", customType: "openai-codex-native-compaction", id: "custom-checkpoint",
+      data: { kind: "openai-codex-native-compaction", version: 1, modelKey: "native:model",
+        replacementHistory: [{ type: "compaction",
+          encrypted_content: "OPAQUE_COMPACTION_REPLAY".repeat(10_000) }],
+        summary: "Readable checkpoint metadata." } },
+    imageRecord(),
+  ];
+  const original = structuredClone(conversation);
+  const { model, requests } = await fixture(t, () => accepted, {
+    compactionSettings: settings,
+  }, "vision");
+
+  // Act.
+  assert.equal(await model.prepareCapture({ purpose: "capture", policy: "Submit.", input: {},
+    conversation, submission }), "ready");
+  await model.complete({ purpose: "capture", policy: "Submit.", input: {},
+    conversation, submission });
+
+  // Assert: the task receives readable context and its image, with no summary provider calls.
+  assert.equal(requests.length, 1);
+  const wire = JSON.stringify(requests[0]);
+  assert.doesNotMatch(wire, /OPAQUE_/);
+  assert.match(wire, /Readable source reasoning\.|Readable source outcome\./);
+  assert.match(wire, /Readable checkpoint metadata\./);
+  assert.match(wire, new RegExp(`data:${image.mimeType};base64,`));
+  assert.deepEqual(conversation, original);
+});
+
+for (const action of ["prepareCapture", "complete"] as const) {
+  test(`saved source summary resumes through ${action} above soft threshold without paid summary`,
+    async t => {
+      // Arrange: preparation persists a prefix; its unchanged recent tail fits the hard window.
+      const recent = { id: "recent-tail", role: "user",
+        text: "Readable recent tail. ".repeat(900) };
+      const older = { id: "older-source", role: "user" as const,
+        text: "Older source evidence. ".repeat(500) };
+      let conversation: readonly unknown[] = [older, recent];
+      const saved: CompactedConversation[] = [];
+      const configured = { enabled: true, reserveTokens: 1_200, keepRecentTokens: 4_000 };
+      const { model, requests, registry, directory } = await fixture(t, request =>
+        request.tools?.length
+        ? accepted : "CUMULATIVE_SAVED_SOURCE", { compactionSettings: configured }, "small");
+      const queue = new DurableQueueStore({ directory, instanceId: "summary-resume" });
+      const snapshot: CaptureSnapshot = { id: "summary-resume", instanceId: "summary-resume",
+        context: { cwd: directory, sessionId: "session", branchId: "branch" },
+        entries: [older, { ...recent, role: "user" }], conversation,
+        conversationCoverage: "complete", finalEntryId: recent.id,
+        mode: "observe", scope: "global", policy: "Submit.", modelVersion: model.version,
+        createdAt: new Date().toISOString() };
+      const queued = await queue.enqueue(snapshot);
+      const request = (): ModelRequest => ({ purpose: "capture", policy: "p".repeat(9_000),
+        input: {}, conversation, submission, onConversationCompacted: async view => {
+          saved.push(view);
+          const updated = await queue.checkpoint(queued.jobId, { compactedConversation: view });
+          conversation = updated.snapshot.conversation!;
+        } });
+      assert.equal(await model.prepareCapture(request()), "progress");
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0]!.summarizedThroughEntryId, "older-source");
+      const resumed = new PiMemoryModel(registry, { provider: "opencode", id: "small" }, {
+        compactionSettings: configured,
+      });
+      const reopened = new DurableQueueStore({ directory, instanceId: "summary-resume" });
+      const persisted = await reopened.getJob(queued.jobId);
+      assert.ok(persisted);
+      conversation = persisted.snapshot.conversation!;
+      const before = requests.length;
+
+      // Act: a fresh instance represents the next pass or a new job reusing branch history.
+      const result = await resumed[action](request());
+
+      // Assert: retained context is admitted without resummarising or publishing the old boundary.
+      assert.deepEqual(result, action === "prepareCapture" ? "ready" : { answer: "Recorded." });
+      assert.equal(saved.length, 1);
+      assert.equal(requests.length - before, action === "prepareCapture" ? 0 : 1);
+      assert.equal(saved[0]!.retainedConversation[0], recent);
+      assert.deepEqual(conversation[1], recent);
+      if (action === "complete") {
+        assert.ok(requests.at(-1)!.tools?.length);
+        assert.match(JSON.stringify(requests.at(-1)), /CUMULATIVE_SAVED_SOURCE/);
+        assert.match(JSON.stringify(requests.at(-1)), /Readable recent tail/);
+      }
+    });
+}
+
+test("resumed compaction sends fresh whole records together with the cumulative prior summary",
+  async t => {
+    // Arrange: later originals exceed the budget, so the saved summary must be extended.
+    const prior = { type: "capture_history_summary", id: "capture-summary:earlier",
+      throughEntryId: "earlier",
+      summary: "PRIOR_REUSABLE_SUMMARY api_key=fixture-sensitive-value" };
+    const originals = longConversation();
+    const saved: CompactedConversation[] = [];
+    const { registry, requests } = await fixture(t, () => "EXTENDED_CUMULATIVE_SUMMARY", {
+      compactionSettings: settings,
+    }, "small");
+    const model = new PiMemoryModel(registry, { provider: "opencode", id: "small" }, {
+      compactionSettings: settings,
+    });
+
+    // Act.
+    const result = await model.prepareCapture({ purpose: "capture", policy: "Submit.", input: {},
+      conversation: [prior, ...originals], submission,
+      onConversationCompacted: async view => { saved.push(view); } });
+
+    // Assert: prior derived context is carried as a summary, not reclassified as a source record.
+    assert.equal(result, "progress");
+    assert.equal(requests.length, 1);
+    const sent = requests[0]!.messages.map(messageText).join("\n");
+    assert.match(sent, /PRIOR_REUSABLE_SUMMARY/);
+    assert.doesNotMatch(sent, /fixture-sensitive-value/);
+    assert.doesNotMatch(sent, /capture_history_summary|capture-summary:earlier/);
+    assert.match(sent, /BEGIN_0 .* END_0/);
+    assert.equal(saved.length, 1);
+    const cut = originals.length - saved[0]!.retainedConversation.length;
+    assert.ok(cut > 0);
+    assert.equal(saved[0]!.summarizedThroughEntryId, originals[cut - 1]!.id);
+    assert.equal(saved[0]!.summary, "EXTENDED_CUMULATIVE_SUMMARY");
+    assert.deepEqual(saved[0]!.retainedConversation, originals.slice(cut));
+  });
+
+test("private read compaction fails explicitly when an indivisible tool exchange cannot fit",
+  async t => {
+    // Arrange: native read replies fit individually; summary JSON escaping enlarges the old group.
+    let taskCalls = 0;
+    let rejectedOrphan = false;
+    let savedHistory = 0;
+    const { model, requests } = await fixture(t, request => {
+      if (!request.tools?.length) return "Older investigation summary.";
+      if (++taskCalls <= 2) return { name: "inspect_source", arguments: {
+        step: taskCalls, reason: taskCalls === 1 ? "source".repeat(500) : "next",
+      } };
+      const calls = new Set(request.messages.flatMap(message =>
+        message.tool_calls?.map(call => call.id) ?? []));
+      rejectedOrphan = request.messages.some(message => message.role === "tool" &&
+        !calls.has(message.tool_call_id!));
+      return rejectedOrphan ? { status: 400, body: "ORPHAN_REAL_PRIVATE_RESULT" } : accepted;
+    }, { compactionSettings: settings }, "small");
+    const originalBody = "ESCAPED_RESULT_START" + String.raw`"\\":`.repeat(4_000) +
+      "ESCAPED_RESULT_END";
+    const inspected: number[] = [];
+
+    // Act: these are actual private assistant/tool messages, not historical user envelopes.
+    await assert.rejects(model.complete({ purpose: "capture", policy: "Submit.", input: "TASK",
+      submission, onConversationCompacted: async () => { savedHistory++; },
+      readTools: [{ name: "inspect_source", description: "Read original source.",
+        parameters: Type.Object({ step: Type.Integer(), reason: Type.String() }),
+        execute: async input => {
+          const step = (input as { step: number }).step;
+          inspected.push(step);
+          return step === 1 ? originalBody : "FRESH_RESULT ".repeat(400);
+        } }] }), (error: Error) => {
+      assert.match(String(error.cause), /indivisible tool exchange.*cannot fit/);
+      return true;
+    });
+
+    // Assert: preparation fails before a paid partial summary or orphaned task request.
+    assert.deepEqual(inspected, [1, 2]);
+    assert.equal(rejectedOrphan, false);
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every(request => request.tools?.length));
+    assert.equal(savedHistory, 0);
+  });
+
+test("private summary chunks keep whole tool batches when a smaller complete exchange fits",
+  async t => {
+    // Arrange: halving five old native records would cut inside the first two-result batch.
+    let taskCalls = 0;
+    const { model, requests } = await fixture(t, request => {
+      if (!request.tools?.length) return "Entire first tool exchange summary.";
+      if (++taskCalls === 1) return [1, 2].map(step => ({ name: "inspect_source",
+        arguments: { step, reason: "a".repeat(600) } }));
+      if (taskCalls <= 3) return { name: "inspect_source", arguments: {
+        step: taskCalls + 1, reason: taskCalls === 2 ? "a".repeat(1_500) : "next",
+      } };
+      const calls = new Set(request.messages.flatMap(message =>
+        message.tool_calls?.map(call => call.id) ?? []));
+      return request.messages.some(message => message.role === "tool" &&
+        !calls.has(message.tool_call_id!))
+        ? { status: 400, body: "ORPHAN_PRIVATE_BATCH" } : accepted;
+    }, { compactionSettings: settings }, "small");
+    const bodies = [String.raw`"\\":`.repeat(1_000), "SECOND_READ_BODY ".repeat(430),
+      String.raw`"\\":`.repeat(1_500), "FRESH_READ_BODY ".repeat(400)];
+
+    // Act: actual private reads produce the protocol records that compaction must group.
+    const result = await model.complete({ purpose: "capture", policy: "Submit.", input: "TASK",
+      submission, readTools: [{ name: "inspect_source", description: "Read source.",
+        parameters: Type.Object({ step: Type.Integer(), reason: Type.String() }),
+        execute: async input => bodies[(input as { step: number }).step - 1] }] })
+      .catch((error: Error) => { assert.fail(`${error.message}: ${String(error.cause)}`); });
+
+    // Assert: both old results are summarised together; retained native results have their calls.
+    assert.deepEqual(result, { answer: "Recorded." });
+    assert.equal(taskCalls, 4);
+    const summaries = requests.filter(request => !request.tools?.length);
+    assert.equal(summaries.length, 1);
+    const sent = summaries[0]!.messages.map(messageText).join("\n");
+    assert.match(sent, /call-1-0/);
+    assert.match(sent, /call-1-1/);
+    assert.match(sent, /SECOND_READ_BODY/);
+    const final = requests.at(-1)!;
+    const results = final.messages.filter(message => message.role === "tool");
+    assert.deepEqual(results.map(message => message.tool_call_id), ["call-2", "call-3"]);
+    assert.equal(messageText(results[0]!), bodies[2]);
+    assert.equal(messageText(results[1]!), bodies[3]);
+    const calls = final.messages.flatMap(message => message.tool_calls ?? []);
+    assert.deepEqual(calls.map(call => call.id), ["call-2", "call-3"]);
   });

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { Type } from "typebox";
 import type {
   ExtensionAPI,
@@ -32,7 +33,9 @@ import {
   initialiseProjectForAgent,
   ProjectInitError,
 } from "./project-init.ts";
-import { CaptureService, type CaptureCheckpointResult } from "./capture.ts";
+import {
+  CaptureService, type CaptureBranch, type CaptureCheckpointOptions, type CaptureCheckpointResult,
+} from "./capture.ts";
 import { FileLogger } from "./logging.ts";
 import { DurableQueueStore } from "./queue.ts";
 import {
@@ -292,10 +295,7 @@ export interface RecallServicePort {
 
 export interface CaptureServicePort {
   enqueue(snapshot: CaptureSnapshot): Promise<unknown>;
-  checkpoint?(options?: {
-    sessionId?: string;
-    branchId?: string;
-  }): Promise<CaptureCheckpointResult>;
+  checkpoint?(options?: CaptureCheckpointOptions): Promise<CaptureCheckpointResult>;
   advanceWatermark?(update: {
     sessionId: string;
     branchId: string;
@@ -424,6 +424,11 @@ interface Runtime {
   recoveryResult?: CaptureCheckpointResult;
   captureFeedbackFlush?: Promise<void>;
   captureCheckpointTail?: Promise<void>;
+  captureTriggerId: number;
+  /** Pending callbacks from turns already included in a drain cannot immediately retry failures. */
+  captureDeferrals?: { throughTriggerId: number; branches: CaptureBranch[] };
+  /** Foreground conflict resolution waits for this pass, not the entire backlog drain. */
+  capturePass?: Promise<CaptureCheckpointResult>;
   settledCaptureTail?: Promise<void>;
   activeResolutions: Set<Promise<unknown>>;
   lifecycleController: AbortController;
@@ -1397,8 +1402,8 @@ export function createForgetfulExtension(
     ): Promise<void> => {
       // A handoff can arrive before this extension's checkpoint releases the worker lock.
       // Bound the foreground wait without cancelling the background capture work.
-      const outcome = await boundedWait(
-        runtime.captureCheckpointTail ?? Promise.resolve(),
+      const outcome = await boundedWait<unknown>(
+        runtime.capturePass ?? Promise.resolve(),
         [signal, ctx.signal, runtime.lifecycleController.signal],
         runtime.config.instance.timeoutMs,
       );
@@ -1940,26 +1945,87 @@ export function createForgetfulExtension(
       }
     };
 
+    const runCapturePasses = async (
+      runtime: Runtime, ctx: ExtensionContext, options?: CaptureCheckpointOptions,
+    ): Promise<CaptureCheckpointResult> => {
+      const total: CaptureCheckpointResult = {
+        processed: 0, processedJobIds: [], paused: false, errors: [],
+      };
+      const processed = new Set<string>();
+      const deferred = new Map((options?.excludeBranches ?? []).map((branch) =>
+        [`${branch.sessionId}\u0000${branch.branchId}`, branch]));
+      let throughTriggerId = deferred.size > 0
+        ? runtime.captureDeferrals?.throughTriggerId ?? runtime.captureTriggerId
+        : runtime.captureTriggerId;
+      try {
+        while (isCurrentRuntime(runtime, ctx) && runtime.config.enabled &&
+            runtime.config.captureMode !== "off") {
+          const pending = await refreshQueueNotice(runtime, ctx);
+          if (!isCurrentRuntime(runtime, ctx)) break;
+          if (pending.length > 0) runtime.activity.set("capture-queue",
+            `processing queued work · ${pending.length} remaining…`);
+          // Give an already-waiting foreground resolution the gap between bounded passes.
+          // Its evidence lookup needs the same protection as the eventual write.
+          while (runtime.activeResolutions.size > 0) {
+            await Promise.allSettled([...runtime.activeResolutions]);
+          }
+          if (!isCurrentRuntime(runtime, ctx)) break;
+          const pass = runtime.capture?.checkpoint?.({
+            ...options, excludeBranches: [...deferred.values()],
+          });
+          if (!pass) break;
+          runtime.capturePass = pass;
+          let result: CaptureCheckpointResult;
+          try { result = await pass; }
+          finally { if (runtime.capturePass === pass) runtime.capturePass = undefined; }
+          total.processed += result.processed;
+          for (const id of result.processedJobIds) processed.add(id);
+          total.paused ||= result.paused;
+          total.errors.push(...result.errors);
+          runtime.logger.emit("info", "capture.batch_completed", {
+            processed: result.processed, continuation: result.continuation ?? "none",
+            deferredBranches: result.deferredBranches?.length ?? 0,
+          });
+          if (result.discardedJobs?.length)
+            (total.discardedJobs ??= []).push(...result.discardedJobs);
+          for (const branch of result.deferredBranches ?? [])
+            deferred.set(`${branch.sessionId}\u0000${branch.branchId}`, branch);
+          // Freeze the cutoff before reporting failure: a user responding to that report is
+          // a new retry opportunity, not an older callback still waiting behind this drain.
+          if (result.deferredBranches?.length) throughTriggerId = runtime.captureTriggerId;
+          if (!isCurrentRuntime(runtime, ctx)) break;
+          reportDiscardedCapture(runtime, ctx, result);
+          if (runtime.capture) await reportCaptureOutcome(runtime, ctx, runtime.capture, result);
+          await handoffPendingConflicts(runtime, ctx);
+          if (!result.continuation) break;
+          // Yield between ready batches; a live worker's lock gets a slower, cancellable recheck.
+          try {
+            await delay(result.continuation === "busy" ? 1_000 : 0, undefined, {
+              signal: runtime.lifecycleController.signal, ref: false,
+            });
+          } catch (error) {
+            if (!runtime.lifecycleController.signal.aborted) throw error;
+            break;
+          }
+        }
+      } finally {
+        if (isCurrentRuntime(runtime, ctx)) runtime.captureDeferrals = {
+          throughTriggerId, branches: [...deferred.values()],
+        };
+        runtime.activity.set("capture-queue");
+        await refreshQueueNotice(runtime, ctx);
+      }
+      total.processedJobIds = [...processed];
+      return total;
+    };
+
     const recoverRuntimeCapture = async (
       runtime: Runtime, ctx: ExtensionContext,
     ): Promise<void> => {
       if (!isCurrentRuntime(runtime, ctx) || !runtime.config.enabled) return;
       await runtime.queue.completeProjectDiscovery(runtime.context);
       if (!isCurrentRuntime(runtime, ctx)) return;
-      const pending = (await refreshQueueNotice(runtime, ctx)).filter((job) =>
-        !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite);
-      if (!isCurrentRuntime(runtime, ctx)) return;
-      if (pending.length > 0) runtime.activity.set("recovery",
-        `resuming ${pending.length} queued ${pending.length === 1 ? "task" : "tasks"}…`);
-      try {
-        const result = await runtime.capture?.checkpoint?.();
-        runtime.recoveryResult = result;
-        reportDiscardedCapture(runtime, ctx, result);
-        await handoffPendingConflicts(runtime, ctx);
-      } finally {
-        runtime.activity.set("recovery");
-        await refreshQueueNotice(runtime, ctx);
-      }
+      runtime.recoveryResult = await runCapturePasses(runtime, ctx);
     };
 
     const loadRuntime = async (
@@ -2013,6 +2079,7 @@ export function createForgetfulExtension(
           baselineEntryId: prepared.currentLeaf,
           skipNextCapture: state.skipNextCapture,
           pendingCaptureJobs: new Map(),
+          captureTriggerId: 0,
           activeResolutions: new Set(),
           lifecycleController: new AbortController(),
           ready: !prepared.context.projectDiscoveryPending,
@@ -2532,6 +2599,7 @@ export function createForgetfulExtension(
           }),
         });
         if (result.status === "ready") {
+          const triggerId = ++runtime.captureTriggerId;
           runtime.activity.set("queue", "saving work locally…");
           let enqueueResult: unknown;
           try { enqueueResult = await capture.enqueue(result.snapshot); }
@@ -2559,14 +2627,12 @@ export function createForgetfulExtension(
             }
             await runtime.queue.completeProjectDiscovery(runtime.context);
             if (!isCurrentRuntime(runtime, ctx)) return;
-            const checkpointResult = await capture.checkpoint?.({
-              sessionId: context.sessionId,
-              branchId: context.branchId,
+            const deferrals = runtime.captureDeferrals;
+            await runCapturePasses(runtime, ctx, {
+              sessionId: context.sessionId, branchId: context.branchId,
+              excludeBranches: deferrals && triggerId <= deferrals.throughTriggerId
+                ? deferrals.branches : [],
             });
-            reportDiscardedCapture(runtime, ctx, checkpointResult);
-            await reportCaptureOutcome(runtime, ctx, capture, checkpointResult);
-            await handoffPendingConflicts(runtime, ctx);
-            await refreshQueueNotice(runtime, ctx);
           });
           runtime.captureCheckpointTail = checkpoint.catch((error) => {
             if (!isCurrentRuntime(runtime, ctx)) return;
@@ -3216,27 +3282,27 @@ export function createForgetfulExtension(
         if (!runtime.capture?.resolveConflict) {
           throw new Error("No pending Forgetful conflict can be resolved.");
         }
-        await waitForCaptureCheckpoint(runtime, ctx, signal);
-        let preferredEvidenceIds: string[] = params.evidenceEntryIds ?? [];
-        const pendingConflict = await findResolutionConflict(runtime, ctx, params.conflict_id);
-        const sourceEntryIds = pendingConflict?.sourceEntryIds;
-        if (Array.isArray(sourceEntryIds)) {
-          preferredEvidenceIds = [
-            ...sourceEntryIds.filter((id): id is string => typeof id === "string"),
-            ...preferredEvidenceIds,
-          ];
-        }
-        if (
-          signal?.aborted ||
-          !isCurrentRuntime(runtime, ctx) ||
-          (pendingConflict &&
-            !conflictBelongsToActiveBranch(pendingConflict, runtime, ctx))
-        ) {
-          throw new Error("No pending Forgetful conflict can be resolved.");
-        }
-        const resolution = runtime.capture.resolveConflict(
-          params.conflict_id,
-          {
+        const resolveConflict = runtime.capture.resolveConflict.bind(runtime.capture);
+        const resolution = (async () => {
+          await waitForCaptureCheckpoint(runtime, ctx, signal);
+          let preferredEvidenceIds: string[] = params.evidenceEntryIds ?? [];
+          const pendingConflict = await findResolutionConflict(runtime, ctx, params.conflict_id);
+          const sourceEntryIds = pendingConflict?.sourceEntryIds;
+          if (Array.isArray(sourceEntryIds)) {
+            preferredEvidenceIds = [
+              ...sourceEntryIds.filter((id): id is string => typeof id === "string"),
+              ...preferredEvidenceIds,
+            ];
+          }
+          if (
+            signal?.aborted ||
+            !isCurrentRuntime(runtime, ctx) ||
+            (pendingConflict &&
+              !conflictBelongsToActiveBranch(pendingConflict, runtime, ctx))
+          ) {
+            throw new Error("No pending Forgetful conflict can be resolved.");
+          }
+          return resolveConflict(params.conflict_id, {
             action: params.action,
             ...(params.reason ? { reason: params.reason } : {}),
             ...(params.evidenceEntryIds
@@ -3244,8 +3310,8 @@ export function createForgetfulExtension(
               : {}),
             additionalEntries: resolutionEvidence(ctx, preferredEvidenceIds),
             conversation: sanitizeCaptureConversation(ctx.sessionManager.getBranch()),
-          },
-        );
+          });
+        })();
         runtime.activeResolutions.add(resolution);
         try {
           const value = await resolution;

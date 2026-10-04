@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, open, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readdir, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -10,6 +10,7 @@ import {
   createAssistantMessageEventStream, type AssistantMessage, type JsonObject,
 } from "@earendil-works/pi-ai";
 import { CaptureService, type CaptureServiceOptions } from "../src/capture.ts";
+import type { ForgetfulClient } from "../src/contracts.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
@@ -228,6 +229,102 @@ test("worker lock contention is distinct from a failed nested capture checkpoint
   assert.deepEqual((await readdir(f.directory)).filter((name) => name.startsWith("worker-")), []);
 });
 
+test("cancellation waits for a summary checkpoint already blocked by the real queue lock",
+  { skip: process.platform === "win32", timeout: 15_000 }, async (t) => {
+    // Arrange: real Pi model, source history and durable queue; only provider output is scripted.
+    const directory = await mkdtemp(join(tmpdir(), "capture-blocked-summary-"));
+    const providerStarted = gate(), providerReply = gate(), modelSettled = gate();
+    const queue = new DurableQueueStore({ directory, instanceId: "blocked-summary" });
+    const order: string[] = [];
+    const runtime = await ModelRuntime.create({ authPath: join(directory, "auth.json"),
+      modelsPath: null, refreshOnCreate: false });
+    const message: AssistantMessage = { role: "assistant", api: "faux",
+      provider: "blocked-summary", model: "memory", stopReason: "stop", timestamp: 1,
+      content: [{ type: "text", text: "Accepted cumulative source summary." }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    runtime.registerProvider("blocked-summary", { api: "faux", apiKey: "fixture-only",
+      baseUrl: "https://fixture.invalid/unused", models: [{ id: "memory", name: "Memory",
+        reasoning: false, input: ["text"], contextWindow: 64_000, maxTokens: 1024,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+      streamSimple(_model, context) {
+        assert.deepEqual(providerTools(context), [], "Only preparation may reach this provider");
+        const stream = createAssistantMessageEventStream();
+        providerStarted.resolve();
+        void providerReply.promise.then(() => stream.end(message));
+        return stream;
+      } });
+    const model = new PiMemoryModel(new ModelRegistry(runtime),
+      { provider: "blocked-summary", id: "memory" }, { contextLimitTokens: 8000,
+        compactionSettings: { enabled: true, reserveTokens: 1200, keepRecentTokens: 1200 } });
+    const capture = new CaptureService({ queue, model, instanceId: "blocked-summary",
+      client: {} as ForgetfulClient,
+      getMode: () => "observe", onActivity: (phase) => {
+        if (phase === undefined) { order.push("model-settled"); modelSettled.resolve(); }
+      } });
+    let writer: FileHandle | undefined;
+    let worker: Promise<unknown> | undefined;
+    t.after(async () => {
+      capture.stop();
+      providerReply.resolve();
+      await rm(queue.lockPath, { force: true });
+      await writer?.close();
+      await worker;
+      await rm(directory, { recursive: true, force: true });
+    });
+    const session = SessionManager.inMemory(directory);
+    for (let index = 0; index < 36; index++) {
+      session.appendMessage({ role: "user", timestamp: 1,
+        content: `Original evidence ${index}: ${"historical discussion ".repeat(100)}` });
+    }
+    session.appendMessage(message);
+    const built = buildCaptureSnapshot({ session, instanceId: "blocked-summary", mode: "observe",
+      scope: "global", policy: "", modelVersion: "memory", context: { cwd: directory,
+        sessionId: session.getSessionId(), branchId: "active" } });
+    assert.equal(built.status, "ready");
+    if (built.status !== "ready") throw new Error("Expected source snapshot");
+    const queued = await capture.enqueue(built.snapshot);
+
+    // Act: a FIFO's reader/writer handshake proves the durable callback is waiting on the lock.
+    let returned = false;
+    worker = capture.checkpoint().then((result) => {
+      returned = true;
+      order.push("checkpoint-returned");
+      return result;
+    });
+    await bounded(providerStarted.promise);
+    await promisify(execFile)("mkfifo", [queue.lockPath]);
+    providerReply.resolve();
+    writer = await bounded(open(queue.lockPath, "w"));
+    order.push("summary-checkpoint-blocked");
+    capture.stop();
+    order.push("lifecycle-cancelled");
+    await bounded(modelSettled.promise);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(returned, false, "Cancellation must wait behind the already accepted checkpoint");
+    // Remove the FIFO before EOF; the next actual queue lock acquisition can then succeed.
+    await writer.writeFile(JSON.stringify({ pid: process.pid + 100_000, token: "dead-writer" }));
+    await rm(queue.lockPath);
+    await writer.close();
+    writer = undefined;
+    order.push("queue-lock-released");
+    await bounded(worker);
+
+    // Assert: the in-flight checkpoint wins before cancellation, retaining progress on restart.
+    const reopened = new DurableQueueStore({ directory, instanceId: "blocked-summary" });
+    const pending = await reopened.getJob(queued.jobId);
+    assert.equal(pending?.status, "paused");
+    assert.equal(pending?.attempts, 0);
+    assert.equal(pending?.callCount, 0);
+    assert.equal(pending?.snapshot.historySummary?.text, "Accepted cumulative source summary.");
+    assert.deepEqual(pending?.snapshot.entries, built.snapshot.entries);
+    assert.deepEqual(pending?.snapshot.sourceConversation, built.snapshot.conversation);
+    assert.equal((await reopened.getWatermark(session.getSessionId(), "active")).historyDigest,
+      undefined);
+    assert.deepEqual(order, ["summary-checkpoint-blocked", "lifecycle-cancelled", "model-settled",
+      "queue-lock-released", "checkpoint-returned"]);
+  });
+
 for (const operation of ["create", "supersede"] as const) {
   test(`failed shutdown persistence reports errors and prevents ${operation} replay`, async (t) => {
     // Arrange: an accepted request followed by an unavailable queue mutation lock.
@@ -263,10 +360,16 @@ for (const operation of ["create", "supersede"] as const) {
       });
     } finally { await rm(lockPath, { force: true }); }
     // Assert: durable pre-dispatch receipts also protect a later restart with no final marker.
-    for (let i = 0; i < 4; i++) await f.open({ staleJobMs: 0 }).run();
+    const beforeRecovery = await f.open().queue.getJob(f.jobId);
+    const receipt = operation === "supersede" ? beforeRecovery?.supersession
+      : (beforeRecovery?.candidateOutcomes.storage as { creation?: { status: string } })?.creation;
+    assert.equal(receipt?.status, "started", "The accepted write must have a durable receipt");
+    const recoveries = [];
+    for (let i = 0; i < 4; i++) recoveries.push(await f.open({ staleJobMs: 0 }).run());
     assert.equal(accepted, 1);
     const saved = await f.open().queue.getJob(f.jobId);
-    assert.ok(saved?.uncertainWrite);
+    assert.ok(saved?.uncertainWrite, JSON.stringify({ operation, accepted, saved,
+      recoveries, modelSubmissions: f.state.models }));
     assert.match(JSON.stringify(saved?.snapshot.entries), /We decided to use SQLite/);
   });
 }

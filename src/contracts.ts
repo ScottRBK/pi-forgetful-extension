@@ -264,6 +264,8 @@ export class ModelSubmissionError extends Error {
 }
 
 export interface MemoryModelClient {
+  /** One bounded source-history preparation slice, before charging capture extraction calls. */
+  prepareCapture?(request: ModelRequest): Promise<"ready" | "progress">;
   complete(request: ModelRequest): Promise<unknown>;
 }
 

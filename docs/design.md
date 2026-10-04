@@ -340,6 +340,10 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    index with a verified digest. Reuse a successful summary only for the same session/branch and
    matching source boundary; retain recent messages and original unprocessed evidence. Persist
    private-model compaction so stages and retries can reuse its summary plus unchanged tail.
+   Initial capture preparation performs at most one summary request per slice. Checkpoint each
+   accepted, reducing summary and its exact advancing source boundary before the next slice.
+   Partial progress belongs to that job, not the reusable branch cache. A progress-only yield
+   spends neither a failure attempt nor the extraction-call allowance; real failures still count.
    Keep original native source records separately from that model view, preserving images, tool
    arguments and failures until success or exhausted attempts. Conflicts verify origin against
    these originals, not the compacted view. Retained source records never go in the queue index.
@@ -354,7 +358,14 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    the furthest matching same-session boundary. Divergent paths get a new branch, including
    repeated visits to the same fork point when its old branch no longer matches. Lookup failure
    logs the actual error and falls back without blocking recall. Recover pending records after
-   restart, retaining per-candidate receipts and evidence for retries.
+   restart, retaining per-candidate receipts and evidence for retries. Each pass claims at most
+   eight jobs. Schedule follow-on passes while eligible work can advance, including an underfilled
+   preparation-only pass. Carry failed/permission-paused branch exclusions across the drain cycle
+   and its already-waiting settled callbacks; do not immediately spend their remaining attempts.
+   Continue other healthy branches. Worker-lock contention uses delayed, cancellable rechecks
+   without taking ownership from a live worker. Foreground conflict resolution, including evidence
+   validation, takes priority between passes. Keep these passes on the existing serial lifecycle
+   tail; no new daemon or queue is introduced.
 5. Complete a job only after all candidate outcomes are recorded. Advance the successful capture
    cursor without moving backwards; it is distinct from enqueue receipts and summary progress.
    A newer completion does not mark older pending jobs finished. Release bulky search/review
@@ -647,6 +658,14 @@ images use native blocks for capable models, including during summarization. Uns
 or indivisible records that cannot fit fail explicitly; evidence is never silently clipped.
 Unsaved host settings are not available through Pi's extension context. Summaries are derived
 context, not new source evidence. Pi/provider capacity failures remain failure-open.
+
+Initial capture history has a separate bounded preparation phase before extraction is charged.
+One slice makes at most one successful summary request under the three-minute timeout and durably
+checkpoints accepted progress. Extraction and its private investigation/read continuations retain
+one shared task deadline; recall deadlines are unchanged. Empty, nonreducing, nonadvancing or
+indivisible oversized input is a real failure, never an endless progress yield. Recognised native
+provider replay fields are excluded from model-facing historical records while readable content,
+source identity, arbitrary tool payloads and original session/evidence files remain intact.
 
 Selected evidence, policies, rich records and private correction history are not character-clipped.
 The model adapter does not reject complete responses merely for exceeding an extension byte cap.

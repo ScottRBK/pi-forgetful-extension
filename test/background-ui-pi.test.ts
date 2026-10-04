@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { DurableQueueStore } from "../src/queue.ts";
 
 const exec = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,7 +43,8 @@ interface Request {
 }
 
 const progress = new RegExp([
-  "starting…", "resuming \\d+ queued tasks?…", "saving work locally…",
+  "starting…", "resuming \\d+ queued tasks?…",
+  "processing queued work · \\d+ remaining…", "saving work locally…",
   "finding relevant memories…", "reviewing session…", "saving to Forgetful…",
   "checking previous save…",
 ].join("|"));
@@ -172,6 +174,12 @@ async function startTerminal(t: TestContext, mapped = true) {
     "CLI must start project discovery", 10_000);
   return {
     pane, requests, evidence,
+    async queue() {
+      const queues = join(agentDir, "forgetful", "queues");
+      const directories = await readdir(queues);
+      assert.equal(directories.length, 1);
+      return new DurableQueueStore({ directory: join(queues, directories[0]!) });
+    },
     failNextProjectLookup() { failNextProjectLookup = true; },
     rejectCaptureSubmissions() {
       rejectedCapturesRemaining = 3;
@@ -267,15 +275,25 @@ async function startTerminal(t: TestContext, mapped = true) {
   };
 }
 
+function widgetText(screen: string): string {
+  const lines = screen.split("\n");
+  const start = lines.findIndex((line) => line.includes("Forgetful ·"));
+  if (start < 0) return "";
+  const end = lines.findIndex((line, index) => index > start && /^[─━]{10}/.test(line));
+  assert.ok(end > start, "The activity widget must remain directly above the editor");
+  return lines.slice(start, end).map((line) => line.trim()).join(" ");
+}
+
 function assertWidget(screen: string, labels: string[]): void {
   const lines = screen.split("\n");
   const rows = lines.map((line, index) => ({ line, index }))
     .filter(({ line }) => line.includes("Forgetful ·"));
   assert.equal(rows.length, 1, "Background work must share one transient widget");
   const row = rows[0]!;
-  for (const label of labels) assert.ok(row.line.includes(label), `Missing phase: ${label}`);
+  const text = widgetText(screen);
+  for (const label of labels) assert.ok(text.includes(label), `Missing phase: ${label}`);
   assert.match(row.line, /[\u2800-\u28ff]/, "The widget must contain a spinner");
-  assert.match(row.line, /\d+(?:\.\d+)?s|\d+:\d{2}/, "The widget must show elapsed time");
+  assert.match(text, /\d+(?:\.\d+)?s|\d+:\d{2}/, "The widget must show elapsed time");
   assert.ok(lines.slice(row.index + 1, row.index + 4).some((line) => /^[─━]{10}/.test(line)),
     "The widget belongs just above the editor");
 }
@@ -318,15 +336,17 @@ test("terminal combines concurrent recall and capture, then clears when idle", {
   await terminal.prompt("Use SQLite for this repository.", 1);
   terminal.ready();
   const capture = await terminal.submission("submit_capture_candidates");
-  await until(terminal.pane, (screen) => screen.includes("resuming 1 queued task…") &&
+  await until(terminal.pane, (screen) => screen.includes("processing queued work · 1 remaining…") &&
     screen.includes("reviewing session…"), "Recovered work must show its queue count and phase");
   const resuming = await terminal.evidence("capture provider held after readiness");
 
   // Act: keep capture held while another prompt starts background recall and answers normally.
   await terminal.prompt("What storage should this repository use?", 2);
   const recall = await terminal.submission("submit_recall_plan");
-  await until(terminal.pane, (screen) => screen.includes("finding relevant memories…") &&
-    screen.includes("reviewing session…"), "Both held operations must be visible together");
+  await until(terminal.pane, (screen) =>
+    widgetText(screen).includes("finding relevant memories…") &&
+      widgetText(screen).includes("reviewing session…"),
+  "Both held operations must be visible together");
   const concurrent = await terminal.evidence("recall and capture providers both held");
   recall.reply(noRecall);
   capture.reply({ candidates: [] });
@@ -338,7 +358,7 @@ test("terminal combines concurrent recall and capture, then clears when idle", {
   await terminal.exit();
 
   // Assert: concurrent phases use one editor widget; completed progress never becomes chat.
-  assertWidget(resuming, ["resuming 1 queued task…", "reviewing session…"]);
+  assertWidget(resuming, ["processing queued work · 1 remaining…", "reviewing session…"]);
   assertWidget(concurrent, ["finding relevant memories…", "reviewing session…"]);
   assert.doesNotMatch(idle, progress);
   assert.doesNotMatch(await terminal.history(), progress);
@@ -567,4 +587,56 @@ test("capture failure shows durable pending work and a final outcome after real 
       (tool) => tool.name === "submit_capture_candidates")).length, (attempt + 1) * 3,
     "Startup recovery and early settlement must not retry the same turn twice");
   }
+});
+
+test("terminal updates the remaining backlog across automatic follow-on capture batches", {
+  skip: !enabled, timeout: 45_000,
+}, async (t) => {
+  // Arrange: ten settled turns while discovery is held, then reopen the real persisted session.
+  const terminal = await startTerminal(t);
+  for (let index = 1; index <= 10; index++) {
+    await terminal.prompt(`Use SQLite; repository decision ${index}.`, index);
+  }
+  const queue = await terminal.queue();
+  await until(() => queue.listJobMetadata(), (jobs) => jobs.length === 10 &&
+    jobs.every((job) => job.status === "pending"), "All ten turns must be durable before exit");
+  await terminal.exit();
+  terminal.ready();
+  await terminal.restart();
+  const first = await terminal.submission("submit_capture_candidates");
+  await until(terminal.pane, (screen) =>
+    screen.includes("processing queued work · 10 remaining…"),
+  "The widget must include the running job in the unfinished backlog count");
+  const initial = await terminal.evidence("ten queued jobs; first provider held");
+  assertWidget(initial, ["processing queued work · 10 remaining…", "reviewing session…"]);
+
+  // Act: release the first batch; no new prompt triggers the ninth provider request.
+  first.reply({ candidates: [] });
+  for (let index = 1; index < 8; index++) {
+    const capture = await terminal.submission("submit_capture_candidates", index);
+    capture.reply({ candidates: [] });
+  }
+  const ninth = await terminal.submission("submit_capture_candidates", 8);
+
+  // Assert: the widget reflects real queue progress while follow-on work is still running.
+  await until(() => queue.listJobMetadata(), (jobs) =>
+    jobs.filter((job) => job.status === "complete").length === 8,
+  "The first batch must finish before observing follow-on progress");
+  await until(terminal.pane, (screen) =>
+    screen.includes("processing queued work · 2 remaining…"),
+  "The widget must replace the initial count when the next batch starts");
+  const following = await terminal.evidence("eight complete; ninth provider held");
+  assertWidget(following, ["processing queued work · 2 remaining…", "reviewing session…"]);
+  ninth.reply({ candidates: [] });
+  const tenth = await terminal.submission("submit_capture_candidates", 9);
+  tenth.reply({ candidates: [] });
+  await until(() => queue.listJobMetadata(), (jobs) => jobs.length === 10 &&
+    jobs.every((job) => job.status === "complete"), "All ten jobs must finish automatically");
+  await until(terminal.pane, (screen) => !/Forgetful[ ·:]/.test(screen),
+    "Finished backlog must clear its activity widget");
+  const idle = await terminal.evidence("all ten complete without another prompt");
+  assert.doesNotMatch(idle, progress);
+  assert.equal(terminal.requests.filter(({ body }) => body.model === "main").length, 10);
+  assert.doesNotMatch(await terminal.history(), progress);
+  await terminal.exit();
 });

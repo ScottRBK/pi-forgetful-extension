@@ -239,7 +239,7 @@ prompt before project discovery finishes; that turn proceeds without automatic r
 turns are still saved to the local queue and await discovery before capture processing.
 
 A single transient line above the prompt editor shows background work at every verbosity level:
-`Forgetful · starting…`, `resuming N queued tasks…`, `saving work locally…`,
+`Forgetful · starting…`, `processing queued work · N remaining…`, `saving work locally…`,
 `finding relevant memories…`, `reviewing session…`, `saving to Forgetful…`, or
 `checking previous save…`. It combines concurrent activities with a spinner and total background
 elapsed time (not the duration of each phase), and clears when idle or cancelled. A non-spinning
@@ -247,7 +247,8 @@ notice remains when queued work cannot proceed: `unavailable — queued work kep
 `capture retry pending — work kept locally`, or `previous save needs checking`. Local-storage
 notices are shown only after reading durable queue records. `/forgetful status` reports uncertain
 saves, or says that queue diagnostics are unavailable without hiding the remaining configuration.
-These UI updates never become conversation or compaction input.
+The remaining count includes unfinished running work and refreshes between capture passes; it is
+not a count of saved memories. These UI updates never become conversation or compaction input.
 
 Once recall is ready, the main model starts with a memory-decision-pending lifecycle message,
 so independent work is not blocked. A single latest-state renderer shows retrieval progress or a
@@ -395,9 +396,13 @@ requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenan
 This is not ongoing source curation.
 
 Capture history is stored in private immutable files beside the durable queue index, bounded at
-50 MiB. Snapshots do not share that index bound. Private-model compaction persists a summary plus
-unchanged recent messages. Original native records, including images and tool arguments, are kept
-separately within the snapshot until capture finishes; they are not duplicated in the model view.
+50 MiB. Snapshots do not share that index bound. Before extraction, each preparation slice makes
+at most one summary request and saves the accepted summary with its exact source boundary and
+unchanged tail. A later slice or restart resumes from that checkpoint instead of repeating the
+completed chunks. Partial summaries stay with their job; only successful capture publishes reusable
+branch history. Original native records, including images and tool arguments, remain separately
+available until capture finishes. Recognised provider replay/signature fields are omitted only from
+the model-facing view, not from the original Pi conversation or durable evidence.
 Successful summaries are reused only for the same session and branch. Their source-ID cursor
 only moves forward, so an older retry cannot replace a newer summary. Inactive summary caches
 expire after seven days; active work and pending conflicts remain protected. Missing or corrupt
@@ -411,8 +416,19 @@ A newer successful job does not mark older pending jobs complete; each keeps its
 Pi restarts recover the saved branch only when its latest handled entry is on the active journal
 path. A divergent path without that entry gets a new branch; summaries never cross sessions.
 
+Capture runs in passes of at most eight job claims. While Pi remains open, healthy pending work
+continues in follow-on passes without another prompt. A preparation-only slice can also request a
+follow-on pass, even when fewer than eight jobs were claimed. Failed or permission-paused branches
+wait for a later settled turn or a restart rather than retrying repeatedly in the same cycle.
+Callbacks already waiting when failure is reported share its deferrals. Other eligible branches
+continue; busy worker locks get delayed, cancellable checks. Foreground conflict resolution gets
+priority between passes, including while its evidence is checked. Live workers are never displaced,
+and unknown saves or pending project discovery do not trigger retry loops.
+
 Completed jobs retain only small UI outcome records, not search results or full review payloads.
-Each failed or permission-paused attempt counts. Ordinary shutdown, reload and navigation cancel
+Successful preparation-only slices consume neither a failure attempt nor the extraction-call
+allowance. Actual preparation failures still count as failed attempts. Each other failed or
+permission-paused attempt also counts. Ordinary shutdown, reload and navigation cancel
 active model/read work without consuming a failure attempt or the interrupted model-call allowance.
 On the third failed or permission-paused attempt, the job, snapshots and all associated conflicts
 are discarded immediately, with a final outcome for the UI. Exhausted model-call budgets are
@@ -501,8 +517,12 @@ That same allowance is used for the context check and provider request. This cap
 it does not cut returned JSON or change the main Pi session's context limit.
 Selected record and entry counts, timeouts, transport safety, queue-index capacity, and log bounds
 still apply. Background tasks use Pi's compaction helpers and persisted compaction settings.
-The current task and tool instructions stay intact. Read turns, compaction and corrections share the
-existing deadline; an oversized indivisible record fails explicitly instead of being clipped.
+The current task and tool instructions stay intact. Initial capture preparation uses separate,
+bounded summary slices before charging extraction's model-call allowance. Each slice retains the
+three-minute request timeout. Extraction, its read turns, further compaction and corrections still
+share one task deadline; recall keeps its existing shared deadline. An oversized indivisible record,
+empty/nonreducing summary or oversized task fails explicitly instead of being clipped or yielding
+forever.
 With compaction disabled, a fitting input can reduce the reply allowance. Input that leaves no
 room for a reply fails without sending a provider request.
 Pi does not expose unsaved host compaction overrides to extensions. Native images require an

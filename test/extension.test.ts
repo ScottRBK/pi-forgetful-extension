@@ -12,7 +12,8 @@ import {
   type CaptureServicePort,
   type RecallServicePort,
 } from "../src/extension.ts";
-import type { CaptureCheckpointResult } from "../src/capture.ts";
+import { CaptureService, type CaptureCheckpointResult } from "../src/capture.ts";
+import { DurableQueueStore } from "../src/queue.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import type {
   CaptureSnapshot,
@@ -4127,6 +4128,140 @@ test("resolver checkpoint waiting is bounded and cannot enter stale capture", as
     }
   }
 });
+
+for (const followOn of [false, true]) {
+  test(`foreground conflict evidence lookup survives ${followOn ? "automatic" : "no"} follow-on`,
+    { timeout: 15_000 }, async (t) => {
+      // Arrange: the approved legacy hook/tool port, backed by real capture and queue locks.
+      const fixture = await harness({ userSettings: { timeout_ms: 10_000 } });
+      const gate = () => {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => { release = resolve; });
+        return { promise, release };
+      };
+      const firstStarted = gate(), firstProvider = gate();
+      const lookupStarted = gate(), evidenceLookup = gate();
+      const followOnStarted = gate(), followOnProvider = gate(), followOnFinished = gate();
+      const order: string[] = [];
+      let calls = 0, lookups = 0;
+      let resolving: Promise<any> | undefined;
+      let settled: Promise<unknown> | undefined;
+      let capture: CaptureService | undefined;
+      try {
+        await fixture.emit("session_start", { type: "session_start", reason: "new" });
+        await fixture.command("status");
+        // Memory commands skip their following settlement; consume that before repository work.
+        await fixture.emit("agent_settled", { type: "agent_settled" });
+        const queue = new DurableQueueStore({ directory: join(fixture.root, "real-queue"),
+          instanceId: "resolution-race" });
+        capture = new CaptureService({ queue, instanceId: "resolution-race",
+          client: {} as ForgetfulClient, model: { async complete() {
+            calls++;
+            if (calls === 1) {
+              order.push("current-pass-provider");
+              firstStarted.release();
+              await firstProvider.promise;
+            } else if (calls === 9) {
+              order.push("follow-on-provider");
+              followOnStarted.release();
+              await followOnProvider.promise;
+            }
+            return { candidates: [] };
+          } } });
+        for (let index = 0; index < 9; index++) {
+          const user = `decision-${index}`, assistant = `settled-${index}`;
+          fixture.entries.push(entry(user, fixture.entries.at(-1).id, "user", "Use SQLite."));
+          fixture.entries.push(entry(assistant, user, "assistant", "Noted.", "stop"));
+          await capture.enqueue({ id: `snapshot-${index}`, instanceId: "resolution-race",
+            context: { cwd: fixture.root, sessionId: "session-1", branchId: "session-1:root" },
+            entries: [{ id: user, role: "user", text: "Use SQLite." }],
+            finalEntryId: assistant, mode: "observe", scope: "global", policy: "",
+            modelVersion: "scripted", createdAt: new Date().toISOString() });
+        }
+        fixture.setLeaf("settled-8");
+        const now = new Date().toISOString();
+        await queue.addConflict({ id: "delayed-evidence", candidateId: "storage",
+          binding: { instanceId: "resolution-race" }, sessionId: "session-1",
+          branchId: "session-1:root", destinationProjectId: 7,
+          candidate: { id: "storage", title: "Storage", content: "Use SQLite." },
+          sourceEntryIds: ["decision-0"], evidence: ["decision-0: Use SQLite."],
+          reason: "Confirm storage", status: "pending", createdAt: now, updatedAt: now });
+        fixture.capture.checkpoint = async () => {
+          const result = await capture!.checkpoint();
+          order.push("pass-completed");
+          if (calls >= 9) followOnFinished.release();
+          // The control keeps the same bounded checkpoint but disables its automatic follow-on.
+          return followOn ? result : { ...result, continuation: undefined };
+        };
+        fixture.capture.pendingConflicts = async () => {
+          order.push(`lookup-${++lookups}`);
+          if (lookups === 2) {
+            order.push("evidence-lookup-started");
+            lookupStarted.release();
+            await evidenceLookup.promise;
+            order.push("evidence-lookup-finished");
+          }
+          return capture!.pendingConflicts();
+        };
+        fixture.capture.resolveConflict = (id, input) => {
+          order.push("foreground-dispatch");
+          return capture!.resolveConflict(id, input);
+        };
+
+        // Act: resolution waits for the current pass, then pauses in evidence preparation.
+        settled = fixture.emit("agent_settled", { type: "agent_settled" });
+        let startupTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([firstStarted.promise, new Promise<never>((_, reject) => {
+          startupTimer = setTimeout(() => reject(new Error("Current pass did not start")), 3_000);
+        })]).finally(() => clearTimeout(startupTimer));
+        const tool = fixture.tools.get("forgetful_resolve");
+        resolving = tool.execute("resolution-race", { conflict_id: "delayed-evidence",
+          action: "skip" }, undefined, undefined, fixture.ctx);
+        void resolving!.catch(() => undefined);
+        firstProvider.release();
+        let lookupTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([lookupStarted.promise, new Promise<never>((_, reject) => {
+          lookupTimer = setTimeout(() => reject(new Error("Evidence lookup did not start")), 3_000);
+        })]).finally(() => clearTimeout(lookupTimer));
+        if (followOn) {
+          // A correct scheduler stays idle during validation; the current scheduler reaches nine.
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([followOnStarted.promise, new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 1_000);
+          })]).finally(() => clearTimeout(timer));
+        }
+        assert.ok(!order.includes("foreground-dispatch"),
+          "The held lookup must belong to foreground evidence validation, not handoff");
+        evidenceLookup.release();
+        const outcome = await resolving!.then((value) => ({ value, error: undefined }),
+          (error: Error) => ({ value: undefined, error: error.message }));
+
+        // Assert: this is a branch-lock race after a completed pass, never the old wait timeout.
+        t.diagnostic(JSON.stringify({ followOn, order, error: outcome.error }));
+        assert.equal(outcome.error, undefined,
+          `Foreground resolution lost its branch lock: ${JSON.stringify(order)}`);
+        assert.match(outcome.value.content[0].text, /resolved/);
+        assert.equal((await queue.getConflict("delayed-evidence"))?.status, "rejected");
+        if (followOn) {
+          followOnProvider.release();
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([followOnFinished.promise, new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Follow-on did not resume")), 3_000);
+          })]).finally(() => clearTimeout(timer));
+          assert.ok((await queue.listJobs()).every((job) => job.status === "complete"),
+            "Yielding to foreground resolution must not strand the rest of the backlog");
+        }
+      } finally {
+        firstProvider.release();
+        evidenceLookup.release();
+        followOnProvider.release();
+        await resolving?.catch(() => undefined);
+        await settled;
+        capture?.stop();
+        await fixture.cleanup();
+      }
+    });
+}
 
 test("conflict handoff preserves full selected evidence and still redacts secrets", async () => {
   // Arrange: each selected conflict exceeds the old line and combined evidence budgets.

@@ -354,6 +354,34 @@ export class PiMemoryModel implements MemoryModelClient {
     }
   }
 
+  async prepareCapture(request: ModelRequest): Promise<"ready" | "progress"> {
+    if (request.purpose !== "capture") {
+      throw new TypeError("Capture preparation requires a capture request");
+    }
+    const started = performance.now();
+    this.emit("info", "model.preparation_started", request);
+    try {
+      const result = await this.completeRequest(request, true);
+      if (result !== "ready" && result !== "progress") {
+        throw new Error("Invalid capture preparation result");
+      }
+      this.emit("info", "model.preparation_completed", request, {
+        elapsedMs: performance.now() - started, status: result,
+      });
+      return result;
+    } catch (error) {
+      this.emit("info", "model.preparation_error", request, {
+        elapsedMs: performance.now() - started,
+        status: request.signal?.aborted ? "aborted" : "failed",
+      });
+      this.emit("debug", "model.error_detail", request, {
+        error: rejectionText(error),
+        cause: error instanceof Error && error.cause ? rejectionText(error.cause) : undefined,
+      });
+      throw error;
+    }
+  }
+
   private emit(
     level: "info" | "debug",
     event: string,
@@ -385,7 +413,9 @@ export class PiMemoryModel implements MemoryModelClient {
     }
   }
 
-  private async completeRequest(request: ModelRequest): Promise<unknown> {
+  private async completeRequest(
+    request: ModelRequest, preparationOnly = false,
+  ): Promise<unknown> {
     if (request.signal?.aborted)
       throw new Error("Memory model request aborted");
     if (!isRecallConcurrency(request.readConcurrency ?? 1)) {
@@ -432,39 +462,65 @@ export class PiMemoryModel implements MemoryModelClient {
         this.transformHeaders,
         deadline.controller.signal,
       );
+      const leading = request.conversation?.[0] as
+        { type?: unknown; summary?: unknown; throughEntryId?: unknown } | undefined;
+      const initialHistory = leading?.type === "capture_history_summary" &&
+        typeof leading.throughEntryId === "string" && typeof leading.summary === "string"
+        ? { summary: sanitizeText(leading.summary), summaryMessage: historyMessages[0]!,
+          retainedMessages: historyMessages.slice(1) } : undefined;
       const taskContext = new MemoryTaskContext(
         model, context.messages.at(-1)!, this.compactionSettings, this.contextLimitTokens,
+        initialHistory,
       );
       let initialPreparation = true;
-      const prepare = async (): Promise<number> => {
-        const maxTokens = await taskContext.prepare(
-          context, deadline.controller.signal, this.sessionId,
-          async (summaryContext, summaryOptions) => {
-            const response = await this.completeAttempt(model, summaryContext,
-              { ...options, maxTokens: summaryOptions.maxTokens },
-              request, deadline, deadline.compactionCalls + 1, "compaction");
-            ensureCompletionFinished(response, request, deadline.timedOut, false);
-            return response;
-          },
-        );
-        // Persist only initial source history, never private task replies or read continuations.
-        if (!initialPreparation) return maxTokens;
-        initialPreparation = false;
-        const compacted = taskContext.getCompactedHistory();
-        if (!compacted || !request.onConversationCompacted) return maxTokens;
+      const persistHistory = async (compacted: {
+        summary: string; retainedMessages: Context["messages"];
+      }): Promise<void> => {
+        if (!request.onConversationCompacted) {
+          if (preparationOnly) throw new Error("Capture preparation requires durable progress");
+          return;
+        }
         const cut = historyMessages.length - compacted.retainedMessages.length;
         const boundary = request.conversation?.[cut - 1] as
           { id?: unknown; type?: unknown; throughEntryId?: unknown } | undefined;
         const throughEntryId = boundary?.type === "capture_history_summary"
           ? boundary.throughEntryId : boundary?.id;
-        if (cut <= 0 || typeof throughEntryId !== "string" ||
+        if (cut <= 0 || boundary?.type === "capture_history_summary" ||
+            typeof throughEntryId !== "string" ||
             !compacted.retainedMessages.every((message, index) =>
               message === historyMessages[cut + index])) {
           throw new Error("Compacted history has no stable source boundary or unchanged tail");
         }
-        await request.onConversationCompacted({ summary: compacted.summary,
+        await Promise.race([request.onConversationCompacted({ summary: compacted.summary,
           summarizedThroughEntryId: throughEntryId,
-          retainedConversation: request.conversation!.slice(cut) });
+          retainedConversation: request.conversation!.slice(cut) }),
+        deadline.callerAbort, deadline.timeout]);
+      };
+      const summarize = async (
+        summaryContext: Context, summaryOptions: ModelsSimpleStreamOptions,
+      ): Promise<AssistantMessage> => {
+        if (preparationOnly && !request.onConversationCompacted) {
+          throw new Error("Capture preparation requires durable progress");
+        }
+        const response = await this.completeAttempt(model, summaryContext,
+          { ...options, maxTokens: summaryOptions.maxTokens },
+          request, deadline, deadline.compactionCalls + 1, "compaction");
+        ensureCompletionFinished(response, request, deadline.timedOut, false);
+        return response;
+      };
+      if (preparationOnly) {
+        return await taskContext.prepareCapture(context, deadline.controller.signal,
+          this.sessionId, summarize, persistHistory);
+      }
+      const prepare = async (): Promise<number> => {
+        const maxTokens = await taskContext.prepare(
+          context, deadline.controller.signal, this.sessionId,
+          summarize,
+          initialPreparation ? persistHistory : undefined,
+        );
+        // Persist only initial source history, never private task replies or read continuations.
+        if (!initialPreparation) return maxTokens;
+        initialPreparation = false;
         return maxTokens;
       };
       return await this.completeWithSubmission(

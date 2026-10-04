@@ -24,6 +24,7 @@ import type {
   MemoryInput,
   MemoryCreateResult,
   MemoryModelClient,
+  ModelRequest,
   ModelSubmissionTool,
   ModelReadTool,
   WorkContext,
@@ -173,6 +174,17 @@ export interface CaptureServiceOptions {
   now?: () => Date;
 }
 
+export interface CaptureBranch {
+  sessionId: string;
+  branchId: string;
+}
+
+export interface CaptureCheckpointOptions {
+  sessionId?: string;
+  branchId?: string;
+  excludeBranches?: CaptureBranch[];
+}
+
 export interface CaptureCheckpointResult {
   processed: number;
   processedJobIds: string[];
@@ -180,6 +192,10 @@ export interface CaptureCheckpointResult {
   discardedJobs?: Array<{ jobId: string; error: string }>;
   paused: boolean;
   errors: string[];
+  /** Exclude these branches from subsequent passes in the same automatic drain cycle. */
+  deferredBranches?: CaptureBranch[];
+  /** Ready work can advance now; busy means only a contended worker needs a delayed check. */
+  continuation?: "ready" | "busy";
 }
 
 export interface CaptureDiagnosticCandidate {
@@ -1803,6 +1819,17 @@ export class CaptureService {
         }
       },
     };
+    const preparingModel = options.model;
+    if (preparingModel.prepareCapture) {
+      this.model.prepareCapture = (request) => {
+        const signal = request.signal
+          ? AbortSignal.any([request.signal, this.cancellation.signal])
+          : this.cancellation.signal;
+        // Preparation has no charged extraction call to refund on interruption.
+        return this.activity("reviewing", () =>
+          preparingModel.prepareCapture!({ ...request, signal }));
+      };
+    }
     this.identity = {
       instanceId: options.instanceId,
       endpoint: options.endpoint,
@@ -3278,14 +3305,13 @@ export class CaptureService {
 
   private async loadCandidates(
     job: QueueJob,
-  ): Promise<{ job: QueueJob; candidates: CaptureCandidate[] }> {
+  ): Promise<{ job: QueueJob; candidates: CaptureCandidate[]; progress?: boolean }> {
     if (Array.isArray(job.extractedCandidates)) {
       return { job, candidates: job.extractedCandidates as CaptureCandidate[] };
     }
+    // Do not prepare history for extraction that can no longer be attempted.
     await this.ensureModelCallAllowed(job);
-    const currentJob = await this.queue.checkpoint(job.id, {
-      callCount: job.callCount + 1,
-    });
+    const currentJob = job;
     const rejectionReasons = boundedSubmissionRejections(
       currentJob.submissionRejections ?? [],
     );
@@ -3313,7 +3339,7 @@ export class CaptureService {
     };
     let response: unknown;
     try {
-      response = await this.model.complete({
+      let request: ModelRequest = {
         purpose: "capture",
         diagnosticContext: this.correlation(currentJob),
         policy: this.policyFor(currentJob.snapshot, "capture"),
@@ -3340,7 +3366,24 @@ export class CaptureService {
         },
         readTools: [this.sourceInspectionTool(currentJob)],
         submission,
+      };
+      if (this.model.prepareCapture) {
+        if (await this.model.prepareCapture(request) === "progress") {
+          return { job: currentJob, candidates: [], progress: true };
+        }
+        const refreshed = await this.queue.getJob(currentJob.id);
+        if (!refreshed) throw new Error(`Unknown capture job: ${currentJob.id}`);
+        Object.assign(currentJob.snapshot, refreshed.snapshot);
+        request = { ...request, conversation: captureConversation(currentJob.snapshot),
+          input: { ...record(request.input), ...captureWorkMetadata(currentJob.snapshot) } };
+      }
+      await this.ensureModelCallAllowed(currentJob);
+      const charged = await this.queue.checkpoint(currentJob.id, {
+        callCount: currentJob.callCount + 1,
       });
+      // Keep the shared snapshot object used by validation and source-inspection callbacks.
+      currentJob.callCount = charged.callCount;
+      response = await this.model.complete(request);
     } catch (error) {
       await persistRejections();
       throw error;
@@ -3694,11 +3737,17 @@ export class CaptureService {
     return current;
   }
 
-  private async processJob(job: QueueJob, result: CaptureCheckpointResult): Promise<void> {
+  private async processJob(
+    job: QueueJob, result: CaptureCheckpointResult,
+  ): Promise<"progress" | void> {
     // Cancellation cannot prove an accepted mutation failed; preserve receipts for reconciliation.
     if (job.uncertainWrite) throw new CaptureUncertainWrite(job.uncertainWrite);
     if (!(await this.enabled(job.snapshot.mode))) throw new CapturePause("capture is disabled");
     const loaded = await this.loadCandidates(job);
+    if (loaded.progress) {
+      await this.queue.releaseProgress(job.id);
+      return "progress";
+    }
     let currentJob = loaded.job;
     if (this.client.knowledge?.unlinkMemories && loaded.candidates.length > 1 &&
         job.snapshot.mode === "auto" && await this.getMode() === "auto") {
@@ -3726,7 +3775,7 @@ export class CaptureService {
   }
 
   private async runBranchWorker(
-    branch: { sessionId: string; branchId: string },
+    branch: CaptureBranch,
     budget: number,
     result: CaptureCheckpointResult,
   ): Promise<void> {
@@ -3748,15 +3797,19 @@ export class CaptureService {
       if (!job) break;
       result.processed += 1;
       result.processedJobIds.push(job.id);
-      if (!(await this.operations.run({ jobId: job.id, supersession: job.supersession },
-        () => this.processBranchJob(job, result)))) break;
+      const outcome = await this.operations.run({ jobId: job.id, supersession: job.supersession },
+        () => this.processBranchJob(job, result));
+      if (outcome !== "advance") {
+        if (outcome === "deferred") result.deferredBranches = [branch];
+        break;
+      }
     }
   }
 
   private async processBranchJob(
     job: QueueJob,
     result: CaptureCheckpointResult,
-  ): Promise<boolean> {
+  ): Promise<"advance" | "progress" | "deferred"> {
     const started = performance.now();
     this.emit("info", job.attempts > 1 ? "retry" : "started", {
       ...this.correlation(job), attempt: job.attempts,
@@ -3766,16 +3819,17 @@ export class CaptureService {
       finalEntryId: job.snapshot.finalEntryId,
     });
     try {
-      await this.processJob(job, result);
+      const progress = await this.processJob(job, result);
       const after = await this.queue.getJob(job.id);
       this.emit("info", after?.status === "complete" ? "completed" : "job_progress", {
         ...this.correlation(job), status: after?.status,
         elapsedMs: performance.now() - started,
       });
-      return after?.status !== "pending" && after?.status !== "paused";
+      if (progress === "progress") return "progress";
+      return after?.status === "pending" || after?.status === "paused" ? "deferred" : "advance";
     } catch (error) {
       await this.recordBranchFailure(job, result, error, started);
-      return false;
+      return "deferred";
     }
   }
 
@@ -3819,7 +3873,7 @@ export class CaptureService {
   }
 
   private async checkpointBranch(
-    branch: { sessionId: string; branchId: string },
+    branch: CaptureBranch,
     budget: number,
   ): Promise<CaptureCheckpointResult> {
     const result: CaptureCheckpointResult = {
@@ -3828,23 +3882,33 @@ export class CaptureService {
       paused: false,
       errors: [],
     };
-    const workerResult = await this.queue.withWorkerLock(
-      this.identity,
-      branch,
-      async () => {
+    try {
+      const workerResult = await this.queue.withWorkerLock(this.identity, branch, async () => {
         await this.runBranchWorker(branch, budget, result);
         return true;
-      },
-    );
-    if (workerResult === undefined) result.paused = true;
+      });
+      if (workerResult === undefined) {
+        result.paused = true;
+        result.continuation = "busy";
+      }
+    } catch (error) {
+      if (error instanceof AggregateError) throw error;
+      // A damaged source sidecar or failed claim must not prevent other branches advancing.
+      // No job was hydrated, so there is no per-job failure handler to record this diagnostic.
+      const diagnostic = scrubError(error);
+      this.emit("info", "error", { ...branch, operation: "checkpoint" });
+      this.emit("debug", "error_detail", { ...branch, operation: "checkpoint", error: diagnostic });
+      result.errors.push(diagnostic);
+      result.deferredBranches = [branch];
+    }
     return result;
   }
 
   /** Run a bounded worker checkpoint. `agent_settled` should call this without awaiting it. */
   async checkpoint(
-    options?: CaptureSnapshot | { sessionId?: string; branchId?: string },
+    options?: CaptureSnapshot | CaptureCheckpointOptions,
   ): Promise<CaptureCheckpointResult> {
-    if (this.stopped || !(await this.isEnabled()))
+    if (!(await this.enabled()))
       return { processed: 0, processedJobIds: [], paused: true, errors: [] };
     const requestedSessionId =
       options && "context" in options
@@ -3854,7 +3918,7 @@ export class CaptureService {
       options && "context" in options
         ? options.context.branchId
         : options?.branchId;
-    let requestedBranch: { sessionId: string; branchId: string } | undefined;
+    let requestedBranch: CaptureBranch | undefined;
     if (requestedSessionId && requestedBranchId) {
       requestedBranch = {
         sessionId: requestedSessionId,
@@ -3863,8 +3927,10 @@ export class CaptureService {
     } else if (this.sessionId && this.branchId) {
       requestedBranch = { sessionId: this.sessionId, branchId: this.branchId };
     }
+    const excluded = options && "excludeBranches" in options ? options.excludeBranches ?? [] : [];
     const jobs = (await this.queue.listJobMetadata(this.identity))
-      .filter((job) => ["pending", "running", "paused"].includes(job.status));
+      .filter((job) => ["pending", "running", "paused"].includes(job.status) &&
+        !job.snapshot.context.projectDiscoveryPending && !job.uncertainWrite);
     const allBranches = [
       ...new Map(
         jobs.map((job) => [
@@ -3876,7 +3942,9 @@ export class CaptureService {
         ]),
       ).values(),
     ];
-    const branches = requestedBranch
+    const branches = requestedBranch && allBranches.some((branch) =>
+      branch.sessionId === requestedBranch.sessionId &&
+      branch.branchId === requestedBranch.branchId)
       ? [
           requestedBranch,
           ...allBranches.filter(
@@ -3893,8 +3961,11 @@ export class CaptureService {
       errors: [],
     };
     let remaining = this.maxJobsPerCheckpoint;
+    const busyBranches: CaptureBranch[] = [];
     for (const branch of branches) {
       if (remaining <= 0) break;
+      if (excluded.some((item) => item.sessionId === branch.sessionId &&
+          item.branchId === branch.branchId)) continue;
       const result = await this.checkpointBranch(branch, remaining);
       total.processed += result.processed;
       total.processedJobIds.push(...result.processedJobIds);
@@ -3904,15 +3975,23 @@ export class CaptureService {
       }
       total.paused ||= result.paused;
       total.errors.push(...result.errors);
+      if (result.deferredBranches?.length) {
+        total.deferredBranches ??= [];
+        total.deferredBranches.push(...result.deferredBranches);
+      }
+      if (result.continuation === "busy") busyBranches.push(branch);
       remaining -= result.processed;
+    }
+    if (await this.enabled()) {
+      if (await this.queue.hasClaimableWork(this.identity,
+        [...excluded, ...(total.deferredBranches ?? []), ...busyBranches])) {
+        total.continuation = "ready";
+      } else if (busyBranches.length) total.continuation = "busy";
     }
     return total;
   }
 
-  async processPending(options?: {
-    sessionId?: string;
-    branchId?: string;
-  }): Promise<CaptureCheckpointResult> {
+  async processPending(options?: CaptureCheckpointOptions): Promise<CaptureCheckpointResult> {
     return this.checkpoint(options);
   }
 

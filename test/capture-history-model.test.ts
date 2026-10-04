@@ -69,7 +69,16 @@ test("real private-model compaction persists and reuses session history after re
 
     // Act: complete capture, reopen, then settle another message on the same branch.
     const first = await capture.enqueue(snapshot());
-    await capture.checkpoint();
+    for (let pass = 0; pass < 40; pass++) {
+      const result = await capture.checkpoint();
+      assert.deepEqual(result.errors, []);
+      if (result.continuation !== "ready") break;
+      // Each yielded preparation slice is durable and does not spend extraction allowance.
+      const preparing = await queue.getJob(first.jobId);
+      assert.equal(preparing?.attempts, 0);
+      assert.equal(preparing?.callCount, 0);
+      assert.ok(preparing?.snapshot.historySummary);
+    }
     assert.equal((await queue.getJob(first.jobId))?.status, "complete");
     assert.ok(summaryCalls > 0, "the smaller private cap must trigger existing summarisation");
     const callsAfterFirst = summaryCalls;
