@@ -14,7 +14,9 @@ import type { CompactionSettings } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import type { TSchema } from "typebox";
 import {
+  ModelEvidencePage,
   ModelSubmissionError,
+  ModelTaskPause,
   type MemoryModelClient,
   type ModelRequest,
   type ModelSubmissionTool,
@@ -27,7 +29,7 @@ import {
 } from "./config.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import type { DiagnosticLogger } from "./logging.ts";
-import { evidenceMessage, MemoryTaskContext } from "./model-context.ts";
+import { evidenceMessage, evidencePageContent, MemoryTaskContext } from "./model-context.ts";
 import { mapConcurrent } from "./concurrency.ts";
 
 export interface ModelRegistryPort {
@@ -285,7 +287,7 @@ function requestDeadline(
 }
 
 function throwRequestFailure(error: unknown, request: ModelRequest): never {
-  if (error instanceof ModelSubmissionError) throw error;
+  if (error instanceof ModelSubmissionError || error instanceof ModelTaskPause) throw error;
   if (
     error instanceof Error &&
     error.message === "Memory model request aborted"
@@ -600,10 +602,13 @@ export class PiMemoryModel implements MemoryModelClient {
       ]);
       return {
         role: "toolResult", toolCallId: call.id, toolName: call.name,
-        content: [textBlock(serializeInput(value))], isError: false, timestamp: Date.now(),
+        content: value instanceof ModelEvidencePage ? evidencePageContent(value)
+          : [textBlock(serializeInput(value))], isError: false, timestamp: Date.now(),
       };
     } catch (error) {
-      if (request.signal?.aborted || deadline.timedOut) throw error;
+      if (error instanceof ModelTaskPause || request.signal?.aborted || deadline.timedOut) {
+        throw error;
+      }
       return errorToolResult(call, rejectionText(error));
     }
   }

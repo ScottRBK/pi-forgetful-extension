@@ -23,7 +23,7 @@ import type {
 } from "./contracts.ts";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import {
-  compactCaptureSnapshot, reuseCaptureHistory, sanitizeCaptureSnapshot,
+  captureConversation, compactCaptureSnapshot, reuseCaptureHistory, sanitizeCaptureSnapshot,
 } from "./snapshot.ts";
 
 export type QueueJobStatus =
@@ -1164,6 +1164,55 @@ export class DurableQueueStore {
     return this.mutate(async (state) => {
       const job = state.jobs.find((item) => item.id === jobId);
       return { value: job ? await this.hydrateJob(job) : undefined, changed: false };
+    });
+  }
+
+  /** Refresh unfinished extraction context without changing evidence or write receipts. */
+  async refreshCaptureHistory(jobId: string): Promise<{ job: QueueJob; historyError?: string }> {
+    return this.mutate(async (state) => {
+      const stored = state.jobs.find((item) => item.id === jobId);
+      if (!stored) throw new Error(`Unknown capture job: ${jobId}`);
+      // Source damage is never a recoverable cache miss. Read it outside the cache catch.
+      const job = await this.hydrateJob(stored);
+      const unchanged = { value: { job }, changed: false };
+      if (job.status !== "running" || job.extractedCandidates !== undefined ||
+          job.uncertainWrite || interruptedWrite(job)) return unchanged;
+      // A cache cannot turn legacy evidence projections into a complete native conversation.
+      if (!job.snapshot.conversation || job.snapshot.conversationCoverage === "legacy-partial")
+        return unchanged;
+      const { sessionId, branchId } = job.snapshot.context;
+      const watermark = state.watermarks[contextKey(sessionId, branchId)];
+      if (!watermark?.historyDigest) return unchanged;
+      let history: NonNullable<CaptureSnapshot["historySummary"]>;
+      try {
+        const cached = (await this.readSnapshot(watermark.historyDigest)).historySummary;
+        if (!cached?.text.trim() || cached.throughEntryId !== watermark.historyThroughEntryId)
+          throw new Error("Invalid reusable summary boundary or text");
+        history = cached;
+      } catch (error) {
+        clearHistoryCache(watermark);
+        return { value: { job,
+          historyError: `Reusable summary cache unavailable: ${diagnosticError(error)}` } };
+      }
+      const ids = orderedSourceEntryIds(job.snapshot) ?? [];
+      const boundary = ids.indexOf(history.throughEntryId);
+      const end = ids.indexOf(job.snapshot.finalEntryId);
+      // Never import later history or replace the pinned final record with a derived summary.
+      if (boundary < 0 || end < 0 || boundary >= end) return unchanged;
+      if (job.snapshot.historySummary) {
+        const comparison = cursorComparison(
+          { throughEntryId: history.throughEntryId, entryIds: ids },
+          { throughEntryId: job.snapshot.historySummary.throughEntryId, entryIds: ids });
+        if (comparison === undefined || comparison <= 0) return unchanged;
+      }
+      const conversation = captureConversation(job.snapshot);
+      const cut = conversation.findIndex((record) => recordId(record) === history.throughEntryId);
+      if (cut < 0) return unchanged;
+      // Unlike enqueue-time reuse, compaction preserves every unfinished source and its originals.
+      await this.compactJobSnapshot(stored, { summary: history.text,
+        summarizedThroughEntryId: history.throughEntryId,
+        retainedConversation: conversation.slice(cut + 1) });
+      return { value: { job: await this.hydrateJob(stored) } };
     });
   }
 

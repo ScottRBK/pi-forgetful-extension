@@ -340,6 +340,12 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    index with a verified digest. Reuse a successful summary only for the same session/branch and
    matching source boundary; retain recent messages and original unprocessed evidence. Persist
    private-model compaction so stages and retries can reuse its summary plus unchanged tail.
+   Before preparing still-unextracted queued work, atomically refresh its model view from a newer
+   completed branch summary whose boundary lies within the pinned originals. Preserve all pending
+   evidence and the exact suffix; never regress local summary progress or reset outcomes/receipts.
+   Legacy entries-only or partial histories stay unchanged; reuse cannot establish native coverage.
+   This also applies to tasks enqueued before the successful summary existed. No model/policy
+   version compatibility keys or queue migration are required.
    Initial capture preparation performs at most one summary request per slice. Checkpoint each
    accepted, reducing summary and its exact advancing source boundary before the next slice.
    Partial progress belongs to that job, not the reusable branch cache. A progress-only yield
@@ -419,8 +425,16 @@ is then processed by the durable worker described above.
 2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
    a target project and rationale. It may inspect trusted repository text and source URLs through
    a read-only tool before submitting candidates. Actual observations carry durable evidence IDs
-   and provenance; source editing, shell execution and uploads are unavailable. Accept exactly one
-   private `submit_capture_candidates` submission; do not parse text output as fallback JSON.
+   and provenance; source editing, shell execution and uploads are unavailable. It may also use
+   `read_capture_evidence` to selectively read this task's pinned originals by entry ID, without
+   changing evidence identity or eligibility. Reads are optional, not a required read-before-cite
+   check or a guarantee that every fact omitted from a summary will be discovered. Text pages
+   default to 4,000 characters (maximum 16,000), with explicit continuation offsets and original
+   native images on the first page. The existing task deadline and context budget still apply.
+   Revoked capture/read permissions pause the task through the model boundary, not as ordinary
+   tool feedback that permits another provider turn or an empty successful capture.
+   Accept exactly one private `submit_capture_candidates` submission; do not parse text output
+   as fallback JSON.
 3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
    Candidates use only schema-declared fields. Destination selection accepts only the declared
    `destinationProjectId`, `destinationProjectName`, and `destinationRationale` fields, not aliases.

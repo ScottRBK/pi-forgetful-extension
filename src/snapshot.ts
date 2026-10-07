@@ -226,15 +226,20 @@ export function captureSummaryRecord(history: CaptureHistorySummary): unknown {
     trust: "derived-context-not-source-evidence" };
 }
 
+/** Include durable inspections without changing the pinned session conversation. */
+export function captureConversation(snapshot: CaptureSnapshot): readonly unknown[] {
+  if (!snapshot.conversation) return snapshot.entries;
+  return [...snapshot.conversation,
+    ...snapshot.entries.filter((entry) => entry.id.startsWith("inspection:") &&
+      !snapshot.conversation!.some((record) => isRecord(record) && record.id === entry.id))];
+}
+
 /** Replace only the historical model view. Raw evidence survives until the job finishes. */
 export function compactCaptureSnapshot(
   snapshot: CaptureSnapshot,
   view: CompactedConversation,
 ): CaptureSnapshot {
-  const conversation = snapshot.conversation ? [...snapshot.conversation,
-    ...snapshot.entries.filter((entry) => entry.id.startsWith("inspection:") &&
-      !snapshot.conversation!.some((record) => isRecord(record) && record.id === entry.id))]
-    : snapshot.entries;
+  const conversation = captureConversation(snapshot);
   const cut = conversation.findIndex((entry) => isRecord(entry) &&
     (entry.id === view.summarizedThroughEntryId ||
       (entry.type === "capture_history_summary" &&

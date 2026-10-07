@@ -395,6 +395,12 @@ modified files retain their working-tree status. Inspection supports UTF-8 text;
 requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenance.
 This is not ongoing source curation.
 
+When a summary hides a needed source, the model can optionally use `read_capture_evidence` to read
+that task's saved record by entry ID. This never reads the live session or creates evidence.
+Text pages default to 4,000 characters, with a 16,000-character maximum and a continuation offset;
+original images accompany the first page. Reads are selective, not a mandatory scan or citation
+check, and share the existing private task timeout and context budget.
+
 Capture history is stored in private immutable files beside the durable queue index, bounded at
 50 MiB. Snapshots do not share that index bound. Before extraction, each preparation slice makes
 at most one summary request and saves the accepted summary with its exact source boundary and
@@ -403,10 +409,14 @@ completed chunks. Partial summaries stay with their job; only successful capture
 branch history. Original native records, including images and tool arguments, remain separately
 available until capture finishes. Recognised provider replay/signature fields are omitted only from
 the model-facing view, not from the original Pi conversation or durable evidence.
-Successful summaries are reused only for the same session and branch. Their source-ID cursor
-only moves forward, so an older retry cannot replace a newer summary. Inactive summary caches
-expire after seven days; active work and pending conflicts remain protected. Missing or corrupt
-reusable summaries fall back to the pinned session history and are reported in the existing logs.
+Before preparing a queued task that has not extracted candidates, the worker refreshes its history
+from a compatible completed summary on the same session and branch. Reuse advances beyond the
+task's own summary without passing its pinned history, and preserves unfinished evidence, original
+records and the unchanged suffix. Tasks queued before the first summary therefore benefit too.
+Summary source-ID cursors only move forward, so older work cannot replace newer progress.
+Inactive summary caches expire after seven days; active work and pending conflicts remain protected.
+Missing or corrupt reusable summaries fall back to the pinned session history and are reported in
+existing logs.
 Original source evidence is not a cache: missing or altered source files still fail explicitly.
 Pending conflicts from successful jobs keep their source evidence until resolved.
 

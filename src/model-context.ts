@@ -15,10 +15,12 @@ import {
   type Message,
   type Model,
   type SimpleStreamOptions,
+  type ToolResultMessage,
   type UserMessage,
 } from "@earendil-works/pi-ai";
 import { sanitizeText, sanitizeValue } from "./privacy.ts";
 import { DEFAULT_MEMORY_CONTEXT_LIMIT_TOKENS } from "./config.ts";
+import type { ModelEvidencePage } from "./contracts.ts";
 
 type SummaryCompletion = (
   context: Context,
@@ -93,6 +95,21 @@ export function evidenceMessage(record: unknown, label: string, timestamp: numbe
       { type: "text" as const, text: `${label}, image ${index + 1}:` }, image,
     ]),
   ] : text };
+}
+
+/** Page the readable projection, not raw JSON image bytes or provider replay fields. */
+export function evidencePageContent(page: ModelEvidencePage): ToolResultMessage["content"] {
+  const projected = evidenceMessage(page.record, `Pinned source ${page.entryId}`, 0).content;
+  const parts = typeof projected === "string" ? [{ type: "text" as const, text: projected }]
+    : projected;
+  const text = parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+  const images = parts.filter((part) => part.type === "image");
+  if (page.offset > text.length) throw new Error("Evidence offset is beyond the saved record");
+  const end = Math.min(text.length, page.offset + page.limit);
+  return [{ type: "text", text: JSON.stringify({ entryId: page.entryId, offset: page.offset,
+    text: text.slice(page.offset, end), totalCharacters: text.length,
+    nextOffset: end < text.length ? end : null, imagesOnFirstPage: images.length }) },
+  ...(page.offset === 0 ? images : [])];
 }
 
 function textTokens(text: string): number {

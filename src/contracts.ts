@@ -236,12 +236,25 @@ export interface ModelRequest {
   };
 }
 
+/** Explicit local evidence result; ordinary service JSON must never be treated as native images. */
+export class ModelEvidencePage {
+  constructor(
+    readonly entryId: string,
+    readonly record: unknown,
+    readonly offset: number,
+    readonly limit: number,
+  ) {}
+}
+
 export interface ModelReadTool {
   name: string;
   description: string;
   parameters: unknown;
   execute(input: unknown, signal: AbortSignal): Promise<unknown>;
 }
+
+/** Task-level permission/lifecycle stop, not a tool error the model may work around. */
+export class ModelTaskPause extends Error {}
 
 export interface ModelSubmissionTool {
   name: string;
