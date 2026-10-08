@@ -21,7 +21,8 @@ import {
   type JsonObject,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
-import { providerSystemPrompt } from "./provider-context.ts";
+import { Type } from "typebox";
+import { providerSystemPrompt, providerTools } from "./provider-context.ts";
 
 interface Gate {
   readonly started: Promise<void>;
@@ -165,7 +166,6 @@ test(
         let body = "";
         for await (const chunk of request) body += chunk;
         const query = JSON.parse(body) as { query?: string };
-        if (query.query === "boundary search") plannerGate.finish();
         const found =
           query.query === "queue-one"
             ? { ...memory, id: 43, content: "Queue one memory." }
@@ -236,6 +236,8 @@ test(
       streamSimple(model, context, options) {
         const copy = JSON.parse(JSON.stringify(context)) as Context;
         if (model.id === "main") {
+          assert.deepEqual(providerTools(context).map(tool => tool.name).sort(),
+            ["fixture_continue", "forgetful_recall_wait"]);
           mainContexts.push(copy);
           mainCalls += 1;
         } else {
@@ -343,8 +345,8 @@ test(
                 {
                   type: "toolCall",
                   id: "boundary-1",
-                  name: "forgetful_recall",
-                  arguments: { query: "boundary search" },
+                  name: "fixture_continue",
+                  arguments: {},
                 },
               ], "toolUse"),
             );
@@ -428,7 +430,18 @@ test(
       noPromptTemplates: true,
       noContextFiles: true,
       noThemes: true,
-      extensionFactories: [(pi) => createForgetfulExtension({ agentDir })(pi)],
+      extensionFactories: [(pi) => {
+        pi.registerTool({
+          name: "fixture_continue", label: "Continue fixture", description: "Continue test work",
+          parameters: Type.Object({}),
+          async execute() {
+            plannerGate.finish();
+            if (mode === "progress") await progressReviewGate.started;
+            return { content: [{ type: "text", text: "Fixture work complete." }], details: {} };
+          },
+        });
+        return createForgetfulExtension({ agentDir })(pi);
+      }],
     });
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
@@ -467,7 +480,10 @@ test(
     assert.match(providerSystemPrompt(mainContexts[0]!), /forgetful_recall_wait/);
     assert.match(providerSystemPrompt(mainContexts[0]!), /continue independent work/i);
     assert.match(providerSystemPrompt(mainContexts[0]!), /defer.*memory-dependent/i);
-    assert.ok(session.getActiveToolNames().includes("forgetful_recall_wait"));
+    assert.deepEqual(session.getActiveToolNames().sort(),
+      ["fixture_continue", "forgetful_recall_wait"]);
+    assert.deepEqual(providerTools(mainContexts[0]!).map(tool => tool.name).sort(),
+      ["fixture_continue", "forgetful_recall_wait"]);
     waitAfterTerminal = true;
     plannerGate.finish();
     await waitingPrompt;

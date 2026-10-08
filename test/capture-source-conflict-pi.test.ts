@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,8 +16,7 @@ import {
 import { createForgetfulExtension } from "../src/extension.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import { DurableQueueStore } from "../src/queue.ts";
-import { decodeProviderContext, providerTools } from "./provider-context.ts";
-import { realOptions, startForgetful } from "./real-forgetful.ts";
+import { providerTools } from "./provider-context.ts";
 
 const sourceText = "Delivery requires a signed digital handover.\n";
 
@@ -26,27 +27,62 @@ function reply(model = "main"): AssistantMessage {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
 
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(label)), 5_000);
-    })]);
-  } finally { clearTimeout(timer); }
+async function eventually(check: () => Promise<void>): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try { await check(); return; }
+    catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+function notices(manager: SessionManager) {
+  return manager.getBranch().filter((entry) =>
+    entry.type === "custom_message" && entry.customType === "forgetful_conflict");
 }
 
 async function fixture(t: TestContext) {
-  const baseUrl = await startForgetful(t);
+  const project = { id: 7, name: "Delivery", repo_name: "test/source-conflict" };
+  const old = { id: 42, title: "Delivery handover", content: "Use a paper handover.",
+    context: "Previous requirement", keywords: ["delivery"], tags: [], project_ids: [project.id],
+    importance: 7, is_obsolete: false, linked_memory_ids: [] };
+  const mutations: string[] = [];
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    const path = request.url ?? "";
+    if (path.startsWith("/api/v1/projects") && request.method === "GET") {
+      response.end(JSON.stringify({ projects: [project], total: 1 }));
+    } else if (path === "/api/v1/memories/search") {
+      response.end(JSON.stringify({ primary_memories: [old], linked_memories: [] }));
+    } else if (path === "/api/v1/memories/42" && request.method === "GET") {
+      response.end(JSON.stringify(old));
+    } else if (path === "/api/v1/graph/memory/42?depth=1") {
+      response.end(JSON.stringify({ center_memory_id: 42, edges: [] }));
+    } else {
+      if (request.method !== "GET") mutations.push(`${request.method} ${path}`);
+      response.statusCode = 404;
+      response.end("{}");
+    }
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
   const client = new ApiForgetfulClient({ baseUrl });
-  const project = await client.createProject({ name: "Delivery", repo_name: "test/source-conflict",
-    description: "Source inspection conflict ownership" });
-  const old = await client.create({ title: "Delivery handover", content: "Use a paper handover.",
-    context: "Previous requirement", keywords: ["delivery"], tags: [], project_ids: [project.id] });
   const root = await mkdtemp(join(tmpdir(), "pi-source-conflict-"));
   let closeSession: (() => Promise<void>) | undefined;
   t.after(async () => {
     try { await closeSession?.(); }
-    finally { await rm(root, { recursive: true, force: true }); }
+    finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+      await rm(root, { recursive: true, force: true });
+    }
   });
   const cwd = join(root, "repo"), agentDir = join(root, "agent");
   await mkdir(cwd);
@@ -68,10 +104,7 @@ async function fixture(t: TestContext) {
   const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"),
     modelsPath: null, refreshOnCreate: false });
   let inspectionId: string | undefined, extracted = false;
-  let resolution: JsonObject | undefined;
-  let notifyHandoff!: (id: string) => void;
-  const handoff = new Promise<string>((resolve) => { notifyHandoff = resolve; });
-  const handoffs: string[] = [];
+  const mainContexts: Context[] = [];
   const inspectionResults: unknown[] = [];
   runtime.registerProvider("source-conflict", {
     api: "faux", apiKey: "fixture-only", baseUrl: "http://127.0.0.1/unused",
@@ -81,16 +114,15 @@ async function fixture(t: TestContext) {
     streamSimple(model, context: Context) {
       const message = reply(model.id);
       let name: string | undefined, args: JsonObject | undefined;
-      if (model.id === "main" && resolution) {
-        name = "forgetful_resolve";
-        args = resolution;
-        resolution = undefined;
+      if (model.id === "main") {
+        assert.deepEqual(providerTools(context).map(tool => tool.name), ["forgetful_recall_wait"]);
+        mainContexts.push(structuredClone(context));
       } else if (model.id === "memory") {
         const tools = providerTools(context);
         name = tools[0]?.name;
         if (name === "submit_capture_candidates") {
           assert.deepEqual(tools.map((tool) => tool.name),
-            ["submit_capture_candidates", "inspect_source"]);
+            ["submit_capture_candidates", "inspect_source", "read_capture_evidence"]);
           const inspected = context.messages.find((item) =>
             item.role === "toolResult" && item.toolName === "inspect_source");
           if (extracted) args = { candidates: [] };
@@ -120,14 +152,6 @@ async function fixture(t: TestContext) {
           args = { action: "escalate", conflictingMemoryId: old.id,
             reason: "Confirm the changed handover requirement", sourceEntryIds: [inspectionId],
             oldClaim: "Use a paper handover.", newClaim: sourceText.trim() };
-        } else if (name === "submit_memory_revision") {
-          const { input } = decodeProviderContext(context);
-          assert.ok(inspectionId);
-          assert.ok(input.evidenceEntryIds.includes(inspectionId));
-          args = { title: "Delivery handover", content: sourceText.trim(),
-            context: "Confirmed delivery requirement", keywords: ["delivery"], tags: [],
-            importance: 7, sourceEntryIds: [inspectionId], documentIds: [], codeArtifactIds: [],
-            entityIds: [], memoryIds: [], fileIds: [], sourceFiles: ["delivery.txt"] };
         } else if (name === "submit_recall_plan") {
           args = { search: false, queries: [], queryIntent: "", entities: [] };
         } else {
@@ -147,18 +171,7 @@ async function fixture(t: TestContext) {
   });
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
     noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    extensionFactories: [(pi) => {
-      const send = pi.sendMessage.bind(pi);
-      pi.sendMessage = (message, options) => {
-        send(message, options);
-        if (message.customType === "forgetful_conflict") {
-          const ids = (message.details as { conflictIds: string[] }).conflictIds;
-          handoffs.push(...ids);
-          notifyHandoff(ids[0]!);
-        }
-      };
-      return createForgetfulExtension({ agentDir })(pi);
-    }] });
+    extensionFactories: [createForgetfulExtension({ agentDir })] });
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
   const { session } = await createAgentSession({ cwd, agentDir, modelRuntime: runtime,
@@ -173,147 +186,164 @@ async function fixture(t: TestContext) {
   await session.bindExtensions({});
   // Settle project discovery before exercising capture against the mapped project.
   await session.prompt("/forgetful status");
-  return { client, old, cwd, agentDir, settings, session, manager, shared, handoffs,
-    inspectionResults, inspectionId: () => inspectionId,
-    waitHandoff: () => bounded(handoff, "Inspected-source conflict did not reach Pi handoff"),
-    async queue() {
-      const directory = join(agentDir, "forgetful/queues");
-      const names = await readdir(directory);
-      assert.equal(names.length, 1);
-      return new DurableQueueStore({ directory: join(directory, names[0]!) });
-    },
-    async resolve(id: string, evidenceEntryIds = [inspectionId!]) {
-      resolution = { conflict_id: id, action: "supersede",
-        reason: "Use the inspected delivery requirement.", evidenceEntryIds };
-      await session.prompt(
-        "Resolve the pending handover conflict using the inspected requirement.",
-      );
-      const entry = manager.getBranch().findLast((item) => item.type === "message" &&
-        item.message.role === "toolResult" && item.message.toolName === "forgetful_resolve");
-      assert.ok(entry?.type === "message" && entry.message.role === "toolResult");
-      return entry.message;
+  const queue = async () => {
+    const directory = join(agentDir, "forgetful/queues");
+    const names = await readdir(directory);
+    assert.equal(names.length, 1);
+    return new DurableQueueStore({ directory: join(directory, names[0]!) });
+  };
+  return { client, old, cwd, agentDir, settings, session, manager, shared, mainContexts, queue,
+    inspectionResults, mutations, inspectionId: () => inspectionId,
+    async waitPendingConflict() {
+      let id = "";
+      await eventually(async () => {
+        const store = await queue();
+        const conflicts = await store.pendingConflicts();
+        assert.equal(conflicts.length, 1, "source inspection should produce one pending conflict");
+        const conflict = conflicts[0]!;
+        assert.ok(conflict.jobId);
+        assert.equal((await store.getJob(conflict.jobId))?.status, "complete");
+        id = conflict.id;
+      });
+      return id;
     },
   };
 }
 
-test("Pi hands off and resolves a conflict supported by actual source inspection", realOptions,
+test("Pi hands off a conflict supported by actual source inspection", { timeout: 15_000 },
   async (t) => {
-    // Arrange: actual source reading, Pi tools and capture, with an isolated REST predecessor.
+    // Arrange: real Pi, private source reading and disk queue; controlled external services.
     const f = await fixture(t);
 
-    // Act: extraction reads the source; escalation reaches Pi; its public resolve tool executes.
+    // Act: extraction inspects the source; the next user turn receives the pending conflict.
     await f.session.prompt("Inspect delivery.txt and record the handover requirement.");
-    const id = await f.waitHandoff().catch(async (error) => {
-      assert.ok(f.inspectionId(), "The real source read must have completed before handoff");
-      const queue = await f.queue();
-      const pending = await queue.pendingConflicts();
-      assert.equal(pending.length, 1, JSON.stringify(await queue.listJobs()));
-      assert.deepEqual(pending[0]!.sourceEntryIds, [f.inspectionId()]);
-      throw error;
-    });
-    const result = await f.resolve(id);
+    const id = await f.waitPendingConflict();
+    const queue = await f.queue();
+    const receipt = await queue.getConflict(id);
+    assert.equal(receipt?.status, "pending", "capture alone does not hand the conflict to Pi");
+    assert.deepEqual(receipt?.sourceEntryIds, [f.inspectionId()]);
+    assert.ok(receipt?.jobId);
+    const evidence = (await queue.getJob(receipt.jobId))?.snapshot.entries;
+    assert.ok(evidence?.some((entry) => entry.id === f.inspectionId() &&
+      entry.role === "toolResult" && entry.toolName === "inspect_source"));
+    assert.equal(notices(f.manager).length, 0);
+    assert.equal(f.mainContexts.length, 1, "a pending conflict must not wake the main agent");
+    await f.session.prompt("Explain the handover conflict so I can handle it externally.");
 
-    // Assert: private evidence is usable without being invented as a Pi journal entry.
+    // Assert: private source evidence is handed over without inventing a Pi journal entry.
     assert.equal(f.inspectionResults.length, 1);
     assert.ok(f.inspectionId());
     assert.equal(f.manager.getEntries().some((entry) => entry.id === f.inspectionId()), false);
-    assert.equal(result.isError, false, JSON.stringify(result));
-    const predecessor = await f.client.get(f.old.id);
-    assert.equal(predecessor.is_obsolete, true);
-    assert.ok(predecessor.superseded_by);
-    assert.equal((await f.client.get(predecessor.superseded_by)).content, sourceText.trim());
+    const saved = notices(f.manager);
+    assert.equal(saved.length, 1);
+    assert.match(JSON.stringify(saved[0]), /signed digital handover/);
+    assert.match(JSON.stringify(saved[0]), /paper handover/);
+    assert.ok(JSON.stringify(saved[0]).includes(f.inspectionId()!));
+    const delivered = JSON.stringify(f.mainContexts.at(-1)?.messages);
+    assert.match(delivered, /signed digital handover/);
+    assert.match(delivered, /paper handover/);
+    assert.ok(delivered.includes(f.inspectionId()!));
+    await eventually(async () => {
+      const handedOff = await queue.getConflict(id);
+      assert.equal(handedOff?.status, "handed_off");
+      assert.equal(handedOff?.handoffEntryId, saved[0]!.id);
+      assert.deepEqual((await queue.getJob(receipt.jobId!))?.snapshot.entries, []);
+    });
+    assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
+    assert.deepEqual(f.mutations, []);
     assert.equal(await readFile(join(f.cwd, "delivery.txt"), "utf8"), sourceText);
   });
 
-test("Pi keeps source-conflict receipts across reload and refuses a sibling branch", realOptions,
-  async (t) => {
-    // Arrange: one durable inspected-source conflict on a branch below a shared journal entry.
+for (const invalid of ["invented inspection", "foreign inspection", "later journal"] as const) {
+  test(`Pi refuses a conflict handoff with evidence from ${invalid}`, { timeout: 15_000 },
+    async (t) => {
+      // Arrange: actual source inspection, with an unowned source ID in its pending conflict.
+      const f = await fixture(t);
+      await f.session.prompt("Inspect delivery.txt and record the handover requirement.");
+      const id = await f.waitPendingConflict();
+      const queue = await f.queue();
+      const original = await queue.getConflict(id);
+      assert.ok(original?.jobId);
+      const job = await queue.getJob(original.jobId);
+      assert.ok(job);
+      let invalidId = "inspection:invented";
+      if (invalid === "foreign inspection") {
+        const foreignQueue = new DurableQueueStore({
+          filePath: queue.filePath, ...original.binding,
+        });
+        const foreign = await foreignQueue.enqueue({ ...job.snapshot, id: "foreign-snapshot",
+          finalEntryId: "foreign-final",
+          context: { ...job.snapshot.context, sessionId: "foreign" } });
+        const observed = job.snapshot.entries.find((entry) => entry.id === f.inspectionId());
+        assert.ok(observed);
+        invalidId = "inspection:foreign";
+        await foreignQueue.checkpoint(foreign.jobId, {
+          inspectionEntries: [{ ...observed, id: invalidId }], status: "paused",
+        });
+      } else if (invalid === "later journal") {
+        invalidId = f.manager.appendMessage({ role: "user", timestamp: Date.now(),
+          content: "This entry was never part of the originating capture snapshot." });
+      }
+      const altered = await queue.updateConflict(id, { sourceEntryIds: [invalidId],
+        // Persisted provenance cannot substitute for membership in the originating snapshot.
+        ...{ verifiedOrigin: {
+          entryId: job.snapshot.leafEntryId, inspectionEntryIds: [invalidId],
+        } },
+      });
+
+      // Act: the next normal user turn asks for a handoff through the real Pi hooks.
+      await f.session.prompt("Explain any pending handover conflict.");
+
+      // Assert: invalid provenance neither delivers a notice nor releases its original evidence.
+      assert.equal(notices(f.manager).length, 0);
+      assert.doesNotMatch(JSON.stringify(f.mainContexts.at(-1)?.messages), /paper handover/);
+      assert.deepEqual(await queue.getConflict(id), altered);
+      assert.deepEqual((await queue.getJob(original.jobId))?.snapshot, job.snapshot);
+      assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
+      assert.deepEqual(f.mutations, []);
+      assert.equal(await readFile(join(f.cwd, "delivery.txt"), "utf8"), sourceText);
+    });
+}
+
+test("Pi retains source-conflict evidence across reload without handing it to a sibling branch",
+  { timeout: 15_000 }, async (t) => {
+    // Arrange: an inspected-source conflict below a shared journal entry, not yet delivered.
     const f = await fixture(t);
     await f.session.prompt("Inspect delivery.txt and record the handover requirement.");
-    const id = await f.waitHandoff();
+    const id = await f.waitPendingConflict();
     const queue = await f.queue();
     const receipt = await queue.getConflict(id);
     assert.ok(receipt?.jobId);
     const original = await queue.getJob(receipt.jobId);
     assert.ok(original?.snapshot.leafEntryId);
 
-    // Act: reload the extension, visit a sibling, then return to the original pinned entry.
+    // Act: reopen, switch to a sibling, and settle a turn there.
     await f.session.reload();
     assert.deepEqual(await queue.getConflict(id), receipt);
     await f.session.navigateTree(f.shared, { summarize: false });
-    const denied = await f.resolve(id);
+    await f.session.prompt("Continue unrelated work on this sibling branch.");
+    await f.session.prompt("/forgetful status");
 
-    // Assert: real inspection is insufficient without the originating Pi branch anchor.
-    assert.equal(denied.isError, true, JSON.stringify(denied));
-    assert.match(JSON.stringify(denied.content), /No pending Forgetful conflict can be resolved/);
-    assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
+    // Assert: neither the notice nor private evidence belongs to this sibling conversation.
+    assert.equal(notices(f.manager).length, 0,
+      "a pending source-conflict notice must not be saved in a sibling conversation");
+    assert.doesNotMatch(JSON.stringify(f.mainContexts.at(-1)?.messages), /paper handover/);
     assert.deepEqual(await queue.getConflict(id), receipt);
-
-    await f.session.navigateTree(original.snapshot.leafEntryId, { summarize: false });
-    const resolved = await f.resolve(id);
-    assert.equal(resolved.isError, false, JSON.stringify(resolved));
-    assert.equal((await f.client.get(f.old.id)).is_obsolete, true);
-    assert.equal(await readFile(join(f.cwd, "delivery.txt"), "utf8"), sourceText);
-  });
-
-for (const invalid of ["invented inspection", "foreign inspection", "later journal"] as const) {
-  test(`Pi refuses conflict evidence from ${invalid}`, realOptions, async (t) => {
-    // Arrange: an actual inspection and conflict; replace its source ID through the queue port.
-    const f = await fixture(t);
-    await f.session.prompt("Inspect delivery.txt and record the handover requirement.");
-    const id = await f.waitHandoff();
-    const queue = await f.queue();
-    const original = await queue.getConflict(id);
-    assert.ok(original?.jobId);
-    const job = await queue.getJob(original.jobId);
-    assert.ok(job);
-    let invalidId = "inspection:invented";
-    if (invalid === "foreign inspection") {
-      const foreignQueue = new DurableQueueStore({ filePath: queue.filePath, ...original.binding });
-      const foreign = await foreignQueue.enqueue({ ...job.snapshot, id: "foreign-snapshot",
-        finalEntryId: "foreign-final",
-        context: { ...job.snapshot.context, sessionId: "foreign" } });
-      const observed = job.snapshot.entries.find((entry) => entry.id === f.inspectionId());
-      assert.ok(observed);
-      invalidId = "inspection:foreign";
-      await foreignQueue.checkpoint(foreign.jobId, {
-        inspectionEntries: [{ ...observed, id: invalidId }], status: "paused",
-      });
-    } else if (invalid === "later journal") {
-      invalidId = f.manager.appendMessage({ role: "user", timestamp: Date.now(),
-        content: "This entry was never part of the originating capture snapshot." });
-    }
-    const altered = await queue.updateConflict(id, { sourceEntryIds: [invalidId],
-      // A serialized claim of verification must never substitute for snapshot membership.
-      ...{ verifiedOrigin: { entryId: job.snapshot.leafEntryId, inspectionEntryIds: [invalidId] } },
-    });
-
-    // Act: use the real foreground Pi tool, supplying the selected but unowned evidence ID.
-    const result = await f.resolve(id, [invalidId]);
-
-    // Assert: prefixes, foreign observations and later journal IDs do not grant ownership.
-    assert.equal(result.isError, true, JSON.stringify(result));
+    assert.deepEqual((await queue.getJob(receipt.jobId))?.snapshot, original.snapshot);
     assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
-    assert.deepEqual(await queue.getConflict(id), altered);
+    assert.deepEqual(f.mutations, []);
+
+    // The original branch still owns the inspection and its unresolved memory conflict.
+    await f.session.navigateTree(original.snapshot.leafEntryId, { summarize: false });
+    await f.session.prompt("Review the original inspected handover requirement.");
+    assert.equal(notices(f.manager).length, 1);
+    assert.match(JSON.stringify(f.mainContexts.at(-1)?.messages), /signed digital handover/);
+    assert.match(JSON.stringify(f.mainContexts.at(-1)?.messages), /paper handover/);
+    await eventually(async () => {
+      assert.equal((await queue.getConflict(id))?.status, "handed_off");
+      assert.deepEqual((await queue.getJob(receipt.jobId!))?.snapshot.entries, []);
+    });
+    assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
+    assert.deepEqual(f.mutations, []);
     assert.equal(await readFile(join(f.cwd, "delivery.txt"), "utf8"), sourceText);
   });
-}
-
-test("Pi source-conflict resolution respects revoked project trust", realOptions, async (t) => {
-  // Arrange: trust permitted the original read, but is revoked before conflict resolution.
-  const f = await fixture(t);
-  await f.session.prompt("Inspect delivery.txt and record the handover requirement.");
-  const id = await f.waitHandoff();
-  const queue = await f.queue();
-  const receipt = await queue.getConflict(id);
-  f.settings.setProjectTrusted(false);
-
-  // Act.
-  const result = await f.resolve(id);
-
-  // Assert: verified provenance grants no new write authority.
-  assert.equal(result.isError, true, JSON.stringify(result));
-  assert.equal((await f.client.get(f.old.id)).is_obsolete, false);
-  assert.deepEqual(await queue.getConflict(id), receipt);
-  assert.equal(await readFile(join(f.cwd, "delivery.txt"), "utf8"), sourceText);
-});

@@ -20,6 +20,7 @@ import { sanitizeText } from "../src/privacy.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { RecallService } from "../src/recall.ts";
 import { buildCaptureSnapshot } from "../src/snapshot.ts";
+import { providerTools } from "./provider-context.ts";
 import { startForgetful } from "./real-forgetful.ts";
 
 // Live (spends money): FORGETFUL_LIVE_CONTEXT_QUALITY=1 FORGETFUL_TEST_SOURCE=/path/to/forgetful
@@ -30,7 +31,7 @@ import { startForgetful } from "./real-forgetful.ts";
 const live = process.env.FORGETFUL_LIVE_CONTEXT_QUALITY === "1";
 const dry = process.env.FORGETFUL_CONTEXT_QUALITY_DRY_RUN === "1";
 const MAX_PROVIDER_CALLS = 48;
-const READ_TOOLS = ["forgetful_recall_wait", "forgetful_knowledge_read", "forgetful_recall"];
+const READ_TOOLS = ["forgetful_recall_wait"];
 const execute = promisify(execFile);
 type RecordData = Record<string, unknown>;
 
@@ -184,8 +185,8 @@ function monitorRuntime(runtime: ModelRuntime, calls: RecordData[], blocked: Rec
       throw new Error(`Evaluation provider invocation cap (${MAX_PROVIDER_CALLS}) reached`);
     }
     if (route === "streamSimple" && current().phase === "recall") {
-      assert.ok(context.tools?.every(tool => READ_TOOLS.includes(tool.name)) ?? true,
-        "Fresh main model must only receive read-only Forgetful tools");
+      assert.deepEqual(providerTools(context).map(tool => tool.name), READ_TOOLS,
+        "Fresh main model must receive only recall wait, with no private readers");
     }
     const call: RecordData = { number: calls.length + 1, ...current(), route,
       model: { provider: model.provider, id: model.id }, startedAt: new Date().toISOString(),
@@ -527,7 +528,7 @@ async function runEvaluation(t: TestContext): Promise<{
         assert.equal(session.messages.length, 0);
         assert.deepEqual([...session.getActiveToolNames()].sort(), [...READ_TOOLS].sort());
         const question = scenario.question + " Answer from stored memory. Use the available " +
-          "memory reads as needed, wait for pending recall, and state uncertainty where " +
+          "recall wait tool when recall is pending, and state uncertainty where " +
           "the stored evidence does not establish an answer.";
         record.question = question;
         current.phase = "recall";

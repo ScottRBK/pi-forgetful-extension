@@ -1,22 +1,32 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { ApiForgetfulClient } from "../src/http.ts";
-import { createToolSession, resultText } from "./pi-tool-session.ts";
+import { createToolSession } from "./pi-tool-session.ts";
 import { startForgetful, realOptions } from "./real-forgetful.ts";
+
+async function projectSession(t: TestContext, baseUrl: string, remote: string) {
+  const { session } = await createToolSession(t, baseUrl, [], remote);
+  const notifications: string[] = [];
+  const inputs = ["repo", "Test repository"];
+  await session.bindExtensions({ uiContext: {
+    notify: (message: string) => notifications.push(message),
+    select: async () => "Create a project",
+    input: async () => inputs.shift(),
+    confirm: async () => true,
+    setWidget: () => undefined,
+  } as never });
+  return { session, notifications };
+}
 
 for (const remote of ["https://github.com/repo.git", "git@github.com:repo.git"]) {
   test(`Pi rejects an ownerless Git remote: ${remote}`, realOptions, async (t) => {
     // Arrange.
     const baseUrl = await startForgetful(t);
-    const { session, modelResults } = await createToolSession(t, baseUrl, [{
-      name: "forgetful_project_init", arguments: { name: "repo", description: "Test repository" },
-    }], remote);
+    const { session, notifications } = await projectSession(t, baseUrl, remote);
     // Act.
-    await session.prompt("Initialise this repository in Forgetful.");
+    await session.prompt("/forgetful project init");
     // Assert: an ordinary display name is valid, but the Git mapping needs an owner.
-    const result = modelResults.at(-1)![0]!;
-    assert.equal(result.isError, true);
-    assert.match(resultText(result), /owner\/repo/);
+    assert.match(notifications.join("\n"), /owner\/repo/);
     assert.deepEqual(await new ApiForgetfulClient({ baseUrl }).listProjects(), []);
   });
 }
@@ -44,13 +54,11 @@ for (const [remote, repository] of [
   test(`Pi preserves qualified repository mapping ${repository}`, realOptions, async (t) => {
     // Arrange.
     const baseUrl = await startForgetful(t);
-    const { session, modelResults } = await createToolSession(t, baseUrl, [{
-      name: "forgetful_project_init", arguments: { name: "repo", description: "Test repository" },
-    }], remote);
+    const { session, notifications } = await projectSession(t, baseUrl, remote);
     // Act.
-    await session.prompt("Initialise this repository in Forgetful.");
+    await session.prompt("/forgetful project init");
     // Assert.
-    assert.equal(modelResults.at(-1)![0]!.isError, false);
+    assert.match(notifications.join("\n"), /linked|created/i);
     const projects = await new ApiForgetfulClient({ baseUrl }).listProjects(repository);
     assert.equal(projects.length, 1);
     assert.equal(projects[0]!.repo_name, repository);

@@ -41,9 +41,26 @@ does not open the production database or write production memories. Deterministi
 mechanism; real-model recall quality, contradiction judgment, and latency require separate
 acceptance checks with the selected model.
 
-The integration suite also covers graph and artifact recall, interrupted rich capture, project
-scope, and repeated `/forgetful encode` runs through Pi's real command and tool boundaries.
-Stored-file fixtures are created only in the isolated server; the extension exposes no upload tool.
+The integration suite also exercises graph and artifact recall, interrupted rich capture and project
+scope through the private services and REST boundaries. Stored-file fixtures are created only in
+the isolated server; the extension exposes no upload tool.
+
+Validate the main-agent boundary without using a live service:
+
+- Only `forgetful_recall_wait` is registered; removed foreground tools, six bundled manual skills
+  and `/forgetful encode` are absent. Private `read_forgetful`, internal readers/writers, automatic
+  recall/capture and human setup/status/settings/scope/capture/model/project-init controls remain.
+- Conflict notices keep next-user-turn timing without an idle wake. Delivery stays pending across
+  restart until a matching notice is saved in its originating conversation and branch. Local
+  handoff must not imply server resolution or a successful external write.
+- Handoff directs the main model to discuss with the user and use independent MCP/CLI access.
+  Missing access or failed writes must be reported as unresolved. There is no external-success
+  tracker, prose receipt parser or fallback writer; partial/uncertain writes and automatic receipts
+  retain their existing recovery rules.
+- Extension off/scope/capture controls apply only to the extension. Independent client setup and
+  skills are separate; a wizard for them is not implemented here.
+- Existing capture filtering excludes recognized Forgetful tool names. Generic shell and wrapper
+  memory outputs are not universally identified; do not assert broader CLI/MCP filtering.
 
 ### Controlled lifecycle and terminal checks
 

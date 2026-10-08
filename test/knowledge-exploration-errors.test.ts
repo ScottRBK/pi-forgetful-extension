@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import test, { type TestContext } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+  createAssistantMessageEventStream, type AssistantMessage, type JsonObject,
+  type ToolResultMessage,
+} from "@earendil-works/pi-ai";
+import { PiMemoryModel } from "../src/model.ts";
+import { RecallService } from "../src/recall.ts";
 import {
   ApiForgetfulClient, ForgetfulAbortError, ForgetfulHttpError,
 } from "../src/http.ts";
@@ -9,7 +19,7 @@ import {
   executeKnowledgeRead, type KnowledgeReadRequest, type KnowledgeToolContext,
   type KnowledgeToolResult,
 } from "../src/knowledge-tools.ts";
-import { createToolSession, resultText } from "./pi-tool-session.ts";
+import { resultText } from "./pi-tool-session.ts";
 
 const context: KnowledgeToolContext = {
   cwd: "/repo", scope: "project", project: { id: 7, name: "Current" },
@@ -201,31 +211,71 @@ test("entity search scopes and pages fetched details rather than stale summaries
   assert.deepEqual(page(selected).items, [entity(2, [9])]);
 });
 
-test("Pi delivers raw child read errors to the next scripted model turn", async (t) => {
-  // Arrange: real Pi tools and HTTP, with an entirely local scripted provider and no model API.
-  const body = "storage temporarily offline\nupstream diagnostic: retry later";
+test("private Pi recall receives complete child read errors on its next model turn", async (t) => {
+  // Arrange: the actual private reader uses controlled HTTP and a local Pi provider.
+  const body = "storage temporarily offline\n" + "service detail; ".repeat(160) + "DIAGNOSTIC_END";
   const baseUrl = await endpoint(t, { ...records,
-    "/projects": { projects: [{ id: 7, name: "Current", repo_name: "test/validation" }] },
+    "/memories/search": { primary_memories: [], linked_memories: [] },
   }, { path: "/entities/2", respond(response) {
     response.writeHead(503, { "content-type": "text/plain" });
     response.end(body);
   } });
-  const { session, modelResults } = await createToolSession(t, baseUrl, [
-    { name: "forgetful_knowledge_read",
-      arguments: { operation: "search_entities", query: "Entity" } },
-    { name: "forgetful_knowledge_read",
-      arguments: { operation: "get_relationships", entity_id: 1 } },
-  ]);
+  const directory = await mkdtemp(join(tmpdir(), "private-recall-errors-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtime = await ModelRuntime.create({
+    authPath: join(directory, "auth.json"), modelsPath: null, refreshOnCreate: false,
+  });
+  const calls: Array<{ name: string; arguments: JsonObject }> = [
+    { name: "submit_recall_plan", arguments: { search: true, queries: ["Entity"],
+      queryIntent: "Find stored entity decisions", entities: [] } },
+    { name: "read_forgetful", arguments: { operation: "search_entities", query: "Entity" } },
+    { name: "read_forgetful", arguments: { operation: "get_relationships", entity_id: 1 } },
+    { name: "submit_recall_review", arguments: { summary: "", memoryIds: [],
+      reason: "Exploration failed; no supporting records were read." } },
+  ];
+  let step = 0;
+  let results: ToolResultMessage[] = [];
+  runtime.registerProvider("private-read", {
+    api: "faux", apiKey: "test-only", baseUrl: "http://127.0.0.1/unused",
+    models: [{ id: "memory", name: "memory", reasoning: false, input: ["text"],
+      contextWindow: 64_000, maxTokens: 2048,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+    streamSimple(model, context) {
+      results = context.messages.filter((item) => item.role === "toolResult");
+      const call = calls[step++];
+      assert.ok(call, "Private recall must finish after its validated submission");
+      const message: AssistantMessage = {
+        role: "assistant", api: "faux", provider: "private-read", model: model.id,
+        content: [{ type: "toolCall", id: `call-${step}`, name: call.name,
+          arguments: call.arguments }],
+        stopReason: "toolUse", timestamp: Date.now(),
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      };
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: "done", reason: "toolUse", message });
+      stream.end(message);
+      return stream;
+    },
+  });
+  const model = new PiMemoryModel(new ModelRegistry(runtime), {
+    provider: "private-read", id: "memory",
+  });
+  const recall = new RecallService(new ApiForgetfulClient({ baseUrl }), model);
 
-  // Act: execute the registered tools, then let Pi pass their results to its next provider call.
-  await session.prompt("Inspect the stored entity and its relationships.");
+  // Act: automatic review explores through its real read_forgetful tool before submitting.
+  const recalled = await recall.recall({ prompt: "Inspect the stored entity and relationships.",
+    context: { cwd: directory, sessionId: "private-errors", branchId: "main" },
+    scope: "global", classificationPolicy: "", recallPolicy: "" });
 
-  // Assert: failed exploration is visibly an error with the exact service diagnostic intact.
-  const results = modelResults.at(-1)!;
+  // Assert: both errors reach the private provider intact, without becoming recalled evidence.
+  assert.equal(step, 4, JSON.stringify(recalled));
   assert.equal(results.length, 2);
   for (const result of results) {
     assert.equal(result.isError, true);
     assert.equal(resultText(result),
       `Forgetful GET /api/v1/entities/2 returned HTTP 503: ${body}`);
   }
+  assert.equal(recalled.text, "");
+  assert.deepEqual(recalled.memoryIds, []);
 });

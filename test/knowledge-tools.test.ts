@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { JsonObject } from "@earendil-works/pi-ai";
 import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
@@ -8,7 +7,6 @@ import type {
   CodeArtifact, CodeArtifactInput, Document, DocumentInput, Entity, EntityInput,
   EntityRelationshipInput, ForgetfulClient, Memory, MemoryInput, Project,
 } from "../src/contracts.ts";
-import { bundledSkillPaths } from "../src/encode.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import {
   executeKnowledgeRead,
@@ -21,7 +19,7 @@ import {
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
 const knowledgeReadTool = {
-  name: "forgetful_knowledge_read",
+  name: "read_forgetful",
   description: "test",
   parameters: KNOWLEDGE_READ_PARAMETERS,
 };
@@ -155,17 +153,10 @@ test("Pi schema accepts leftover search fields on other knowledge read operation
   }));
 });
 
-test("forgetful-recall skill guidance does not advertise removed search length caps", () => {
+test("knowledge read schema accepts full query and intent text", () => {
   assert.doesNotThrow(() => piThenRuntime({
     operation: "search_memories", query: "q".repeat(241), query_context: "c".repeat(501),
   }), "query/query_context are no longer length-capped by the schema");
-
-  const skillPath = bundledSkillPaths().find((path) => path.includes("forgetful-recall"));
-  const skillText = readFileSync(skillPath!, "utf8");
-  assert.ok(
-    !/240 characters/.test(skillText) && !/500 characters/.test(skillText),
-    "SKILL.md must not claim query/query_context length caps that the schema no longer enforces",
-  );
 });
 
 test(

@@ -35,6 +35,7 @@ test("Pi capture persists full history with typed outcomes and earlier evidence"
   const failed = session.appendMessage({ role: "toolResult", toolCallId: "read-1", toolName: "read",
     isError: true, content: [{ type: "text", text: "Not Found" }], timestamp: 1,
     details: { status: 404, api_key: "fixture-secret" } });
+  // Existing journals retain the legacy recall tool name and its untrusted provenance.
   const memory = session.appendMessage({ role: "toolResult", toolCallId: "memory-1",
     toolName: "forgetful_recall", isError: false, timestamp: 1,
     content: [{ type: "text", text: "Untrusted historical claim" }] });
@@ -188,7 +189,8 @@ test("Pi failure observations and image-only provenance survive independent queu
     const emptyFailure = session.appendMessage({ role: "toolResult", toolName: "edit",
       toolCallId: "edit-1", isError: true, timestamp: 1, content: [],
       details: { status: 409, reason: "Conflict" } });
-    const memoryFailure = session.appendMessage({ role: "toolResult", toolName: "forgetful_recall",
+    const memoryFailure = session.appendMessage({
+      role: "toolResult", toolName: "forgetful_recall_wait",
       toolCallId: "memory-1", isError: true, timestamp: 1,
       content: [{ type: "text", text: "Memory unavailable" }] });
     session.appendMessage(assistant("The requested changes could not be completed"));

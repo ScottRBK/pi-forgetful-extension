@@ -13,9 +13,9 @@ The intended experience requires no memory commands during normal work:
   as a hidden Pi conversation message, available to later requests and normal compaction;
 - the initial pending marker persists normally; the useful result itself continues the turn,
   without a separate saved wake; recalled facts are untrusted and excluded from capture evidence;
-- `forgetful_recall_wait` and foreground tool results use normal Pi tool-result persistence;
-- the main agent can search memories, inspect rich knowledge, initialise projects, and write
-  evidenced repository knowledge through bounded tools;
+- `forgetful_recall_wait` is the sole main-agent tool and uses normal Pi tool-result persistence;
+- deliberate main-agent memory access uses independently configured CLI/MCP access and its skills;
+  this extension does not install or configure those clients;
 - startup does local setup only; project discovery and recovery run in the background, with one
   transient activity widget; early settled turns are queued durably until discovery completes;
 - settled capture pins session/branch history, reusing a successful historical summary plus
@@ -39,16 +39,17 @@ The intended experience requires no memory commands during normal work:
 - capture can create and link memories, entities, relationships, documents, and code artifacts;
   file uploads are excluded;
 - configured recall scope is authoritative and independent of each capture destination;
-- setup, project, encode, logging, verbosity, scope, capture, model, and enablement controls remain
-  available on demand.
+- human setup, project, logging, verbosity, scope, capture, model, and enablement controls remain
+  available on demand; these settings do not control independent CLI/MCP clients.
 
 Recall defaults to global search. Capture defaults to the current project, but may select another
 existing project when the evidence supports it. Clear complete changes supersede old memories while
-preserving history. Uncertain conflicts return to their originating session. `forgetful_resolve`
-accepts a pending conflict ID and action; supplied evidence is validated against the originating
-session. An eligible conflict against one memory can produce a complete revised replacement that
-preserves unaffected claims and links; unsafe partial or shared conflicts remain pending or can be
-skipped.
+preserving history. Uncertain conflicts return to their originating conversation on its next user
+turn, without waking an idle agent. A conflict becomes locally `handed_off` only after the notice is
+saved in that conversation; this never means that the server conflict was resolved. The main agent
+agrees a resolution with the user and applies it through independent CLI/MCP access. Unavailable
+access or failed writes remain unresolved, with no fallback extension writer. Existing partial and
+uncertain write records remain untouched; handoff must not discard or replay their saved progress.
 
 Post-exit capture completion remains beyond the MVP; the durable queue remains in scope.
 See [the approved design](docs/design.md).
@@ -56,17 +57,18 @@ See [the approved design](docs/design.md).
 ## High-level architecture
 
 Pi lifecycle code remains separate from memory policy and transport details. The MVP uses a warm
-HTTP REST service behind transport-neutral memory and knowledge ports. Forgetful MCP transport is
-not used. A future CLI adapter must preserve the same scope, validation, timeout, and failure-open
+HTTP REST service behind transport-neutral memory and knowledge ports. Background recall/capture
+does not use MCP. The main agent's independent CLI/MCP integration is outside this extension.
+A future background CLI adapter must preserve the same scope, validation, timeout, and failure-open
 boundaries.
 
 ```mermaid
 flowchart TB
   subgraph PI["Pi extension boundary"]
-    E["ForgetfulExtension\nhooks, commands, bundled skills"]
+    E["ForgetfulExtension\nhooks and human controls"]
     R["Recall hooks\nasync jobs and model boundaries"]
     S["Settled capture hook\nsnapshot and enqueue"]
-    T["Foreground tools\nrecall, knowledge, project init, resolve"]
+    T["Recall wait\nbounded main-agent tool"]
     E --> R
     E --> S
     E --> T

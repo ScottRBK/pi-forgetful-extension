@@ -34,10 +34,9 @@ test("Pi loads the packaged entrypoint and registers the extension", async (t) =
     ...extension.tools.keys(),
   ]);
 
-  // Assert: the actual default export must register tools rather than return another factory.
+  // Assert: direct memory access belongs to separately configured CLI/MCP integrations.
   assert.deepEqual(result.errors, []);
-  assert.ok(names.includes("forgetful_recall"));
-  assert.ok(names.includes("forgetful_resolve"));
+  assert.deepEqual(names, ["forgetful_recall_wait"]);
   assert.ok(
     result.extensions.some((extension) => extension.commands.has("forgetful")),
   );

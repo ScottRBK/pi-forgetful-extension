@@ -108,7 +108,9 @@ export interface PendingConflict {
   evidence: string[];
   partial?: boolean;
   reason: string;
-  status: "pending" | "resolved" | "rejected";
+  status: "pending" | "handed_off" | "resolved" | "rejected";
+  /** The originating conversation saved the handoff; this is not a server-write receipt. */
+  handoffEntryId?: string;
   replacementId?: number;
   uncertainWrite?: string;
   supersession?: SupersessionReceipt;
@@ -1514,6 +1516,30 @@ export class DurableQueueStore {
     branchId?: string,
   ): Promise<PendingConflict[]> {
     return this.pendingConflicts(identity, sessionId, branchId);
+  }
+
+  /** Acknowledge delivery only. Existing write progress remains owned by its original path. */
+  async markConflictHandedOff(conflictId: string, entryId: string): Promise<void> {
+    if (!entryId) throw new Error("A saved conversation entry is required for conflict handoff");
+    const identity = this.defaultIdentity();
+    const pending = await this.getConflict(conflictId);
+    if (!pending || pending.status !== "pending" || !conflictIdentityMatches(pending, identity))
+      return;
+    // Older processes may still be finishing a resolution on this branch. Never race their receipt.
+    await this.withWorkerLock(identity, pending, () => this.mutate((state) => {
+      const conflict = state.conflicts.find((item) => item.id === conflictId);
+      const job = state.jobs.find((item) => item.id === conflict?.jobId);
+      if (!conflict || conflict.status !== "pending" ||
+          !conflictIdentityMatches(conflict, identity) || conflict.uncertainWrite ||
+          conflict.replacementId !== undefined || conflict.replacement || conflict.supersession ||
+          conflict.resolution || job?.uncertainWrite || (job && interruptedWrite(job))) {
+        return { value: undefined, changed: false };
+      }
+      conflict.status = "handed_off";
+      conflict.handoffEntryId = entryId;
+      conflict.updatedAt = nowIso(this.now);
+      return { value: undefined };
+    }));
   }
 
   async updateConflict(

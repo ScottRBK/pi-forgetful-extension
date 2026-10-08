@@ -75,6 +75,10 @@ test("public Pi shutdown aborts held capture without needing a model response",
         maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       })),
       streamSimple(model, context, options) {
+        if (model.id === "main") {
+          assert.deepEqual(providerTools(context).map(tool => tool.name),
+            ["forgetful_recall_wait"]);
+        }
         const submission = providerTools(context)[0]?.name;
         const capture = model.id === "memory" && submission === "submit_capture_candidates";
         const plan = model.id === "memory" && submission === "submit_recall_plan";
@@ -178,10 +182,10 @@ test("public Pi shutdown aborts held capture without needing a model response",
     await assert.rejects(readdir(root), { code: "ENOENT" });
   });
 
-for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as const) {
-  test(`real Pi resolution retains its receipt and service diagnostics during ${outcome}`,
+for (const outcome of ["shutdown", "navigation", "unknown"] as const) {
+  test(`real Pi automatic capture retains its write receipt during ${outcome}`,
     { timeout: 15_000 }, async (t) => {
-      const root = await mkdtemp(join(tmpdir(), "pi-resolution-shutdown-"));
+      const root = await mkdtemp(join(tmpdir(), "pi-capture-receipt-"));
       let closeSession: (() => Promise<void>) | undefined;
       let closeServer: (() => Promise<void>) | undefined;
       let releaseWrite: (() => void) | undefined;
@@ -199,14 +203,12 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
       const git = promisify(execFile);
       await git("git", ["init", "--quiet", root]);
       await git("git", ["-C", root, "remote", "add", "origin",
-        "https://github.com/test/resolution-shutdown.git"]);
+        "https://github.com/test/capture-receipt.git"]);
       const oldMemory = { id: 42, title: "Storage", content: "Use SQLite for this repo.",
         context: "Previous decision.", keywords: ["storage"], tags: [], importance: 7,
         project_ids: [7], is_obsolete: false, linked_memory_ids: [] };
       const stored = new Map<number, Record<string, unknown>>([[42, oldMemory]]);
       const mutations: string[] = [];
-      const validationBody = JSON.stringify({ detail: [{ loc: ["body", "content"],
-        msg: "service validation details ".repeat(200) + "RAW_VALIDATION_TAIL" }] });
       let writeStarted!: () => void;
       const heldWrite = new Promise<void>((resolve) => { writeStarted = resolve; });
       let writeAborted!: () => void;
@@ -215,8 +217,8 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
         response.setHeader("content-type", "application/json");
         const path = request.url ?? "";
         if (path.startsWith("/api/v1/projects")) {
-          response.end(JSON.stringify({ projects: [{ id: 7, name: "Resolution test",
-            repo_name: "test/resolution-shutdown" }], total: 1 }));
+          response.end(JSON.stringify({ projects: [{ id: 7, name: "Capture receipt test",
+            repo_name: "test/capture-receipt" }], total: 1 }));
           return;
         }
         if (path === "/api/v1/memories/search") {
@@ -237,14 +239,9 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
           });
           releaseWrite = () => {
             releaseWrite = undefined;
-            if (outcome === "validation") {
-              response.statusCode = 422;
-              response.end(validationBody);
-            } else {
-              stored.set(99, { ...input, id: 99, is_obsolete: false, linked_memory_ids: [] });
-              response.statusCode = 201;
-              response.end(JSON.stringify({ id: 99 }));
-            }
+            stored.set(99, { ...input, id: 99, is_obsolete: false, linked_memory_ids: [] });
+            response.statusCode = 201;
+            response.end(JSON.stringify({ id: 99 }));
           };
           writeStarted();
           return;
@@ -273,17 +270,17 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
       const runtime = await ModelRuntime.create({
         authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
       });
-      let conflictId: string | undefined;
-      let handoffReady!: () => void;
-      const handoff = new Promise<void>((resolve) => { handoffReady = resolve; });
-      let resolveOnNextMain = false;
       runtime.registerProvider("test", {
         api: "faux", apiKey: "test-only-key", baseUrl: "http://127.0.0.1/unused",
         models: ["main", "memory"].map((id) => ({ id, name: id, reasoning: false,
           input: ["text"], contextWindow: 32_000, maxTokens: 2048,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
         streamSimple(model, context) {
-          let name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
+          if (model.id === "main") {
+            assert.deepEqual(providerTools(context).map(tool => tool.name),
+              ["forgetful_recall_wait"]);
+          }
+          const name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
           const input = model.id === "memory" ? decodeProviderContext(context).input : {};
           let decision: JsonObject = {
             search: false, queries: [], queryIntent: "", entities: [],
@@ -291,24 +288,15 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
           if (name === "submit_capture_candidates") {
             const user = input.eligibleEvidence.find(
               (entry: { role: string }) => entry.role === "user");
-            decision = { candidates: user && !conflictId ? [{ id: "storage",
+            decision = { candidates: user ? [{ id: "storage",
               title: "Local storage", content: "Use local storage for this repo.",
               context: "Explicit user decision.", keywords: ["storage"], tags: [],
               sourceEntryIds: [user.id], evidenceType: "userDecision" }] : [] };
           } else if (name === "submit_capture_decision") {
-            decision = { action: "escalate", conflictingMemoryId: 42,
+            decision = { action: "supersede", conflictingMemoryId: 42,
               oldClaim: oldMemory.content, newClaim: input.candidate.content,
-              reason: "Confirm this change.", sourceEntryIds: input.candidate.sourceEntryIds };
-          } else if (name === "submit_memory_revision") {
-            decision = { title: "Local storage", content: "Use local storage for this repo.",
-              context: "Confirmed change.", keywords: ["storage"], tags: [], importance: 7,
-              sourceEntryIds: input.evidenceEntryIds, documentIds: [], codeArtifactIds: [],
-              entityIds: [], memoryIds: [], fileIds: [], sourceFiles: [] };
-          } else if (model.id === "main" && resolveOnNextMain) {
-            resolveOnNextMain = false;
-            name = "forgetful_resolve";
-            assert.ok(conflictId);
-            decision = { conflict_id: conflictId, action: "supersede", reason: "Confirmed change" };
+              reason: "The user explicitly replaced the old decision.",
+              sourceEntryIds: input.candidate.sourceEntryIds };
           }
           const message: AssistantMessage = {
             role: "assistant", api: "faux", provider: "test", model: model.id,
@@ -333,18 +321,7 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
       const loader = new DefaultResourceLoader({
         cwd: root, agentDir, settingsManager: settings, noSkills: true,
         noPromptTemplates: true, noThemes: true, noContextFiles: true,
-        extensionFactories: [(pi) => {
-          const sendMessage = pi.sendMessage.bind(pi);
-          pi.sendMessage = (message, options) => {
-            const details = message.details as { conflictIds?: string[] } | undefined;
-            if (details?.conflictIds?.[0]) {
-              conflictId = details.conflictIds[0];
-              handoffReady();
-            }
-            sendMessage(message, options);
-          };
-          return createForgetfulExtension({ agentDir })(pi);
-        }],
+        extensionFactories: [createForgetfulExtension({ agentDir })],
       });
       await loader.reload();
       assert.deepEqual(loader.getExtensions().errors, []);
@@ -354,10 +331,8 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
         resourceLoader: loader, noTools: "builtin",
       });
       let navigation: Promise<unknown> | undefined;
-      let resolving: Promise<void> | undefined;
       closeSession = async () => {
         try {
-          await resolving;
           await navigation;
           await session.abort();
           await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
@@ -366,10 +341,6 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
       await session.bindExtensions({});
       await session.prompt("/forgetful status");
       await session.prompt("We decided to use local storage for this repo.");
-      await handoff;
-      resolveOnNextMain = true;
-      resolving = session.prompt("Yes, replace SQLite with local storage for this repo.");
-      void resolving.catch(() => undefined);
       await heldWrite;
       const queues = join(agentDir, "forgetful/queues");
       const [directory] = await readdir(queues);
@@ -377,18 +348,16 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
 
       // Act: stop the runtime with an accepted REST write still awaiting its response.
       let navigationReturned = false;
-      if (outcome !== "validation") {
-        navigation = session.extensionRunner.emit(outcome !== "navigation"
-          ? { type: "session_shutdown", reason: "quit" }
-          : { type: "session_tree", oldLeafId: null, newLeafId: null })
-          .then(() => { navigationReturned = true; });
-        void navigation.catch(() => undefined);
-      }
+      navigation = session.extensionRunner.emit(outcome !== "navigation"
+        ? { type: "session_shutdown", reason: "quit" }
+        : { type: "session_tree", oldLeafId: null, newLeafId: null })
+        .then(() => { navigationReturned = true; });
+      void navigation.catch(() => undefined);
       try {
         const pending = JSON.parse(await readFile(queueFile, "utf8"));
-        assert.equal(pending.conflicts[0].replacement.creationAttempted, true);
-        if (outcome !== "validation") assert.equal(navigationReturned, false,
-          "teardown must await an accepted resolution and its durable receipt");
+        assert.equal(pending.jobs[0].candidateOutcomes.storage.creation.status, "started");
+        assert.equal(navigationReturned, false,
+          "teardown must await an accepted capture write and its durable receipt");
       } finally { if (outcome !== "unknown") releaseWrite?.(); }
       if (outcome === "unknown") {
         let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -396,47 +365,29 @@ for (const outcome of ["shutdown", "navigation", "unknown", "validation"] as con
           await Promise.race([Promise.all([abortedWrite, navigation]),
             new Promise((_, reject) => {
               deadline = setTimeout(() => reject(new Error(
-                "shutdown did not abort an unacknowledged resolution write")), 5_000);
+                "shutdown did not abort an unacknowledged capture write")), 5_000);
             })]);
         } finally { clearTimeout(deadline); }
       }
       await navigation;
-      // Inspect disk immediately at the lifecycle boundary, before awaiting the main agent.
+      // Inspect disk immediately after the lifecycle boundary has drained the capture worker.
       const saved = JSON.parse(await readFile(queueFile, "utf8"));
-      if (outcome !== "validation") {
-        if (outcome === "unknown") {
-          assert.ok(saved.conflicts[0].uncertainWrite);
-          assert.equal(saved.conflicts[0].replacement.creationAttempted, true);
-          assert.equal(saved.conflicts[0].replacement.memoryId, undefined);
-        } else {
-          assert.equal(saved.conflicts[0].replacementId, 99);
-          assert.equal(saved.conflicts[0].replacement.memoryId, 99);
-        }
-        assert.equal(saved.conflicts[0].status, "pending");
-        assert.deepEqual((await readdir(join(queues, directory!)))
-          .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
+      const job = saved.jobs[0];
+      const receipt = job.candidateOutcomes.storage.creation;
+      if (outcome === "unknown") {
+        assert.ok(job.uncertainWrite);
+        assert.equal(receipt.status, "unknown");
+        assert.equal(job.candidateOutcomes.storage.memoryId, undefined);
+      } else {
+        assert.equal(receipt.status, "completed");
+        assert.equal(job.candidateOutcomes.storage.memoryId, 99);
       }
-      await resolving;
-      assert.deepEqual(mutations, ["create"], "stopped resolution must not dispatch supersession");
-      if (outcome === "validation") {
-        const result = session.messages.find((message) =>
-          message.role === "toolResult" && message.toolName === "forgetful_resolve");
-        assert.ok(result && result.role === "toolResult" && result.isError);
-        const text = result.content.filter((part) => part.type === "text")
-          .map((part) => part.type === "text" ? part.text : "").join("\n");
-        assert.ok(text.includes(validationBody), "the main model must receive the complete body");
-        assert.doesNotMatch(text, /Forgetful conflict could not be resolved:/);
-        resolveOnNextMain = true;
-        await session.prompt("Check the previous resolution without duplicating a save.");
-        const blocked = session.messages.findLast((message) =>
-          message.role === "toolResult" && message.toolName === "forgetful_resolve");
-        assert.ok(blocked && blocked.role === "toolResult" && blocked.isError);
-        const blockedText = blocked.content.filter((part) => part.type === "text")
-          .map((part) => part.type === "text" ? part.text : "").join("\n");
-        assert.match(blockedText, /automatic retry blocked/);
-        assert.ok(blockedText.includes(validationBody),
-          "a blocked retry must still expose the original service diagnostic to the model");
-        assert.deepEqual(mutations, ["create"]);
-      }
+      assert.equal(job.status, "paused");
+      assert.equal(job.attempts, 0, "lifecycle stop is not a failed attempt");
+      assert.deepEqual(saved.conflicts, []);
+      assert.deepEqual((await readdir(join(queues, directory!)))
+        .filter((name) => !name.startsWith("snapshot-")), ["queue.json"]);
+      assert.deepEqual(mutations, ["create"], "stopped capture must not dispatch supersession");
+      assert.equal(stored.get(42)?.is_obsolete, false);
     });
 }

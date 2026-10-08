@@ -17,22 +17,18 @@ import { createForgetfulExtension } from "../src/extension.ts";
 import { decodeProviderContext, providerTools } from "./provider-context.ts";
 
 for (const outcome of ["shutdown", "navigation"] as const) {
-  test(`real Pi refuses a late foreground update during ${outcome} drain`,
+  test(`real Pi pauses capture without writes or retry cost during ${outcome} drain`,
     { timeout: 15_000 }, async (t) => {
       // Arrange: real Pi and disk queue; only the external REST/model services are scripted.
       const root = await mkdtemp(join(tmpdir(), "pi-capture-shutdown-"));
       let closeSession: (() => Promise<void>) | undefined;
       let closeServer: (() => Promise<void>) | undefined;
       let releaseCapture: (() => void) | undefined;
-      let releaseAuthorization: (() => void) | undefined;
-      let writing: Promise<void> | undefined;
       let navigation: Promise<unknown> | undefined;
       t.after(async () => {
         try {
-          releaseAuthorization?.();
           releaseCapture?.();
           try {
-            await writing;
             await navigation;
           } finally { await closeSession?.(); }
         } finally {
@@ -46,30 +42,13 @@ for (const outcome of ["shutdown", "navigation"] as const) {
       await git("git", ["init", "--quiet", root]);
       await git("git", ["-C", root, "remote", "add", "origin",
         "https://github.com/test/capture-shutdown.git"]);
-      let storedMemory = { id: 42, title: "Storage", content: "Use SQLite for this repo.",
-        context: "Previous decision.", keywords: ["storage"], tags: [], importance: 7,
-        project_ids: [7], is_obsolete: false, linked_memory_ids: [] };
       const mutations: string[] = [];
-      let authorizationStarted!: () => void;
-      const heldAuthorization = new Promise<void>((resolve) => { authorizationStarted = resolve; });
       const server = createServer(async (request, response) => {
         response.setHeader("content-type", "application/json");
         if (request.url?.startsWith("/api/v1/projects")) {
           response.end(JSON.stringify({ projects: [
             { id: 7, name: "Shutdown test", repo_name: "test/capture-shutdown" },
           ], total: 1 }));
-        } else if (request.url === "/api/v1/memories/42" && request.method === "GET") {
-          releaseAuthorization = () => {
-            releaseAuthorization = undefined;
-            response.end(JSON.stringify(storedMemory));
-          };
-          authorizationStarted();
-        } else if (request.url === "/api/v1/memories/42" && request.method === "PUT") {
-          let body = "";
-          for await (const chunk of request) body += chunk;
-          mutations.push(`${request.method} ${request.url}`);
-          storedMemory = { ...storedMemory, ...JSON.parse(body) };
-          response.end(JSON.stringify(storedMemory));
         } else {
           if (request.method !== "GET") mutations.push(`${request.method} ${request.url}`);
           response.statusCode = 404;
@@ -95,7 +74,6 @@ for (const outcome of ["shutdown", "navigation"] as const) {
       const runtime = await ModelRuntime.create({
         authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
       });
-      let writeOnNextMain = false;
       runtime.registerProvider("test", {
         api: "faux", apiKey: "test-only-key", baseUrl: "http://127.0.0.1/unused",
         models: ["main", "memory"].map((id) => ({
@@ -109,14 +87,9 @@ for (const outcome of ["shutdown", "navigation"] as const) {
           const input = capture ? decodeProviderContext(context).input : {};
           const evidence = input.eligibleEvidence?.find(
             (entry: { role: string }) => entry.role === "user");
-          const write = model.id === "main" && writeOnNextMain;
-          if (write) writeOnNextMain = false;
           const message: AssistantMessage = {
             role: "assistant", api: "faux", provider: "test", model: model.id,
-            content: write ? [{ type: "toolCall", id: "write-1",
-              name: "forgetful_knowledge_write", arguments: {
-                operation: "update_memory", memory_id: 42, content: "Use local storage instead.",
-              } }] : capture ? [{ type: "toolCall", id: "capture-1", name: submission!,
+            content: capture ? [{ type: "toolCall", id: "capture-1", name: submission!,
               arguments: { candidates: [{
                 id: "storage", title: "Use local storage",
                 content: "Use local storage for this repo.",
@@ -127,14 +100,14 @@ for (const outcome of ["shutdown", "navigation"] as const) {
                 arguments: { search: false, queries: [], queryIntent: "", entities: [] } }]
               : [{ type: "text", text: model.id === "main" ? "Decision noted."
                 : "No recall needed." }],
-            stopReason: (capture || write || plan) ? "toolUse" : "stop", timestamp: Date.now(),
+            stopReason: (capture || plan) ? "toolUse" : "stop", timestamp: Date.now(),
             usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           };
           const stream = createAssistantMessageEventStream();
           const emit = () => {
             stream.push({ type: "done",
-              reason: (capture || write || plan) ? "toolUse" : "stop", message });
+              reason: (capture || plan) ? "toolUse" : "stop", message });
             stream.end(message);
           };
           if (capture) {
@@ -180,27 +153,16 @@ for (const outcome of ["shutdown", "navigation"] as const) {
       const [directory] = await readdir(queues);
       const queueFile = join(queues, directory!, "queue.json");
 
-      // The authorization GET is the last asynchronous lookup before update_memory's guard.
-      writeOnNextMain = true;
-      writing = session.prompt("Update the storage memory to say use local storage instead.");
-      void writing.catch(() => undefined);
-      await heldAuthorization;
       navigation = session.extensionRunner.emit(outcome === "shutdown"
         ? { type: "session_shutdown", reason: "quit" }
         : { type: "session_tree", oldLeafId: null, newLeafId: null });
       void navigation.catch(() => undefined);
       // The provider's abort is a reliable gate that lifecycle revocation has happened.
       await aborted;
-      releaseAuthorization?.();
-      await writing;
       await navigation;
       const saved = JSON.parse(await readFile(queueFile, "utf8"));
       assert.equal(saved.jobs[0].status, "paused");
       assert.equal(saved.jobs[0].attempts, 0);
-      assert.deepEqual(mutations, [], "stopped runtime must not dispatch a foreground update");
-      assert.equal(storedMemory.content, "Use SQLite for this repo.");
-      const result = session.messages.find((message) =>
-        message.role === "toolResult" && message.toolName === "forgetful_knowledge_write");
-      assert.ok(result && result.role === "toolResult" && result.isError);
+      assert.deepEqual(mutations, [], "stopped capture must not dispatch writes");
     });
 }

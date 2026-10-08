@@ -7,7 +7,7 @@ A separately selected memory model plans relevant context while normal work star
 then captures durable, evidenced knowledge after work settles. Recall lifecycle messages reach
 the main model only at model-call boundaries. Clear contradictions automatically supersede old
 memories while preserving their history. Uncertain conflicts return to the originating session
-for resolution through a bounded tool.
+for discussion with the user and resolution through independently configured MCP or CLI access.
 
 ![Pi Forgetful architecture](docs/assets/architecture.png)
 
@@ -57,8 +57,8 @@ ask your coding agent to read the [Forgetful setup skill][forgetful-setup-skill]
 
 ## Getting Started
 
-The first time Pi starts with the extension installed, it will register the memory hooks, commands,
-and agent tools immediately.
+The first time Pi starts with the extension installed, it registers the memory hooks, commands
+and `forgetful_recall_wait` immediately.
 
 Inside Pi, connect to Forgetful:
 
@@ -126,27 +126,21 @@ Repeated initialisation reuses the existing link. If a request fails, run init a
 whether it was saved. Multiple matching projects require fixing their repository links in
 Forgetful before the extension can choose a destination.
 
-The active agent can also initialise the repository through `forgetful_project_init`. Choose
-exactly one mode: create with `name` and `description`, omitting `project_id`; or link an existing
-unassigned project with `project_id` only, omitting `name` and `description`. This uses the same
-repository mapping and trust checks as the wizard.
+### Deliberate knowledge access
 
-### Encode a repository
+The extension exposes only `forgetful_recall_wait` to the main agent. Automatic recall and capture
+retain their private readers and writers, including `read_forgetful`. Human setup, status, settings,
+scope, capture, model and `/forgetful project init` controls remain available.
 
-```text
-/forgetful encode
-```
+For deliberate searches, record inspection, repository encoding or agreed conflict resolution,
+configure Forgetful MCP or CLI access and its skills independently. The extension no longer bundles
+manual memory skills or provides `/forgetful encode`, explicit recall, knowledge read/write, agent
+project-init or resolver tools. A wizard to configure independent access is future work and is not
+implemented here. `/forgetful setup` configures only this extension's warm REST connection.
 
-This starts an encoding turn with the active Pi model. It surveys repository documentation,
-source, configuration and the current commit, then stores system components and relationships,
-long-form documents, reusable code and linked atomic memories. The bundled Forgetful workflows
-work when the extension is loaded directly through Pi settings as well as through a package.
-
-Encoding checks existing knowledge before writing. Repeat it to refresh repository knowledge;
-clear contradictions preserve the old memory through supersession. The agent finishes with a
-coverage report identifying saved knowledge, updated records, skipped areas and remaining gaps.
-Encoding requires a trusted repository and a working connection, but does not require a separate
-background memory model. File uploads are outside this workflow.
+`/forgetful off`, scope and capture controls affect this extension only. They do not disable,
+restrict or configure independent MCP/CLI clients; those clients use their own permissions,
+settings and workflows.
 
 ## Usage
 
@@ -154,26 +148,17 @@ Normal work needs no memory commands. Recall starts alongside the active turn, a
 after a successful `agent_settled` event. Recall searches globally by default. Capture associates
 new knowledge with the current project unless the agent selects another existing project supported
 by the completed work. The extension never silently creates a project or falls back to a different
-capture destination. Explicit repository encoding can initialise its project through the agent
-tool.
-
-Explicit knowledge writes also default to the verified current project. When the user or clear
-session evidence identifies another repository, resolve its existing assigned project first and
-pass that numeric `project_id` to `forgetful_knowledge_write`. Destination validation happens before
-project-scoped overlap checks and again before mutation. A failed override never falls back to the
-current project. New records and superseding replacements identify the active source repository;
-updates preserve the existing record's provenance.
+capture destination. Use `/forgetful project init` to create or link its project explicitly.
 
 | Command | Effect |
 | --- | --- |
 | `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |
 | `/forgetful project init` | Create or link this repository's Forgetful project. |
-| `/forgetful encode` | Survey or refresh repository knowledge with the active agent. |
 | `/forgetful status` | Show effective settings and memory status. |
-| `/forgetful on` / `/forgetful off` | Enable or disable memory processing. |
+| `/forgetful on` / `/forgetful off` | Enable or disable this extension’s memory processing. |
 | `/forgetful capture auto` | Automatically capture evidenced knowledge. |
 | `/forgetful capture observe` | Inspect candidates without writing memories. |
-| `/forgetful capture off` | Disable extraction, resolution, and capture writes. |
+| `/forgetful capture off` | Disable this extension’s extraction and capture writes. |
 | `/forgetful capture skip` | Skip the active run, or the next run when idle. |
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
@@ -187,8 +172,8 @@ updates preserve the existing record's provenance.
 | `/forgetful verbosity error` | Show errors only. |
 | `/forgetful debug on` / `/forgetful debug off` | Legacy aliases for debug / warning verbosity. |
 
-Verbosity is saved in user settings and applies immediately, including to queued recall and the
-`forgetful_recall` tool. Each level includes higher-severity messages. Explicit command replies
+Verbosity is saved in user settings and applies immediately, including to queued recall. Each level
+includes higher-severity messages. Explicit command replies
 (including `/forgetful status`) and normal Pi tool results remain visible at every level.
 Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
 
@@ -293,7 +278,9 @@ the current request and are not copied into each saved result. The initial pendi
 persists normally. Hidden display is not a privacy boundary: recalled text is bounded and redacted
 before delivery. No-context and failure states remain transient. `forgetful_recall_wait` returns an
 ordinary Pi tool result and follows normal tool-result persistence. Capture excludes recall messages
-and memory-operation results from eligible evidence.
+and results from recognized Forgetful tool names from eligible evidence. Existing filtering is
+unchanged: memory output from generic `bash` calls or wrappers is not universally identified.
+Independent MCP/CLI use therefore does not guarantee that every memory result is excluded.
 Conflict messages follow normal Pi persistence; `/forgetful status` reports the verbosity and latest
 recall result.
 
@@ -303,31 +290,20 @@ Overall recall timeouts show the `timeout_ms` limit shared by planning, search, 
 review. Caller cancellations are reported separately with their supplied reason when available.
 Details are bounded and redacted; recalled text also passes through known-secret redaction.
 
-The main model can search further with `forgetful_recall`, inspect records and supporting material
-with `forgetful_knowledge_read`, and store repository knowledge with `forgetful_knowledge_write`.
-`forgetful_resolve` resolves an existing pending capture conflict. Retrieved content is untrusted
-historical context, never executable instructions.
+Retrieved content is untrusted historical context, never executable instructions. Deliberate
+knowledge access uses the independently configured clients described above.
 
-Invalid foreground tool calls return failed tool results to the main model. Unknown arguments are
-rejected, and validation feedback identifies the field and applicable limit so the model can retry
-with corrected arguments. API client errors preserve the actual status and response body, including
-non-JSON and server-error diagnostics, subject to known-secret redaction and transport limits.
-Automatic recall keeps its separate failure-open behaviour.
+API client errors preserve the actual HTTP status and response body, including validation field
+details, JSON and non-JSON bodies, plain `Not Found` responses and server-error diagnostics,
+subject to known-secret redaction and transport limits. Private tool validation identifies the
+field and applicable limit so the memory model can correct invalid arguments. Automatic recall
+keeps its failure-open behaviour.
 
-For `forgetful_project_init`, choose exactly one mode: create with `name` and `description`,
-omitting `project_id`; or link an existing unassigned project with `project_id` only, omitting
-`name` and `description`. `name` is a display label, not a repository identifier. The repository
-mapping comes from Git's origin and must have an `owner/repo` path; GitLab subgroups and self-hosted
-prefixes are supported. Project repository names allow 255 characters, but the API's knowledge
-`source_repo` field allows 200. The extension reports that mismatch instead of truncating identity.
-Tool-specific scope, evidence and size restrictions still apply even when the API accepts more.
-
-Foreground `search_memories` follows Forgetful MCP search defaults: `k=3` primary matches,
-linked memories enabled, and up to five links per primary memory. Results retain full memory
-content, primary and linked groups, and the server's count, token and truncation metadata.
-Use `k` (1–20) for search breadth; `offset` and `limit` belong to list and content operations.
-Pi shows a compact result summary that expands to the full response. Automatic recall selects a
-limited number of records, but does not shorten their text before model review.
+Repository mapping comes from Git's origin and must have an `owner/repo` path; GitLab subgroups
+and self-hosted prefixes are supported. Project repository names allow 255 characters, but the
+API's knowledge `source_repo` field allows 200. The extension reports that mismatch instead of
+truncating identity. Automatic recall selects a limited number of records but does not shorten
+their text before model review.
 
 ### Recall
 
@@ -348,10 +324,9 @@ change it for an individual operation.
 The private reviewer can use `read_forgetful` to search and follow stored memories, entities,
 relationships and supporting documents or code artifacts within the existing deadline. It can
 explore even when the initial memory search is empty. It has no repository or external URL access.
-The active agent can also explicitly open supporting records, including stored files. Strict project
-scope also applies to linked records and relationship
-endpoints. Files require the server's optional file feature; an unavailable feature does not
-prevent ordinary memory recall.
+Strict project scope also applies to linked records and relationship endpoints. Internal stored-file
+support depends on the server's optional file feature; an unavailable feature does not prevent
+ordinary memory recall. Main-agent file access requires an independent client.
 
 Review is one bounded model path within the existing overall deadline. The private review tool may
 retry invalid, unknown, duplicate, or semantically rejected submissions up to three total attempts.
@@ -362,8 +337,6 @@ Cancellation, timeout, or exhausted attempts inject nothing; raw
 results are never a fallback for failed review. Summaries remain untrusted historical context. The
 model can retain title-only memory links as leads, but must not invent their unseen contents.
 
-Explicit `forgetful_recall` and `forgetful_knowledge_read` calls still return read-only results
-directly to the main agent, which chooses what to use. They do not add a background review path.
 Automatic recall is asynchronous, but it is bounded to one planner and one review path per job.
 Exploration happens through read-only tools within that review path; recall lifecycle messages
 do not recursively start new recall jobs.
@@ -418,7 +391,7 @@ Inactive summary caches expire after seven days; active work and pending conflic
 Missing or corrupt reusable summaries fall back to the pinned session history and are reported in
 existing logs.
 Original source evidence is not a cache: missing or altered source files still fail explicitly.
-Pending conflicts from successful jobs keep their source evidence until resolved.
+Pending conflicts from successful jobs retain source evidence for delivery to their origin.
 
 Progress is separate: the summary cursor marks compressed history, the completed capture cursor
 marks the furthest successful job, and enqueue receipts prevent replay even after failures.
@@ -431,8 +404,7 @@ continues in follow-on passes without another prompt. A preparation-only slice c
 follow-on pass, even when fewer than eight jobs were claimed. Failed or permission-paused branches
 wait for a later settled turn or a restart rather than retrying repeatedly in the same cycle.
 Callbacks already waiting when failure is reported share its deferrals. Other eligible branches
-continue; busy worker locks get delayed, cancellable checks. Foreground conflict resolution gets
-priority between passes, including while its evidence is checked. Live workers are never displaced,
+continue; busy worker locks get delayed, cancellable checks. Live workers are never displaced,
 and unknown saves or pending project discovery do not trigger retry loops.
 
 Completed jobs retain only small UI outcome records, not search results or full review payloads.
@@ -450,27 +422,26 @@ snapshots fail explicitly. Transient recall text that Pi did not save cannot be 
 the journal.
 
 Conflict notices include the full sanitized reasons, claims and evidence for up to three selected
-conflicts. They do not shorten evidence before the main model decides how to resolve it.
+conflicts. Delivery keeps next-user-turn timing: the notice reaches the originating
+conversation with its next user prompt, without an idle wake or extra turn. The conflict remains
+pending until its matching notice is saved in that conversation. It is then marked locally handed
+off, which does not mean the conflict is resolved in Forgetful. Pending delivery survives restart
+and cannot move to an unrelated session or branch.
 
-For a pending conflict against one exclusively scoped memory, `forgetful_resolve` asks the memory
-model for a complete replacement and explicit reference selections. The model distinguishes a
-corrected fact from an actual change and chooses what history and references apply. Ordinary and
-partial conflicts use the same path. Shared, global, cross-project and multi-memory conflicts cannot
-borrow write authority from the current destination.
+The main model discusses the conflict with the user and uses independently configured MCP/CLI
+access to apply the agreed resolution. If access is unavailable or a write fails, it reports the
+conflict as unresolved. The extension does not track external success, parse conversation prose
+as a resolution receipt, or provide a fallback writer. Handoff does not replay or discard existing
+partial or uncertain writes: those records remain pending with their evidence retained, even after
+the notice is saved. Automatic capture receipts and their recovery rules remain unchanged.
 
-Revision fields include the complete memory, evidence IDs, reference lists and source provenance.
-Memory context stores only semantic applicability. Session, branch and evidence entry IDs remain
-internal for evidence validation instead of being appended to context. Forgetful's native source
-fields retain selected repository, file, URL and encoding provenance. A recognised legacy context
-suffix is removed when a replacement is written; existing records are not bulk migrated.
-Empty selections do not copy old associations. Invalid submissions receive the existing bounded
-correction attempts. Tools execute the accepted instructions; they do not choose different
-references or reinterpret the claims. Completed operations are checkpointed, not replayed to restore
-later external changes. Failures return to the model with receipts so it can decide the next step.
-Unknown
-create outcomes remain unresolved rather than being matched by title or automatically recreated.
-Forgetful itself may create similarity links; explicit additions do not promise an exact final
-graph.
+Automatic writes retain their existing evidence, provenance and checkpoint rules. Memory context
+stores semantic applicability; session, branch and evidence entry IDs stay internal. Forgetful's
+native source fields retain selected repository, file, URL and encoding provenance. Recognised
+legacy context suffixes are removed on replacement writes without bulk migration. Completed
+operations are not replayed to restore later external changes. Unknown create outcomes remain
+unresolved rather than being matched by title or automatically recreated. Forgetful itself may
+create similarity links; explicit additions do not promise an exact final graph.
 
 Each private capture tool allows at most three attempts within its existing model request and
 three-minute deadline. Invalid calls receive validation feedback so the model can correct them;
@@ -517,7 +488,7 @@ Capture reads remain sequential. Existing supporting entity/document lookups are
 are not governed by this setting. More concurrency does not guarantee lower latency; Forgetful's
 worker capacity and other sessions still matter.
 
-Private recall, capture and conflict-resolution tasks use `context_limit_tokens` from the user
+Private recall and capture tasks use `context_limit_tokens` from the user
 settings, defaulting to 100000. This is a positive integer; invalid values warn and use the default.
 The effective budget is the smaller of this limit and the selected model's context window, counting
 system instructions, tool schemas, messages and the permitted reply. Before each provider call,
@@ -562,11 +533,6 @@ Pi stops its TUI before shutdown hooks, so there is no exit spinner.
 
 The queue survives normal restarts. Work resumes on a later eligible start; no worker runs after Pi
 exits, and the MVP does not guarantee post-exit completion.
-
-Explicit stored-file reads return images to Pi or save other files under the agent directory in
-`forgetful/downloads/`. These private downloads remain available for normal Pi tools to inspect;
-you can delete them when finished. Tool results, including retrieved images, follow Pi's normal
-session persistence.
 
 ## Safety and Limitations
 

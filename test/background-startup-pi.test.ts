@@ -65,12 +65,6 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
       authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
     });
     const modelCalls: string[] = [];
-    const testForegroundAbort = mapped && !navigation;
-    let askForTool = false;
-    let toolStarted!: () => void;
-    let toolFinished!: () => void;
-    const toolCalled = new Promise<void>((resolve) => { toolStarted = resolve; });
-    const toolReturned = new Promise<void>((resolve) => { toolFinished = resolve; });
     let captureInput: Record<string, unknown> | undefined;
     let captureConversation: unknown;
     let captureStarted!: () => void;
@@ -83,9 +77,12 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
       })),
       streamSimple(model, context) {
         modelCalls.push(model.id);
+        if (model.id === "main") {
+          assert.deepEqual(providerTools(context).map(tool => tool.name),
+            ["forgetful_recall_wait"]);
+        }
         const name = model.id === "memory" ? providerTools(context)[0]?.name
-          : askForTool ? "forgetful_knowledge_read" : undefined;
-        askForTool = false;
+          : undefined;
         if (name === "submit_capture_candidates") {
           const decoded = decodeProviderContext(context);
           captureInput = decoded.input;
@@ -95,8 +92,7 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
         const message: AssistantMessage = {
           role: "assistant", api: "faux", provider: "test", model: model.id,
           content: name ? [{ type: "toolCall", id: "capture", name,
-            arguments: name === "forgetful_knowledge_read" ? { operation: "list_projects" }
-              : { candidates: [] } }] : [{ type: "text", text: "Decision noted." }],
+            arguments: { candidates: [] } }] : [{ type: "text", text: "Decision noted." }],
           stopReason: name ? "toolUse" : "stop", timestamp: Date.now(),
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
@@ -115,16 +111,7 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
     const loader = new DefaultResourceLoader({
       cwd: root, agentDir, settingsManager: settings, noSkills: true,
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      extensionFactories: [(pi) => {
-        const register = pi.registerTool.bind(pi);
-        pi.registerTool = (definition) => register(definition.name !== "forgetful_knowledge_read"
-          ? definition : { ...definition, async execute(...args) {
-            toolStarted();
-            try { return await definition.execute(...args); }
-            finally { toolFinished(); }
-          } });
-        return createForgetfulExtension({ agentDir })(pi);
-      }],
+      extensionFactories: [createForgetfulExtension({ agentDir })],
     });
     await loader.reload();
     const { session } = await createAgentSession({
@@ -146,6 +133,7 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
 
     // Act: neither session load nor the first turn depends on the held server response.
     await within(session.bindExtensions({}), "session load waited for project discovery");
+    assert.deepEqual(session.getActiveToolNames(), ["forgetful_recall_wait"]);
     await within(discovery, "project discovery did not start in the background");
     if (navigation) {
       await within(session.extensionRunner.emit({ type: "session_tree",
@@ -153,19 +141,11 @@ test(`Pi preserves early capture (mapped: ${mapped}, after navigation: ${navigat
     }
     await within(session.prompt("Use SQLite for this repository."),
       "the first prompt waited for project discovery");
-    if (testForegroundAbort) {
-      askForTool = true;
-      const asking = session.prompt("Read the stored projects.");
-      await within(toolCalled, "the foreground tool did not start");
-      await within(session.abort(), "foreground cancellation waited for discovery");
-      await within(asking, "the aborted foreground turn did not return");
-      await within(toolReturned, "the tool still awaited discovery after cancellation");
-    }
     await within(session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }),
       "shutdown waited for project discovery");
 
     // Assert: no untrusted capture/recall ran; early work is durable, not just buffered in RAM.
-    assert.deepEqual(modelCalls, testForegroundAbort ? ["main", "main"] : ["main"]);
+    assert.deepEqual(modelCalls, ["main"]);
     assert.equal(requests.length, navigation ? 2 : 1,
       "cancelled discovery must not dispatch a fallback request");
     const queues = join(agentDir, "forgetful", "queues");

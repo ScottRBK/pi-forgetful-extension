@@ -21,7 +21,9 @@ import {
   type AssistantMessage,
   type Context,
 } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { DurableQueueStore } from "../src/queue.ts";
 import type { CaptureSnapshot, EvidenceEntry } from "../src/contracts.ts";
 import {
   decodeProviderContext, providerSystemPrompt, providerTools,
@@ -70,7 +72,7 @@ async function shutdownSession(session: AgentSession): Promise<void> {
 }
 
 test(
-  "real Pi receives saved reviewed recall and exposes the bounded tools",
+  "real Pi receives saved reviewed recall and exposes only recall wait and the independent fixture",
   {
     timeout: 20_000,
   },
@@ -123,7 +125,6 @@ test(
     const created: Record<string, unknown>[] = [];
     const obsoleted: number[] = [];
     const stored = new Map<number, Record<string, unknown>>([[memory.id, memory]]);
-    // Reserve #99 for the foreground replacement asserted below.
     let nextMemoryId = 100;
     let failCaptureSearch = false;
     let markFirstSearch!: () => void;
@@ -132,6 +133,8 @@ test(
     const firstSearchResponse = new Promise<void>(resolve => { releaseFirstSearch = resolve; });
     let markFirstRecallWake!: () => void;
     const firstRecallWake = new Promise<void>(resolve => { markFirstRecallWake = resolve; });
+    let queuedRecallReady!: () => void;
+    const queuedRecall = new Promise<void>(resolve => { queuedRecallReady = resolve; });
     const server = createServer(async (request, response) => {
       response.setHeader("content-type", "application/json");
       if (request.url?.startsWith("/api/v1/projects")) {
@@ -258,11 +261,9 @@ test(
     let releaseCapture: (() => void) | undefined;
     let onHeldCapture: (() => void) | undefined;
     let createConflict = false;
-    let resolveOnNextMain = false;
     let skipExtraction = false;
     let groupedSkipCandidates = false;
     let queueOneNeedsTool = false;
-    const handoffs: Array<{ content: unknown; details?: unknown }> = [];
     const runtime = await ModelRuntime.create({
       authPath: join(agentDir, "auth.json"),
       modelsPath: null,
@@ -284,6 +285,10 @@ test(
       })),
       streamSimple(model, context, options) {
         providerSessions.push({ model: model.id, sessionId: options?.sessionId });
+        if (model.id === "main") {
+          assert.deepEqual(providerTools(context).map(tool => tool.name).sort(),
+            ["fixture_continue", "forgetful_recall_wait"]);
+        }
         (model.id === "main" ? mainContexts : memoryContexts).push(
           JSON.parse(JSON.stringify(context)) as Context,
         );
@@ -468,29 +473,6 @@ test(
             },
           },
         };
-        if (model.id === "main" && resolveOnNextMain) {
-          resolveOnNextMain = false;
-          const details = handoffs
-            .filter(({ details }) =>
-              Array.isArray(
-                (details as { conflictIds?: unknown } | undefined)?.conflictIds,
-              ),
-            )
-            .at(-1)?.details as { conflictIds: string[] };
-          message.content = [
-            {
-              type: "toolCall",
-              id: "resolve-1",
-              name: "forgetful_resolve",
-              arguments: {
-                conflict_id: details.conflictIds[0],
-                action: "supersede",
-                reason: "The user confirmed the project storage change.",
-              },
-            },
-          ];
-          message.stopReason = "toolUse";
-        }
         const latestUser = context.messages.findLast(
           (item) =>
             item.role === "user" &&
@@ -505,9 +487,9 @@ test(
           message.content = [
             {
               type: "toolCall",
-              id: "deeper-1",
-              name: "forgetful_recall",
-              arguments: { query: "database detail" },
+              id: "continue-1",
+              name: "fixture_continue",
+              arguments: {},
             },
           ];
           message.stopReason = "toolUse";
@@ -548,6 +530,14 @@ test(
       noContextFiles: true,
       extensionFactories: [
         (pi) => {
+          pi.registerTool({
+            name: "fixture_continue", label: "Continue fixture", description: "Continue test work",
+            parameters: Type.Object({}),
+            async execute() {
+              await queuedRecall;
+              return { content: [{ type: "text", text: "Fixture work complete." }], details: {} };
+            },
+          });
           const observeNotifications = (ctx: {
             ui: {
               notify: (
@@ -575,9 +565,11 @@ test(
           });
           const sendMessage = pi.sendMessage.bind(pi);
           pi.sendMessage = (message, options) => {
-            handoffs.push(message);
             sendMessage(message, options);
-            if (message.customType === "forgetful_recall_result") markFirstRecallWake();
+            if (message.customType === "forgetful_recall_result") {
+              markFirstRecallWake();
+              if (String(message.content).includes("Queue one memory.")) queuedRecallReady();
+            }
           };
           return createForgetfulExtension({ agentDir })(pi);
         },
@@ -600,6 +592,7 @@ test(
       markFirstSearch();
       releaseFirstSearch();
       markFirstRecallWake();
+      queuedRecallReady();
       releaseMain?.();
       releaseCapture?.();
       await shutdownSession(session);
@@ -659,8 +652,10 @@ test(
         (entry) => "display" in entry && entry.display === false,
       ),
     );
-    assert.ok(session.getActiveToolNames().includes("forgetful_recall"));
-    assert.ok(session.getActiveToolNames().includes("forgetful_resolve"));
+    assert.deepEqual(session.getActiveToolNames().sort(),
+      ["fixture_continue", "forgetful_recall_wait"]);
+    assert.deepEqual(providerTools(mainContexts[0]!).map(tool => tool.name).sort(),
+      ["fixture_continue", "forgetful_recall_wait"]);
     assert.equal(queries.length, 1);
     assert.equal(
       (queries[0] as { strict_project_filter: boolean }).strict_project_filter,
@@ -1197,7 +1192,7 @@ test(
           JSON.stringify(mainContexts.slice(firstContext).map((context) => context.messages)),
         );
         assert.equal(memoryContexts.length, firstMemoryContext + 6);
-        assert.equal(queries.length, firstQuery + 4);
+        assert.equal(queries.length, firstQuery + 3);
         const continuations = mainContexts
           .slice(firstContext + 1)
           .map((c) => JSON.stringify(c.messages));
@@ -1263,7 +1258,7 @@ test(
         assert.equal(firstRecallContexts.length, 1, "queued recall must reach one later boundary");
         assert.ok(
           firstRecallContexts.some((context) =>
-            JSON.stringify(context.messages).includes('"toolName":"forgetful_recall"'),
+            JSON.stringify(context.messages).includes('"toolName":"fixture_continue"'),
           ),
           "queued recall must remain available through the tool continuation",
         );
@@ -1312,7 +1307,7 @@ test(
     );
 
     await t.test(
-      "a real settled conflict reaches the next prompt and can be resolved",
+      "a real settled conflict reaches its originating conversation without a memory mutation",
       async () => {
         // Arrange: the separate memory model finds an uncertain same-fact conflict.
         await session.prompt("/forgetful capture auto");
@@ -1323,57 +1318,35 @@ test(
         );
         const settledMainCalls = mainContexts.length;
 
-        // Act: let the durable capture worker deliver through Pi's actual nextTurn mechanism.
+        // Act: let actual capture persist the conflict, without starting another main-model turn.
+        const directories = await readdir(join(agentDir, "forgetful/queues"));
+        assert.equal(directories.length, 1);
+        const queue = new DurableQueueStore({
+          directory: join(agentDir, "forgetful/queues", directories[0]!),
+        });
         const deadline = Date.now() + 3000;
-        const conflictHandoffs = () => handoffs.filter(({ details }) =>
-          Array.isArray((details as { conflictIds?: unknown } | undefined)?.conflictIds),
-        );
-        while (conflictHandoffs().length === 0 && Date.now() < deadline) {
+        let pending = await queue.pendingConflicts();
+        while (!pending.length && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
+          pending = await queue.pendingConflicts();
         }
-        const conflictHandoff = conflictHandoffs()[0];
-        assert.equal(
-          conflictHandoffs().length,
-          1,
-          "settled capture must reach its originating live session",
-        );
-        assert.equal(
-          mainContexts.length,
-          settledMainCalls,
-          "handoff must not start a model turn",
-        );
+        assert.ok(pending.length, "settled capture must retain a conflict for its next user turn");
+        assert.equal(mainContexts.length, settledMainCalls, "handoff must not start a model turn");
         assert.equal(created.length, before);
-        assert.match(String(conflictHandoff?.content), /SQLite/);
-        assert.match(String(conflictHandoff?.content), /local storage/);
 
-        // The main model uses the bounded resolver after a real user clarification.
+        // The next user turn saves the notice; external action belongs to the model/user.
         skipExtraction = true;
-        nextMemoryId = 99;
-        resolveOnNextMain = true;
-        await session.prompt(
-          "Yes, replace the old SQLite decision with local storage.",
-        );
+        await session.prompt("I will review the storage conflict using my external memory tools.");
 
-        // Assert at the real tool and external service boundaries.
-        assert.ok(
-          JSON.stringify(mainContexts[settledMainCalls]).includes(
-            "Forgetful capture needs a bounded decision",
-          ),
-        );
-        assert.equal(
-          created.length,
-          before + 1,
-          JSON.stringify(session.messages.slice(-5)),
-        );
-        assert.deepEqual(obsoleted, [99]);
-        const resolved = session.messages.filter(
-          (message) => message.role === "toolResult",
-        );
-        assert.ok(
-          resolved.some((message) =>
-            JSON.stringify(message).includes("resolved"),
-          ),
-        );
+        assert.match(JSON.stringify(mainContexts[settledMainCalls]), /SQLite/);
+        assert.match(JSON.stringify(mainContexts[settledMainCalls]), /local storage/);
+        const notices = sessionManager.getEntries().filter((entry) =>
+          entry.type === "custom_message" && entry.customType === "forgetful_conflict");
+        assert.equal(notices.length, 1);
+        assert.equal(created.length, before);
+        assert.deepEqual(obsoleted, []);
+        assert.equal(session.messages.some((message) =>
+          message.role === "toolResult" && message.toolName === "forgetful_resolve"), false);
       },
     );
 
@@ -1430,213 +1403,5 @@ test(
       },
     );
 
-  },
-);
-
-test(
-  "real Pi persists recall failures as errors while keeping no-match results successful",
-  { timeout: 20_000 },
-  async (t) => {
-    // Arrange: the real SDK, a scripted provider, and a memory endpoint that first fails.
-    const root = await mkdtemp(join(tmpdir(), "pi-forgetful-errors-"));
-    let closeSession: (() => Promise<void>) | undefined;
-    let closeServer: (() => Promise<void>) | undefined;
-    t.after(async () => {
-      try { await closeSession?.(); }
-      finally {
-        try { await closeServer?.(); }
-        finally { await rm(root, { recursive: true, force: true }); }
-      }
-    });
-    const agentDir = join(root, "agent");
-    await mkdir(join(agentDir, "forgetful"), { recursive: true });
-    await promisify(execFile)("git", ["init", "--quiet", root]);
-    await promisify(execFile)("git", [
-      "-C",
-      root,
-      "remote",
-      "add",
-      "origin",
-      "https://github.com/test/recall-errors.git",
-    ]);
-    let searchCalls = 0;
-    const server = createServer((request, response) => {
-      response.setHeader("content-type", "application/json");
-      if (!request.url?.endsWith("/memories/search")) {
-        response.statusCode = 404;
-        response.end("{}");
-        return;
-      }
-      searchCalls += 1;
-      if (searchCalls === 1) {
-        response.statusCode = 503;
-        response.end("{}");
-        return;
-      }
-      response.end(JSON.stringify({
-        primary_memories: [],
-        linked_memories: [],
-      }));
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    closeServer = () => new Promise<void>((resolve, reject) => {
-      server.close((error) => error ? reject(error) : resolve());
-      // An accepted connection without a request can otherwise hide failures during teardown.
-      server.closeAllConnections();
-    });
-    const address = server.address();
-    assert.ok(address && typeof address !== "string");
-    await writeFile(
-      join(agentDir, "forgetful/settings.json"),
-      JSON.stringify({
-        base_url: `http://127.0.0.1:${address.port}/api/v1`,
-        model: "test/memory",
-        capture_mode: "off",
-        timeout_ms: 2_000,
-      }),
-    );
-
-    const runtime = await ModelRuntime.create({
-      authPath: join(agentDir, "auth.json"),
-      modelsPath: null,
-      refreshOnCreate: false,
-    });
-    const mainPrompts = new Set<string>();
-    runtime.registerProvider("test", {
-      api: "faux",
-      apiKey: "test-only-key",
-      baseUrl: "http://127.0.0.1/unused",
-      models: ["main", "memory"].map((id) => ({
-        id,
-        name: id,
-        reasoning: false,
-        input: ["text"],
-        contextWindow: 32_000,
-        maxTokens: 2_048,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      })),
-      streamSimple(model, context) {
-        const stream = createAssistantMessageEventStream();
-        const submissionName = model.id === "memory"
-          ? providerTools(context)[0]?.name
-          : undefined;
-        const decision = submissionName === "submit_recall_plan"
-          ? { search: false, queries: [], queryIntent: "", entities: [] }
-          : undefined;
-        const latestUser = context.messages.findLast(
-          (message) =>
-            message.role === "user" &&
-            !JSON.stringify(message.content).includes("[Forgetful "),
-        );
-        const promptKey = JSON.stringify(latestUser?.content ?? "");
-        const shouldCall = model.id === "main" && !mainPrompts.has(promptKey);
-        if (shouldCall) mainPrompts.add(promptKey);
-        const content = decision
-          ? [{
-              type: "toolCall" as const,
-              id: "plan-1",
-              name: "submit_recall_plan",
-              arguments: decision,
-            }]
-          : shouldCall
-            ? [{
-              type: "toolCall" as const,
-              id: `recall-${searchCalls + 1}`,
-              name: "forgetful_recall",
-              arguments: { query: "recall error regression" },
-            }]
-            : [{ type: "text" as const, text: "Recall completed." }];
-        const message: AssistantMessage = {
-          role: "assistant",
-          api: "faux",
-          provider: "test",
-          model: model.id,
-          content,
-          stopReason: decision || shouldCall ? "toolUse" : "stop",
-          timestamp: Date.now(),
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              total: 0,
-            },
-          },
-        };
-        queueMicrotask(() => {
-          stream.push({
-            type: "done",
-            reason: message.stopReason as "stop" | "toolUse",
-            message,
-          });
-          stream.end(message);
-        });
-        return stream;
-      },
-    });
-    const settings = SettingsManager.create(root, agentDir);
-    settings.setProjectTrusted(true);
-    settings.applyOverrides({
-      retry: { enabled: false },
-      compaction: { enabled: false },
-    });
-    const loader = new DefaultResourceLoader({
-      cwd: root,
-      agentDir,
-      settingsManager: settings,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      extensionFactories: [createForgetfulExtension({ agentDir })],
-    });
-    await loader.reload();
-    assert.deepEqual(loader.getExtensions().errors, []);
-    const sessionManager = SessionManager.inMemory(root);
-    const { session } = await createAgentSession({
-      cwd: root,
-      agentDir,
-      modelRuntime: runtime,
-      model: runtime.getModel("test", "main"),
-      settingsManager: settings,
-      sessionManager,
-      resourceLoader: loader,
-      noTools: "builtin",
-    });
-    closeSession = () => shutdownSession(session);
-    await session.bindExtensions({});
-    const toolEnds: Array<{ isError?: boolean }> = [];
-    session.subscribe((event) => {
-      if (
-        event.type === "tool_execution_end" &&
-        event.toolName === "forgetful_recall"
-      ) {
-        toolEnds.push(event);
-      }
-    });
-
-    // Act: the first direct recall fails, then the second returns no matches.
-    await session.prompt("Trigger the recall error path.");
-    await session.prompt("Trigger the normal no-match path.");
-
-    // Assert at the SDK event and persisted-message seams.
-    assert.equal(searchCalls, 2);
-    assert.ok(toolEnds[0]?.isError, "the emitted tool execution must be an error");
-    assert.equal(toolEnds[1]?.isError, false);
-    const results = session.messages.filter(
-      (message) =>
-        message.role === "toolResult" &&
-        message.toolName === "forgetful_recall",
-    ) as Array<{ role: "toolResult"; isError?: boolean }>;
-    assert.equal(results.length, 2);
-    assert.equal(results[0]?.isError, true);
-    assert.equal(results[1]?.isError, false);
   },
 );

@@ -6,14 +6,14 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import type { BeforeAgentStartEventResult } from "@earendil-works/pi-coding-agent";
 import {
   canonicalRepository,
   createForgetfulExtension,
   type CaptureServicePort,
   type RecallServicePort,
 } from "../src/extension.ts";
-import { CaptureService, type CaptureCheckpointResult } from "../src/capture.ts";
-import { DurableQueueStore } from "../src/queue.ts";
+import type { CaptureCheckpointResult } from "../src/capture.ts";
 import { ApiForgetfulClient } from "../src/http.ts";
 import type {
   CaptureSnapshot,
@@ -346,8 +346,21 @@ async function harness(
           typeof event.text === "string")
         lastPrompt = event.text;
       let result: unknown;
-      for (const handler of handlers.get(name) ?? [])
+      const messages: NonNullable<BeforeAgentStartEventResult["message"]>[] = [];
+      let systemPrompt = event.systemPrompt;
+      for (const handler of handlers.get(name) ?? []) {
         result = await handler(event, ctx);
+        if (name === "before_agent_start" && result) {
+          const start = result as BeforeAgentStartEventResult;
+          if (start.message) messages.push(start.message);
+          if (start.systemPrompt !== undefined) {
+            systemPrompt = start.systemPrompt;
+            event = { ...event, systemPrompt };
+          }
+        }
+      }
+      // Pi collects every handler's message, including separate conflict and recall hooks.
+      if (name === "before_agent_start") return { messages, systemPrompt };
       if (name === "context") contextResults.push(result);
       return result;
     },
@@ -1431,7 +1444,7 @@ test("automatic recall injects only the memory model's selected summary", async 
     const initial = await fixture.emit("before_agent_start", {
       type: "before_agent_start", prompt: "What is MiniCPM's context size?",
       systemPrompt: "base prompt",
-    }) as { systemPrompt: string; message: Record<string, unknown> };
+    }) as { systemPrompt: string };
     await waitForRecallTerminal(fixture);
 
     // Assert: the review sees both candidates; the terminal message sees only its summary.
@@ -1911,7 +1924,7 @@ test("empty search allows review and injects nothing when review finds no contex
   }
 });
 
-test("title-only memory leads remain browsable but cannot support automatic review", async () => {
+test("title-only memory leads cannot support automatic review", async () => {
   // Arrange: the graph exposes a title-only memory lead, not a primary memory hit.
   const entity = { id: 2, name: "MiniCPM", entity_type: "System", project_ids: [7],
     aka: [], tags: [], notes: "Local model" };
@@ -1950,12 +1963,6 @@ test("title-only memory leads remain browsable but cannot support automatic revi
     assert.doesNotMatch(String(terminal.content), /available for further reading|Memory #71/);
     assert.match(fixture.notifications.join("\n"), /availableSources/);
 
-    // A deliberate foreground lookup still exposes the lead for inspection.
-    const deeper = await fixture.tools.get("forgetful_recall")!.execute(
-      "read-lead", { query: "MiniCPM" }, undefined, undefined, fixture.ctx,
-    );
-    assert.match(JSON.stringify(deeper), /Entity memory #71/);
-    assert.doesNotMatch(JSON.stringify(deeper), /Full detail not injected/);
   } finally {
     await fixture.cleanup();
   }
@@ -2098,7 +2105,7 @@ for (const timeout of ["overall", "model"]) {
   });
 }
 
-for (const path of ["normal", "queued", "foreground"]) {
+for (const path of ["normal", "queued"]) {
   for (const clockJumpMs of [-60_000, 60_000]) {
     const name = `${path} recall reports elapsed time despite a ${clockJumpMs} ms clock jump`;
     test(name, async (t) => {
@@ -2112,9 +2119,6 @@ for (const path of ["normal", "queued", "foreground"]) {
       };
       const fixture = await recallReviewHarness((_input, signal) => stall(signal), {
         deadlineMs: 200,
-        ...(path === "foreground" ? {
-          fetchImpl: async (_url: unknown, init?: RequestInit) => stall(init?.signal),
-        } : {}),
       });
       try {
         await fixture.emit("session_start", { type: "session_start", reason: "new" });
@@ -2138,10 +2142,6 @@ for (const path of ["normal", "queued", "foreground"]) {
             () => fixture.widgets.size === 0,
             "queued recall should finish before elapsed time is checked",
           );
-        } else {
-          await assert.rejects(fixture.tools.get("forgetful_recall")!.execute(
-            "clock", { query: "Context size?" }, undefined, undefined, fixture.ctx,
-          ), /Forgetful recall is unavailable/);
         }
         const actualElapsedMs = performance.now() - startedAt;
 
@@ -2269,7 +2269,7 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
       await fixture.emit("session_start", { type: "session_start", reason: "new" });
       fixture.notifications.splice(0);
 
-      // Act: recall through both prompt hooks and the foreground tool.
+      // Act: recall through normal and queued prompt hooks.
       await fixture.emit("before_agent_start", {
         type: "before_agent_start", prompt: "Which database?", systemPrompt: "base prompt",
       });
@@ -2282,21 +2282,17 @@ for (const verbosity of ["debug", "info", "warning", "error"]) {
       });
       await waitForCondition(
         () => fixture.widgets.size === 0,
-        "queued verbosity recall should finish before foreground recall",
+        "queued verbosity recall should finish before checking its diagnostics",
       );
       await fixture.emit("context", {
         type: "context", messages: [{ role: "user", content: "Which database?" }],
       });
-      await fixture.tools.get("forgetful_recall")!.execute(
-        "details", { query: "database" }, undefined, undefined, fixture.ctx,
-      );
-
       // Assert: debug reveals the actual bounded context; info reveals only summaries.
       const output = fixture.notifications.join("\n");
       const summaries = fixture.notifications.filter((message) => /recall completed/.test(message));
       assert.equal(
         summaries.length,
-        verbosity === "debug" || verbosity === "info" ? 3 : 0,
+        verbosity === "debug" || verbosity === "info" ? 2 : 0,
         fixture.notifications.join("\n"),
       );
       if (verbosity === "debug") {
@@ -2537,7 +2533,7 @@ test("search plans require intent and debug identifies the search decision", asy
   }
 });
 
-test("debug reports search exceptions for automatic and manual recall", async () => {
+test("debug reports search exceptions for automatic recall", async () => {
   // Arrange: real recall and REST adapter, with an external service returning HTTP 503.
   let reviews = 0;
   const service = new RecallService(new ApiForgetfulClient({
@@ -2568,28 +2564,18 @@ test("debug reports search exceptions for automatic and manual recall", async ()
 
     // Assert: the failure names the step, exception and HTTP status.
     assert.equal(reviews, 1);
-    let notifications = fixture.notifications.join("\n");
+    const notifications = fixture.notifications.join("\n");
     assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);
     assert.match(notifications, /HTTP 503: \{\}/);
     assert.doesNotMatch(notifications, /completed|no-matches/);
     assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
 
-    fixture.notifications.splice(0);
-    const tool = fixture.tools.get("forgetful_recall")!;
-    await assert.rejects(
-      tool.execute("call-1", { query: "decisions" }, undefined,
-        undefined, fixture.ctx),
-      /Forgetful POST \/api\/v1\/memories\/search returned HTTP 503: \{\}/,
-    );
-    notifications = fixture.notifications.join("\n");
-    assert.match(notifications, /memory search.*ForgetfulHttpError:.*HTTP 503/);
-    assert.doesNotMatch(notifications, /Forgetful recall review validation debug:/);
   } finally {
     await fixture.cleanup();
   }
 });
 
-test("debug explains the overall deadline during automatic and manual recall", async () => {
+test("debug explains the overall deadline during automatic recall", async () => {
   // Arrange: the external search stays pending beyond recall's shared time budget.
   const service = new RecallService(new ApiForgetfulClient({
     baseUrl: "http://localhost:8020/api/v1",
@@ -2619,155 +2605,6 @@ test("debug explains the overall deadline during automatic and manual recall", a
       /memory search.*overall recall deadline exceeded.*30 ms.*timeout_ms.*planning and search/i);
     assert.equal(latestRecallMessage(fixture, "completion").details?.status, "failure");
 
-    // Act: the foreground tool reaches the same limit.
-    fixture.notifications.splice(0);
-    await assert.rejects(fixture.tools.get("forgetful_recall")!.execute(
-      "deadline", { query: "decisions" }, undefined, undefined, fixture.ctx,
-    ), /Forgetful recall is unavailable/);
-
-    // Assert: it exposes the same explanation in debug UI.
-    assert.match(fixture.notifications.join("\n"),
-      /memory search.*overall recall deadline exceeded.*30 ms/i);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-for (const reason of [new Error("Session ended: Bearer private-abort-token"),
-  "Session ended: Bearer private-abort-token", undefined]) {
-  test(`debug explains caller cancellation (${typeof reason}) with redaction`, async () => {
-    // Arrange: the caller cancels while the external search is pending.
-    const controller = new AbortController();
-    const service = new RecallService(new ApiForgetfulClient({
-      baseUrl: "http://localhost:8020/api/v1",
-      fetchImpl: async () => {
-        controller.abort(reason);
-        throw new Error("External request aborted");
-      },
-    }), {
-      async complete() {
-        return { search: true, queries: ["decisions"], queryIntent: "History", entities: [] };
-      },
-    });
-    const fixture = await harness({ recallService: service, userSettings: { debug: true } });
-    fixture.ctx.signal = controller.signal;
-    try {
-      await fixture.emit("session_start", { type: "session_start", reason: "new" });
-      fixture.notifications.splice(0);
-
-      // Act: foreground recall uses the active Pi signal and reports cancellation.
-      const tool = fixture.tools.get("forgetful_recall")!;
-      await assert.rejects(
-        tool.execute("cancel", { query: "decisions" }, undefined, undefined, fixture.ctx),
-        /Forgetful recall is unavailable/,
-      );
-
-      // Assert: caller cancellation is distinct from a timeout and stays out of the prompt.
-      const warning = fixture.notifications.join("\n");
-      assert.match(warning, /memory search.*Recall cancelled by caller/);
-      if (reason !== undefined) assert.match(warning, /Session ended: \[redacted\]/);
-      assert.doesNotMatch(warning, /deadline exceeded|private-abort-token/);
-      assert.equal(fixture.sentMessages.length, 0);
-    } finally {
-      await fixture.cleanup();
-    }
-  });
-}
-
-test("manual recall cancels a pending external search with the session signal", async (t) => {
-  let resolveSearchStarted!: () => void;
-  const searchStarted = new Promise<void>((resolve) => {
-    resolveSearchStarted = resolve;
-  });
-  let resolveSearchAborted!: () => void;
-  const searchAborted = new Promise<void>((resolve) => {
-    resolveSearchAborted = resolve;
-  });
-  let searchAbortedObserved = false;
-  const pendingResponses = new Set<{ destroy(): void }>();
-  const server = createServer((request, response) => {
-    response.setHeader("content-type", "application/json");
-    if (request.url?.includes("/projects")) {
-      response.end(JSON.stringify({ projects: [] }));
-      return;
-    }
-    if (!request.url?.endsWith("/memories/search")) {
-      response.statusCode = 404;
-      response.end("{}");
-      return;
-    }
-    resolveSearchStarted();
-    pendingResponses.add(response);
-    const markAborted = () => {
-      if (searchAbortedObserved) return;
-      searchAbortedObserved = true;
-      resolveSearchAborted();
-      pendingResponses.delete(response);
-      response.destroy();
-    };
-    request.once("aborted", markAborted);
-    request.once("close", () => {
-      if (request.aborted) markAborted();
-    });
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => {
-    for (const response of pendingResponses) response.destroy();
-    return new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
-  const fixture = await harness({
-    userSettings: { base_url: baseUrl },
-    recallService: new RecallService(
-      new ApiForgetfulClient({ baseUrl, timeoutMs: 5_000 }),
-      {
-        async complete() {
-          return { search: false, queries: [], queryIntent: "", entities: [] };
-        },
-      },
-    ),
-  });
-  const sessionAbort = new AbortController();
-  fixture.ctx.signal = sessionAbort.signal;
-  try {
-    await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    const execution = fixture.tools.get("forgetful_recall")!.execute(
-      "manual-cancel",
-      { query: "pending external recall" },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    await Promise.race([
-      searchStarted,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("search did not start")), 500),
-      ),
-    ]);
-
-    sessionAbort.abort();
-    const outcome = await Promise.race([
-      execution.then(
-        () => ({ kind: "resolved" as const }),
-        (error: unknown) => ({ kind: "rejected" as const, error }),
-      ),
-      new Promise<{ kind: "timeout" }>((resolve) =>
-        setTimeout(() => resolve({ kind: "timeout" }), 500),
-      ),
-    ]);
-    assert.equal(outcome.kind, "rejected", "session cancellation must stop promptly");
-    if (outcome.kind === "rejected")
-      assert.match(String(outcome.error), /Forgetful recall is unavailable/);
-    await Promise.race([
-      searchAborted,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("search was not aborted")), 500),
-      ),
-    ]);
-    assert.equal(searchAbortedObserved, true);
   } finally {
     await fixture.cleanup();
   }
@@ -3968,21 +3805,13 @@ test("tree navigation stops the old worker and drops old-branch queued recall", 
 
 test("startup recovery and escalation handoff stay on the originating branch", async () => {
   const fixture = await harness();
-  assert.ok(fixture.capture.checkpoint);
-  const checkpoint = fixture.capture.checkpoint.bind(fixture.capture);
-  const checkpointStarted = new Promise<void>((resolve) => {
-    fixture.capture.checkpoint = async (options) => {
-      const result = await checkpoint(options);
-      resolve();
-      return result;
-    };
-  });
   try {
     await fixture.emit("session_start", {
       type: "session_start",
       reason: "new",
     });
-    await checkpointStarted;
+    await waitForCondition(() => fixture.capture.checkpoints.length === 1,
+      "startup recovery should checkpoint the queue");
     assert.equal(fixture.capture.checkpoints.length, 1);
     fixture.capture.conflicts = [
       {
@@ -4003,265 +3832,20 @@ test("startup recovery and escalation handoff stay on the originating branch", a
       entry("assistant-1", "user-1", "assistant", "I need a decision", "stop"),
     );
     await fixture.emit("agent_settled", { type: "agent_settled" });
-    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.length > 0);
-    assert.equal(fixture.sentMessages.length, 1);
-    assert.deepEqual(fixture.sentMessages[0]?.options, {
-      deliverAs: "nextTurn",
-    });
-    assert.match(
-      String((fixture.sentMessages[0]?.message as { content: string }).content),
-      /conflict-1/,
-    );
+    assert.deepEqual(fixture.sentMessages, [], "capture must not queue a wake or nextTurn notice");
+    const result = await fixture.emit("before_agent_start", {
+      prompt: "Please explain the conflict", systemPrompt: "Base",
+    }) as { messages: Array<{ customType: string; content: string }> };
+    assert.deepEqual(result.messages.map((message) => message.customType), [
+      "forgetful_conflict", "forgetful_recall_async",
+    ]);
+    assert.match(result.messages[0]!.content, /conflict-1/);
+    assert.equal(fixture.capture.resolutions.length, 0);
 
-    const tool = fixture.tools.get("forgetful_resolve");
-    const result = await tool.execute(
-      "call-1",
-      {
-        conflict_id: "conflict-1",
-        action: "skip",
-        reason: "keep existing fact",
-      },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    assert.match(String(result.content[0].text), /resolved/);
-    assert.equal(fixture.capture.resolutions[0]?.id, "conflict-1");
-    assert.deepEqual(fixture.capture.resolutions[0]?.value, {
-      action: "skip",
-      reason: "keep existing fact",
-      additionalEntries: [
-        { id: "user-1", role: "user", text: "Please settle this" },
-      ],
-      conversation: fixture.entries,
-    });
   } finally {
     await fixture.cleanup();
   }
 });
-
-test("resolver checkpoint waiting is bounded and cannot enter stale capture", async () => {
-  for (const mode of ["abort", "timeout", "navigation"] as const) {
-    const fixture = await harness({
-      userSettings: mode === "timeout" ? { timeout_ms: 20 } : {},
-      conflicts: [{
-        id: "held-conflict",
-        sessionId: "session-1",
-        branchId: "session-1:root",
-        sourceEntryIds: ["held-user"],
-        oldMemory: { content: "old claim" },
-        candidate: { title: "new claim", content: "new claim" },
-      }],
-    });
-    let releaseCheckpoint!: (value: CaptureCheckpointResult) => void;
-    let markCheckpointStarted!: () => void;
-    const checkpointStarted = new Promise<void>((resolve) => {
-      markCheckpointStarted = resolve;
-    });
-    const checkpoint = new Promise<CaptureCheckpointResult>((resolve) => {
-      releaseCheckpoint = resolve;
-    });
-    let toolRun: Promise<unknown> | undefined;
-    let navigation: Promise<unknown> | undefined;
-    try {
-      await fixture.emit("session_start", {
-        type: "session_start",
-        reason: "new",
-      });
-      fixture.capture.checkpoint = async () => {
-        markCheckpointStarted();
-        return checkpoint;
-      };
-      fixture.entries.push(entry("held-user", "root", "user", "settle this"));
-      fixture.entries.push(
-        entry("held-assistant", "held-user", "assistant", "done", "stop"),
-      );
-      const settled = fixture.emit("agent_settled", { type: "agent_settled" });
-      await checkpointStarted;
-
-      const tool = fixture.tools.get("forgetful_resolve");
-      assert.ok(tool);
-      const controller = new AbortController();
-      toolRun = Promise.resolve(tool.execute(
-        "held-call",
-        { conflict_id: "held-conflict", action: "skip" },
-        mode === "abort" ? controller.signal : undefined,
-        undefined,
-        fixture.ctx,
-      ));
-      const toolOutcome = toolRun.then(() => "resolved", () => "rejected");
-      if (mode === "abort") controller.abort();
-      if (mode === "navigation") {
-        fixture.setLeaf("branch-b");
-        navigation = fixture.emit("session_tree", {
-          type: "session_tree",
-          oldLeafId: "root",
-          newLeafId: "branch-b",
-        });
-        void navigation.catch(() => undefined);
-      }
-      const outcome = await Promise.race([
-        toolOutcome,
-        new Promise<"deadline">((resolve) => setTimeout(() => resolve("deadline"), 250)),
-      ]);
-      assert.equal(outcome, "rejected", `${mode} resolver wait must fail open promptly`);
-      assert.equal(fixture.capture.resolutions.length, 0);
-      releaseCheckpoint({
-        processed: 0,
-        processedJobIds: [],
-        paused: false,
-        errors: [],
-      });
-      await settled;
-      await navigation;
-      await toolRun.catch(() => undefined);
-    } finally {
-      releaseCheckpoint({
-        processed: 0,
-        processedJobIds: [],
-        paused: true,
-        errors: [],
-      });
-      await toolRun?.catch(() => undefined);
-      await navigation;
-      await fixture.cleanup();
-    }
-  }
-});
-
-for (const followOn of [false, true]) {
-  test(`foreground conflict evidence lookup survives ${followOn ? "automatic" : "no"} follow-on`,
-    { timeout: 15_000 }, async (t) => {
-      // Arrange: the approved legacy hook/tool port, backed by real capture and queue locks.
-      const fixture = await harness({ userSettings: { timeout_ms: 10_000 } });
-      const gate = () => {
-        let release!: () => void;
-        const promise = new Promise<void>((resolve) => { release = resolve; });
-        return { promise, release };
-      };
-      const firstStarted = gate(), firstProvider = gate();
-      const lookupStarted = gate(), evidenceLookup = gate();
-      const followOnStarted = gate(), followOnProvider = gate(), followOnFinished = gate();
-      const order: string[] = [];
-      let calls = 0, lookups = 0;
-      let resolving: Promise<any> | undefined;
-      let settled: Promise<unknown> | undefined;
-      let capture: CaptureService | undefined;
-      try {
-        await fixture.emit("session_start", { type: "session_start", reason: "new" });
-        await fixture.command("status");
-        // Memory commands skip their following settlement; consume that before repository work.
-        await fixture.emit("agent_settled", { type: "agent_settled" });
-        const queue = new DurableQueueStore({ directory: join(fixture.root, "real-queue"),
-          instanceId: "resolution-race" });
-        capture = new CaptureService({ queue, instanceId: "resolution-race",
-          client: {} as ForgetfulClient, model: { async complete() {
-            calls++;
-            if (calls === 1) {
-              order.push("current-pass-provider");
-              firstStarted.release();
-              await firstProvider.promise;
-            } else if (calls === 9) {
-              order.push("follow-on-provider");
-              followOnStarted.release();
-              await followOnProvider.promise;
-            }
-            return { candidates: [] };
-          } } });
-        for (let index = 0; index < 9; index++) {
-          const user = `decision-${index}`, assistant = `settled-${index}`;
-          fixture.entries.push(entry(user, fixture.entries.at(-1).id, "user", "Use SQLite."));
-          fixture.entries.push(entry(assistant, user, "assistant", "Noted.", "stop"));
-          await capture.enqueue({ id: `snapshot-${index}`, instanceId: "resolution-race",
-            context: { cwd: fixture.root, sessionId: "session-1", branchId: "session-1:root" },
-            entries: [{ id: user, role: "user", text: "Use SQLite." }],
-            finalEntryId: assistant, mode: "observe", scope: "global", policy: "",
-            modelVersion: "scripted", createdAt: new Date().toISOString() });
-        }
-        fixture.setLeaf("settled-8");
-        const now = new Date().toISOString();
-        await queue.addConflict({ id: "delayed-evidence", candidateId: "storage",
-          binding: { instanceId: "resolution-race" }, sessionId: "session-1",
-          branchId: "session-1:root", destinationProjectId: 7,
-          candidate: { id: "storage", title: "Storage", content: "Use SQLite." },
-          sourceEntryIds: ["decision-0"], evidence: ["decision-0: Use SQLite."],
-          reason: "Confirm storage", status: "pending", createdAt: now, updatedAt: now });
-        fixture.capture.checkpoint = async () => {
-          const result = await capture!.checkpoint();
-          order.push("pass-completed");
-          if (calls >= 9) followOnFinished.release();
-          // The control keeps the same bounded checkpoint but disables its automatic follow-on.
-          return followOn ? result : { ...result, continuation: undefined };
-        };
-        fixture.capture.pendingConflicts = async () => {
-          order.push(`lookup-${++lookups}`);
-          if (lookups === 2) {
-            order.push("evidence-lookup-started");
-            lookupStarted.release();
-            await evidenceLookup.promise;
-            order.push("evidence-lookup-finished");
-          }
-          return capture!.pendingConflicts();
-        };
-        fixture.capture.resolveConflict = (id, input) => {
-          order.push("foreground-dispatch");
-          return capture!.resolveConflict(id, input);
-        };
-
-        // Act: resolution waits for the current pass, then pauses in evidence preparation.
-        settled = fixture.emit("agent_settled", { type: "agent_settled" });
-        let startupTimer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([firstStarted.promise, new Promise<never>((_, reject) => {
-          startupTimer = setTimeout(() => reject(new Error("Current pass did not start")), 3_000);
-        })]).finally(() => clearTimeout(startupTimer));
-        const tool = fixture.tools.get("forgetful_resolve");
-        resolving = tool.execute("resolution-race", { conflict_id: "delayed-evidence",
-          action: "skip" }, undefined, undefined, fixture.ctx);
-        void resolving!.catch(() => undefined);
-        firstProvider.release();
-        let lookupTimer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([lookupStarted.promise, new Promise<never>((_, reject) => {
-          lookupTimer = setTimeout(() => reject(new Error("Evidence lookup did not start")), 3_000);
-        })]).finally(() => clearTimeout(lookupTimer));
-        if (followOn) {
-          // A correct scheduler stays idle during validation; the current scheduler reaches nine.
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([followOnStarted.promise, new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, 1_000);
-          })]).finally(() => clearTimeout(timer));
-        }
-        assert.ok(!order.includes("foreground-dispatch"),
-          "The held lookup must belong to foreground evidence validation, not handoff");
-        evidenceLookup.release();
-        const outcome = await resolving!.then((value) => ({ value, error: undefined }),
-          (error: Error) => ({ value: undefined, error: error.message }));
-
-        // Assert: this is a branch-lock race after a completed pass, never the old wait timeout.
-        t.diagnostic(JSON.stringify({ followOn, order, error: outcome.error }));
-        assert.equal(outcome.error, undefined,
-          `Foreground resolution lost its branch lock: ${JSON.stringify(order)}`);
-        assert.match(outcome.value.content[0].text, /resolved/);
-        assert.equal((await queue.getConflict("delayed-evidence"))?.status, "rejected");
-        if (followOn) {
-          followOnProvider.release();
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([followOnFinished.promise, new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Follow-on did not resume")), 3_000);
-          })]).finally(() => clearTimeout(timer));
-          assert.ok((await queue.listJobs()).every((job) => job.status === "complete"),
-            "Yielding to foreground resolution must not strand the rest of the backlog");
-        }
-      } finally {
-        firstProvider.release();
-        evidenceLookup.release();
-        followOnProvider.release();
-        await resolving?.catch(() => undefined);
-        await settled;
-        capture?.stop();
-        await fixture.cleanup();
-      }
-    });
-}
 
 test("conflict handoff preserves full selected evidence and still redacts secrets", async () => {
   // Arrange: each selected conflict exceeds the old line and combined evidence budgets.
@@ -4280,22 +3864,22 @@ test("conflict handoff preserves full selected evidence and still redacts secret
   try {
     // Act: the extension supplies pending conflicts to Pi's next model turn.
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
-    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.some((item) =>
-      (item.message as { customType?: string }).customType === "forgetful_conflict"));
+    await fixture.command("status");
+    const result = await fixture.emit("before_agent_start", {
+      prompt: "Continue", systemPrompt: "Base",
+    }) as { messages: Array<{ customType: string; content: string }> };
 
     // Assert: all three selected conflicts retain their tails, but the fourth is not selected.
-    const handoff = fixture.sentMessages.find((item) =>
-      (item.message as { customType?: string }).customType === "forgetful_conflict");
+    const handoff = result.messages.find((message) => message.customType === "forgetful_conflict");
     assert.ok(handoff);
-    const content = (handoff.message as { content: string }).content;
+    const content = handoff.content;
     for (const tail of ["REASON_TAIL", "OLD_TAIL", "NEW_TAIL", "EVIDENCE_TAIL"]) {
       assert.equal(content.split(tail).length - 1, 3, `${tail} must survive in each conflict`);
     }
     assert.doesNotMatch(content, /full-conflict-3|conflict-secret/);
     assert.match(content, /\[redacted\]/);
     assert.match(content, /untrusted evidence/);
-    assert.deepEqual(handoff.options, { deliverAs: "nextTurn" });
+    assert.deepEqual(fixture.sentMessages, []);
   } finally {
     await fixture.cleanup();
   }
@@ -4314,11 +3898,14 @@ test("conflict handoff renders malformed claims as unknown", async () => {
   });
   try {
     await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    await fixture.emit("before_agent_start", { prompt: "Continue", systemPrompt: "Base" });
-    await waitForFixtureEvent(fixture, "message", () => fixture.sentMessages.length > 0);
-
-    assert.equal(fixture.sentMessages.length, 1);
-    const content = (fixture.sentMessages[0]!.message as { content: string }).content;
+    await fixture.command("status");
+    const result = await fixture.emit("before_agent_start", {
+      prompt: "Continue", systemPrompt: "Base",
+    }) as { messages: Array<{ customType: string; content: string }> };
+    const notices = result.messages.filter((message) =>
+      message.customType === "forgetful_conflict");
+    assert.equal(notices.length, 1);
+    const content = notices[0]!.content;
     assert.match(content, /old claim: unknown/);
     assert.match(content, /proposed claim: unknown/);
     assert.match(content, /candidate title: unknown/);
@@ -4352,72 +3939,15 @@ test("a sibling branch cannot inherit a conflict from the shared baseline", asyn
       },
     ];
     await fixture.emit("agent_settled", { type: "agent_settled" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const result = await fixture.emit("before_agent_start", {
+      prompt: "Continue on this sibling", systemPrompt: "Base",
+    }) as { messages: Array<{ customType: string }> };
+    assert.equal(result.messages.some((message) => message.customType === "forgetful_conflict"),
+      false);
     assert.equal(fixture.sentMessages.length, 0);
 
-    const tool = fixture.tools.get("forgetful_resolve");
-    await assert.rejects(
-      tool.execute(
-        "resolve-old",
-        {
-          conflict_id: "old-branch-conflict",
-          action: "skip",
-        },
-        undefined,
-        undefined,
-        fixture.ctx,
-      ),
-      /No pending Forgetful conflict can be resolved/,
-    );
     assert.equal(fixture.capture.resolutions.length, 0);
   } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("a resolver waiting for recovery cannot delegate after session tree navigation", async () => {
-  const fixture = await harness();
-  let release!: (value: unknown[]) => void;
-  const pending = new Promise<unknown[]>((resolve) => { release = resolve; });
-  let markLookupStarted!: () => void;
-  const lookupStarted = new Promise<void>((resolve) => { markLookupStarted = resolve; });
-  let resolving: Promise<unknown> | undefined;
-  let navigation: Promise<unknown> | undefined;
-  try {
-    fixture.capture.pendingConflicts = async () => {
-      markLookupStarted();
-      return pending;
-    };
-    await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    await lookupStarted;
-    const tool = fixture.tools.get("forgetful_resolve");
-    resolving = tool.execute(
-      "resolve-race",
-      { conflict_id: "race-conflict", action: "skip" },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    // Navigation may reject the tool before it is awaited. Observe that rejection immediately.
-    void resolving!.catch(() => undefined);
-    fixture.setLeaf("branch-b");
-    navigation = fixture.emit("session_tree", {
-      type: "session_tree", oldLeafId: "root", newLeafId: "branch-b",
-    });
-    void navigation.catch(() => undefined);
-    // Cancellation while recovery owns the checkpoint is an error, never a delegated resolution.
-    await assert.rejects(resolving!, /^Error: Forgetful conflict checkpoint wait ended\.$/);
-    assert.equal(fixture.capture.resolutions.length, 0);
-    release([{
-      id: "race-conflict", sessionId: "session-1", branchId: "session-1:root",
-      sourceEntryIds: ["root"], reason: "race",
-    }]);
-    await navigation;
-    assert.equal(fixture.capture.resolutions.length, 0);
-  } finally {
-    release([]);
-    await resolving?.catch(() => undefined);
-    await navigation;
     await fixture.cleanup();
   }
 });
@@ -4457,103 +3987,6 @@ test("an in-flight runtime cannot install after session tree navigation", async 
     );
     await fixture.emit("agent_settled", { type: "agent_settled" });
     assert.equal(fixture.capture.enqueued.length, 0);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("conflict resolution preserves full text in eight trusted evidence entries", async () => {
-  const fixture = await harness();
-  try {
-    await fixture.emit("session_start", {
-      type: "session_start",
-      reason: "new",
-    });
-    const clarification = "Detailed clarification. ".repeat(1_000);
-    for (let index = 0; index < 10; index += 1) {
-      fixture.entries.push(
-        entry(`evidence-${index}`, "root", "user", `${clarification} ${index}`),
-      );
-    }
-    fixture.capture.conflicts = [
-      {
-        id: "conflict-evidence",
-        sessionId: "session-1",
-        branchId: "session-1:root",
-        sourceEntryIds: ["evidence-0"],
-      },
-    ];
-    const tool = fixture.tools.get("forgetful_resolve");
-    await tool.execute(
-      "call-evidence",
-      {
-        conflict_id: "conflict-evidence",
-        action: "supersede",
-        reason: "confirmed",
-      },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    const additionalEntries =
-      (
-        fixture.capture.resolutions[0]?.value as {
-          additionalEntries?: Array<{ id: string; text: string }>;
-        }
-      ).additionalEntries ?? [];
-    assert.ok(additionalEntries.length <= 8);
-    assert.equal(additionalEntries.find((item) => item.id === "evidence-0")?.text,
-      `${clarification} 0`);
-    assert.equal(additionalEntries.find((item) => item.id === "evidence-9")?.text,
-      `${clarification} 9`);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("conflict resolution reports deferred and rejected statuses", async () => {
-  const fixture = await harness({
-    conflicts: [
-      {
-        id: "conflict-status",
-        sessionId: "session-1",
-        branchId: "session-1:root",
-        sourceEntryIds: [],
-      },
-    ],
-  });
-  try {
-    await fixture.emit("session_start", {
-      type: "session_start",
-      reason: "new",
-    });
-    fixture.capture.resolveConflict = async (id, value) => {
-      fixture.capture.resolutions.push({ id, value });
-      return { status: value.action === "defer" ? "deferred" : "rejected" };
-    };
-    const tool = fixture.tools.get("forgetful_resolve");
-    const deferred = await tool.execute(
-      "call-defer",
-      {
-        conflict_id: "conflict-status",
-        action: "defer",
-      },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    assert.match(String(deferred.content[0].text), /deferred/);
-    const rejected = await tool.execute(
-      "call-skip",
-      {
-        conflict_id: "conflict-status",
-        action: "skip",
-      },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    assert.match(String(rejected.content[0].text), /rejected/);
   } finally {
     await fixture.cleanup();
   }
@@ -4615,15 +4048,20 @@ test("debug status omits malformed project IDs", async () => {
   }
 });
 
-test("a delayed conflict handoff is discarded after branch navigation", async () => {
+test("a delayed conflict handoff is discarded after branch navigation",
+  { timeout: 5_000 }, async () => {
   const fixture = await harness();
   let release: (value: unknown[]) => void = () => undefined;
   let navigation: Promise<unknown> | undefined;
+  let handoff: Promise<unknown> | undefined;
   try {
     await fixture.emit("session_start", {
       type: "session_start",
       reason: "new",
     });
+    await fixture.command("status");
+    await waitForCondition(() => fixture.capture.checkpoints.length === 1 &&
+      fixture.widgets.size === 0, "startup recovery should finish before delaying the handoff");
     let started = false;
     const pending = new Promise<unknown[]>((resolve) => {
       release = resolve;
@@ -4644,10 +4082,10 @@ test("a delayed conflict handoff is discarded after branch navigation", async ()
         "stop",
       ),
     );
-    await fixture.emit("agent_settled", { type: "agent_settled" });
-    for (let attempt = 0; !started && attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    handoff = fixture.emit("before_agent_start", {
+      prompt: "Explain the pending conflict", systemPrompt: "Base",
+    });
+    await waitForCondition(() => started, "the next turn should request pending conflicts");
     fixture.setLeaf("branch-b");
     navigation = fixture.emit("session_tree", {
       type: "session_tree",
@@ -4669,10 +4107,13 @@ test("a delayed conflict handoff is discarded after branch navigation", async ()
       },
     ]);
     await navigation;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const result = await handoff as { messages: Array<{ customType: string }> };
+    assert.equal(result.messages.some((message) => message.customType === "forgetful_conflict"),
+      false);
     assert.equal(fixture.sentMessages.length, 0);
   } finally {
     release([]);
+    await handoff;
     await navigation;
     await fixture.cleanup();
   }
@@ -5161,283 +4602,6 @@ test("project init filters large project lists before opening the selector", asy
     assert.deepEqual(confirmations, ["Link Project 149 (#150) to test/repo?"]);
     assert.deepEqual(fixture.writes, []);
   } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("encode dispatches the bundled repository workflow to the active agent", async () => {
-  // Arrange: the extension has a trusted repository context and a configured endpoint,
-  // but the workflow must not depend on a background memory model call.
-  const fixture = await harness({
-    gitRemote: "git@github.com:test/repo.git",
-    userSettings: { model: undefined },
-  });
-  try {
-    // Act.
-    await fixture.command("encode");
-
-    // Assert: Pi receives one follow-up containing the complete workflow contract.
-    assert.equal(fixture.sentUserMessages.length, 1);
-    const message = fixture.sentUserMessages[0];
-    assert.equal((message?.options as { deliverAs?: string }).deliverAs, "followUp");
-    assert.equal(typeof message?.content, "string");
-    assert.match(String(message?.content), /Encoding a repository/i);
-    assert.match(String(message?.content), /coverage report/i);
-    assert.match(String(message?.content), /forgetful_knowledge_read/);
-    assert.match(String(message?.content), /forgetful_knowledge_write/);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("agent project init exposes exclusive create and link request modes", async () => {
-  // Arrange: the registered Pi tool is the public contract seen by an agent.
-  const fixture = await projectFixture();
-  const tool = fixture.tools.get("forgetful_project_init");
-  assert.ok(tool);
-  try {
-    // Act / Assert: each mode accepts its complete input and rejects ambiguous input.
-    assert.deepEqual(tool.parameters.required, []);
-    assert.match(String(tool.description), /Choose exactly one mode/i);
-    assert.match(String(tool.description), /omit(?:ting)? `project_id`/i);
-    assert.doesNotThrow(() => tool.prepareArguments({
-      name: "Agent repository", description: "Repository knowledge",
-    }));
-    assert.doesNotThrow(() => tool.prepareArguments({ project_id: 41 }));
-    for (const invalid of [
-      {},
-      { name: "Agent repository" },
-      { description: "Repository knowledge" },
-      { name: "Agent repository", description: "Repository knowledge", project_id: 41 },
-      { name: "Agent repository", project_id: 41 },
-      { description: "Repository knowledge", project_id: 41 },
-    ]) {
-      assert.throws(() => tool.prepareArguments(invalid));
-    }
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("agent project init creates a trusted current repository mapping", async () => {
-  // Arrange: no project mapping exists and the background memory model is absent.
-  const fixture = await projectFixture();
-  await writeFile(
-    join(fixture.agentDir, "forgetful/settings.json"),
-    JSON.stringify({ enabled: true }),
-  );
-  const tool = fixture.tools.get("forgetful_project_init");
-  assert.ok(tool);
-  try {
-    // Act.
-    const result = await tool.execute(
-      "project-init-1",
-      { name: "Agent repository", description: "Repository knowledge" },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-
-    // Assert: the tool writes only the canonical current repository mapping.
-    assert.deepEqual(fixture.writes, [
-      {
-        name: "Agent repository",
-        description: "Repository knowledge",
-        repo_name: "test/repo",
-        project_type: "development",
-      },
-    ]);
-    assert.match(String(result.content[0]?.text), /Agent repository/);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("agent project init accepts any origin repository name", async () => {
-  // Arrange: Azure DevOps is not owner/repo, but it is a usable origin.
-  const writes: unknown[] = [];
-  const projects: Project[] = [];
-  const fixture = await harness({
-    withoutProject: true,
-    gitRemote: "https://dev.azure.com/contoso/widgets/_git/api",
-    createClient: (options) =>
-      new ApiForgetfulClient({
-        ...options,
-        fetchImpl: async (_url, init) => {
-          if (init?.method === "POST") {
-            const body = JSON.parse(String(init.body));
-            writes.push(body);
-            projects.push({ id: 32, ...body });
-            return Response.json(projects[0], { status: 201 });
-          }
-          return Response.json({ projects });
-        },
-      }),
-  });
-  const tool = fixture.tools.get("forgetful_project_init");
-  assert.ok(tool);
-  try {
-    // Act.
-    await tool.execute(
-      "project-init-azure",
-      { name: "Azure repo", description: "Widgets API" },
-      undefined,
-      undefined,
-      fixture.ctx,
-    );
-    // Assert.
-    assert.deepEqual(writes, [
-      {
-        name: "Azure repo",
-        description: "Widgets API",
-        repo_name: "dev.azure.com/contoso/widgets/_git/api",
-        project_type: "development",
-      },
-    ]);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("encode requires trust before starting a repository survey", async () => {
-  const fixture = await harness({ gitRemote: "git@github.com:test/repo.git" });
-  try {
-    fixture.ctx.isProjectTrusted = () => false;
-    await fixture.command("encode");
-    assert.equal(fixture.sentUserMessages.length, 0);
-    assert.match(fixture.notifications.join("\n"), /trust/i);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("agent project init reports rejected setup as a tool error", async () => {
-  const fixture = await projectFixture();
-  try {
-    fixture.ctx.isProjectTrusted = () => false;
-    await assert.rejects(
-      fixture.tools.get("forgetful_project_init")!.execute(
-        "untrusted-init", { name: "API", description: "API project" },
-        undefined, undefined, fixture.ctx,
-      ),
-      /Project trust is required|project setup failed/i,
-    );
-    assert.deepEqual(fixture.writes, []);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-
-test("knowledge read renders a compact summary and expands the full result", async () => {
-  // Arrange: the registered Pi tool and a full foreground search response.
-  const fixture = await harness();
-  try {
-    const tool = fixture.tools.get("forgetful_knowledge_read");
-    const text = JSON.stringify({
-      primary_memories: [{ id: 42, title: "Architecture", content: "Full durable decision." }],
-      linked_memories: [], truncated: false,
-    });
-    const result = {
-      content: [{ type: "text", text }],
-      details: { operation: "search_memories", count: 1 },
-    };
-    const theme = { fg: (_color: string, value: string) => value };
-
-    // Act: render the normal and expanded terminal views through Pi's tool contract.
-    const compact = tool.renderResult(result, { expanded: false }, theme).render(100).join("\n");
-    const expanded = tool.renderResult(result, { expanded: true }, theme).render(100).join("\n");
-
-    // Assert: display volume is bounded without removing the model's full memory content.
-    assert.match(compact, /search_memories.*1/);
-    assert.doesNotMatch(compact, /Full durable decision/);
-    assert.match(expanded.replace(/\s+/g, " "), /Full durable decision/);
-    assert.equal(result.content[0].text, text);
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("forgetful_resolve preserves the full original validation error", async () => {
-  const fixture = await harness();
-  const body = JSON.stringify({ detail: [{ loc: ["body", "content"],
-    msg: "validation details ".repeat(200) + "VALIDATION_TAIL", input: "original input" }] });
-  const original = new Error(`Forgetful POST /api/v1/memories returned HTTP 422: ${body}`);
-  try {
-    await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    fixture.capture.conflicts = [{ id: "partial-conflict", sessionId: "session-1",
-      branchId: "session-1:root", sourceEntryIds: [] }];
-    fixture.capture.resolveConflict = async () => { throw original; };
-
-    const tool = fixture.tools.get("forgetful_resolve");
-    await assert.rejects(tool.execute("resolve-error", {
-      conflict_id: "partial-conflict", action: "supersede", reason: "Confirmed change",
-    }, undefined, undefined, fixture.ctx), (error: Error) => {
-      assert.equal(error, original, "the model-facing boundary must preserve the actual error");
-      assert.equal(error.message, original.message);
-      assert.ok(error.message.includes(body));
-      return true;
-    });
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-test("resolver rejects late dispatch while navigation drains an accepted resolution", async () => {
-  const fixture = await harness({ conflicts: [{ id: "held-conflict", sessionId: "session-1",
-    branchId: "session-1:root", sourceEntryIds: [] }] });
-  let releaseResolution!: () => void;
-  const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
-  let resolutionStarted!: () => void;
-  const started = new Promise<void>((resolve) => { resolutionStarted = resolve; });
-  let releaseLookup!: () => void;
-  const lookupGate = new Promise<void>((resolve) => { releaseLookup = resolve; });
-  let lookupStarted!: () => void;
-  const lookup = new Promise<void>((resolve) => { lookupStarted = resolve; });
-  let first: Promise<unknown> | undefined;
-  let second: Promise<string> | undefined;
-  let navigation: Promise<unknown> | undefined;
-  let calls = 0;
-  try {
-    await fixture.emit("session_start", { type: "session_start", reason: "new" });
-    fixture.capture.resolveConflict = async () => {
-      calls++;
-      resolutionStarted();
-      await resolutionGate;
-      return { status: "resolved" };
-    };
-    const tool = fixture.tools.get("forgetful_resolve");
-    const args = { conflict_id: "held-conflict", action: "skip" };
-    first = tool.execute("accepted", args, undefined, undefined, fixture.ctx);
-    void first!.catch(() => undefined);
-    await started;
-    fixture.capture.pendingConflicts = async () => {
-      lookupStarted();
-      await lookupGate;
-      return fixture.capture.conflicts;
-    };
-    second = Promise.resolve(tool.execute("late", args, undefined, undefined, fixture.ctx))
-      .then(() => "resolved", () => "rejected");
-    await lookup;
-    let navigationReturned = false;
-    navigation = fixture.emit("session_tree", {
-      type: "session_tree", oldLeafId: "root", newLeafId: "branch-b",
-    }).then(() => { navigationReturned = true; });
-    void navigation.catch(() => undefined);
-    releaseLookup();
-    await readFile(join(fixture.agentDir, "forgetful/settings.json"), "utf8");
-    assert.equal(navigationReturned, false, "accepted resolution must still be draining");
-    assert.equal(calls, 1, "lookup completion must not dispatch onto the stopped runtime");
-    releaseResolution();
-    await first;
-    assert.equal(await second, "rejected");
-    await navigation;
-  } finally {
-    releaseLookup();
-    releaseResolution();
-    await first?.catch(() => undefined);
-    await second;
-    await navigation;
     await fixture.cleanup();
   }
 });

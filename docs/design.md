@@ -8,44 +8,43 @@ remaining silent, configurable, bounded, and failure-open.
 The first vertical slice includes both recall and automatic capture. The extension uses the
 existing Forgetful REST API; changes to the Forgetful service are not assumed.
 
-## Knowledge expansion
+## Knowledge access boundary
 
-The extension also works with entities and their relationships, documents, code artifacts and
-stored files. The original memory lifecycle below remains the basis for evidence, project scope,
-automatic contradiction resolution and uncertain-conflict escalation.
+The extension owns automatic recall and capture. Its only main-agent tool is
+`forgetful_recall_wait`; private `read_forgetful` and the internal knowledge readers and writers
+remain available to automatic work.
 
 - Automatic recall uses memories and entities as entry points. It follows a bounded number of
   relevant relationships and document/code references within the existing deadline and context
   budget. Optional record failures preserve candidates for review while time remains. No unreviewed
   candidate is injected if the overall deadline expires.
-- `forgetful_knowledge_read` lets the active agent inspect individual records and supporting
-  material. Project scope is enforced on each record and both ends of a relationship. Stored
-  text and image files can be opened explicitly; file support depends on the server feature flag.
 - Automatic capture can store documents and reusable code and link memories to entities and
   relationships. It excludes file uploads. Resource IDs and completed links are checkpointed so
   an interrupted capture can continue. Query-before-create still cannot guarantee atomic
   deduplication across simultaneous sessions or server-side races.
-- `forgetful_project_init` exposes repository initialisation to the active agent, with the same
-  trusted Git-origin mapping as the interactive wizard. Connection setup remains separate.
-- `/forgetful encode` starts a normal active-agent turn with the bundled repository encoding and
-  supporting workflows. It surveys source and the current commit, creates or refreshes project
-  knowledge, and reports coverage and gaps. It works without the background memory model.
-- Foreground knowledge writes are scoped to a verified project and source context. Clear memory
-  contradictions preserve old facts through supersession; uncertain cases require clarification
-  in the active session. No file-upload tool is exposed in this expansion.
+- Human setup, status, settings, scope, capture and model controls remain, along with
+  `/forgetful project init`. Connection setup stays separate from repository project mapping.
+- Deliberate main-agent knowledge access uses independently configured Forgetful MCP/CLI clients
+  and their skills. Explicit recall, knowledge read/write, agent project-init and resolver tools,
+  the six bundled manual skills, and `/forgetful encode` are removed from this extension.
+- A wizard for configuring independent MCP/CLI access is future work, not part of this change.
+  `/forgetful setup` configures this extension's REST connection only. Extension enablement, scope
+  and capture settings do not control independent clients.
 
 The shared `KnowledgeClient` capability extends the transport-neutral client. Its HTTP adapter
 uses the existing entity, document, code-artifact and file routes, preserving authentication,
 timeouts and schema validation. Memory links include `document_ids`, `code_artifact_ids` and
-`file_ids`. Stored file reads have a separate bounded response allowance for binary payloads;
-a configured response limit still applies.
+`file_ids`. Internal stored-file reads retain a separate bounded response allowance for binary
+payloads; a configured response limit still applies. Keeping these internal capabilities does not
+expose new main-agent tools.
 
 ## Architecture
 
 ![Pi Forgetful architecture](assets/architecture.png)
 
-The extension boundary owns Pi lifecycle hooks, commands, bounded agent tools, and failure-open
-coordination. Recall uses a separately configured Pi model to plan bounded searches asynchronously,
+The extension boundary owns Pi lifecycle hooks, commands, the bounded recall-wait tool, and
+failure-open coordination. Recall uses a separately configured Pi model to plan bounded searches
+asynchronously,
 then reports lifecycle state and reviewed context at model-call boundaries. Capture snapshots a
 settled session branch into a durable queue, then uses the same transport-neutral Forgetful client
 to create, supersede, or escalate candidate memories. The HTTP adapter is the MVP; a future CLI
@@ -57,11 +56,11 @@ expanded layer-by-layer version remains available in
 
 ## Review decisions
 
-The following choices are intentional for the first implementation:
+The following choices describe the approved extension boundary:
 
 - Capture starts in `auto` mode in the first slice, with `off` and `observe` controls retained.
-- The `forgetful_recall` tool is enabled, and its normal Pi tool results may persist in session
-  history. Compact rendering changes presentation, not persistence.
+- Only `forgetful_recall_wait` is exposed as a main-agent tool. Its normal Pi tool results may
+  persist in session history; deliberate knowledge access belongs to independent clients.
 - Recall defaults to global scope. Users can opt into strict project recall explicitly; scope
   enforcement uses the existing Forgetful search contract.
 - Capture associates each new memory with the current project by default. The agent may select
@@ -120,7 +119,7 @@ The extension:
 4. lets the main model use one finite `forgetful_recall_wait` when memory is required;
 5. keeps queued follow-up recall isolated to its matching request and cancels stale jobs;
 6. leaves memory IDs, entity names, and topic leads for deeper exploration;
-7. exposes bounded, read-only recall tools to the main agent;
+7. leaves deliberate knowledge access to independently configured MCP/CLI clients and skills;
 8. evaluates completed work for durable knowledge after `agent_settled`;
 9. assigns each candidate to its relevant project, checks for duplicates and contradictions, and
    quietly creates novel, high-confidence memories through the existing query-before-create path;
@@ -137,8 +136,8 @@ and do not override the current request. The result itself is delivered as a ste
 so it reaches saved history before the next model request. No separate wake message is saved.
 Policy instructions stay request-local, outside the saved facts. The initial pending marker
 persists normally too. Hidden messages are not private storage; result text must be bounded and
-redacted. Capture excludes recall messages as evidence. `forgetful_recall_wait` and
-`forgetful_recall` results follow normal Pi tool-result persistence.
+redacted. Capture excludes recall messages as evidence. `forgetful_recall_wait` results follow
+normal Pi tool-result persistence.
 
 ## Pi feasibility
 
@@ -152,7 +151,7 @@ The implementation is tested against Pi 1.0.1 and uses these extension seams:
 - `ctx.scopedModels` supports a model picker consistent with the user's Pi configuration;
   the extension must persist the selected memory-model ID itself;
 - Pi's bundled `complete()` API can make a focused model call without a subagent process;
-- an extension can register a bounded recall tool and custom compact rendering;
+- an extension can register a bounded recall-wait tool;
 - `pi.exec` and Node's built-in `fetch` support local process and HTTP integration.
 
 A separate agent subprocess is unnecessary. A focused direct model call is faster and has a
@@ -201,9 +200,9 @@ smaller failure surface.
    history, render an arriving state without a temporary copy of the facts. Do not persist stale
    completions, duplicate results, or start another planner. Empty and failed results remain
    transient.
-7. Let the main agent call `forgetful_recall_wait` once when it needs the terminal state, or use
-   the read-only `forgetful_recall` tool when it needs more detail. Its
+7. Let the main agent call `forgetful_recall_wait` once when it needs the terminal state. Its
    returned content is ordinary Pi tool-result content and may be stored in session history.
+   Further deliberate searches require independent MCP/CLI access.
 
 Retrieved memory is untrusted historical context, never executable instruction. Pending and
 progress text is trusted lifecycle protocol; recalled terminal text is untrusted data. The review
@@ -215,7 +214,7 @@ Review summaries are also untrusted. One bounded planning path and one bounded r
 an overall recall budget with search and optional enrichment. Each stops after its first valid
 private submission and never parses text-only output as JSON. All behavior-driving memory model
 requests require a schema-validated submission tool; only context summaries remain plain text.
-Explicit main-agent read tools retain their direct results; the main agent reviews those itself.
+Independent clients retain their own result handling; this extension does not review their output.
 Lifecycle delivery never recursively starts recall or capture.
 
 ## Recall scope and capture destination
@@ -229,8 +228,8 @@ silently. Missing or ambiguous mappings require setup guidance rather than a gue
 For global recall, omit project filtering and send `strict_project_filter: false`. In project
 recall, every search request must send the resolved numeric project ID with
 `strict_project_filter: true`. Forgetful owns search filtering and the scope of returned
-search results; the extension does not revalidate their project IDs. Resolution separately
-checks a selected memory's current state before mutation, as described in the adapter contract.
+search results; the extension does not revalidate their project IDs. Automatic supersession
+separately checks a selected memory before mutation, as described in the adapter contract.
 
 Project-scoped recall is opt-in through the scope command or the persistent per-project setting:
 
@@ -265,13 +264,9 @@ If the intended destination cannot be resolved, skip that candidate with setup g
 of silently writing to the current project or without a project. Global recall does not imply
 project-free capture; personal facts that do not belong to a project need a separate policy.
 
-Explicit foreground writes follow the same destination boundary. They default to the verified
-current project, but may supply a numeric `project_id` for another existing repository-assigned
-project. Resolve that destination before executing the requested write, revalidate it before
-mutation, and never fall back to the current project. Recall scope remains unchanged. New records
-and superseding
-replacements identify the active source repository separately from the selected destination;
-updates preserve the existing record's provenance.
+These boundaries govern this extension's automatic work only. `/forgetful off` and recall scope
+settings do not disable or restrict independent MCP/CLI access, including external resolution
+writes. Those clients have their own configuration, permissions and workflows.
 
 Scope enforcement uses the existing Forgetful service contract. The extension adds only local
 persistence for the user's per-project scope preference; it does not add a new cross-project API
@@ -310,8 +305,8 @@ request and response shapes:
   checks reduce races but are not atomic; the server does not enforce unique repository links;
 - create: `POST /memories` with the required `title`, `content`, `context`, `keywords`, and
   `tags` fields, plus the resolved capture destination in `project_ids`;
-- read for resolution: `GET /memories/{id}` for an existing conflict's selected memory, checking
-  that its content, project associations, and obsolescence state still match the decision;
+- read for automatic supersession: `GET /memories/{id}` for the selected memory, checking its
+  current content, project associations and obsolescence state;
 - supersede: first create the replacement, then `DELETE /memories/{id}` with `reason` and
   `superseded_by` set to the confirmed replacement ID. This route marks the old memory obsolete
   and preserves its history; the operation is not a hard delete;
@@ -321,8 +316,14 @@ request and response shapes:
 
 The current create route has no idempotency key. Query-before-create remains the duplicate
 boundary in this slice. Create-then-obsolete is also not an atomic transaction, and the read
-before resolution is not a compare-and-swap guarantee. The adapter must not claim otherwise.
+before mutation is not a compare-and-swap guarantee. The adapter must not claim otherwise.
 Any proposed Forgetful API or persistence change is escalated rather than hidden in the extension.
+
+Errors preserve the actual HTTP status and response body, including JSON and non-JSON bodies,
+validation field details, plain `Not Found` responses, all 5xx statuses and service diagnostics.
+Known-secret redaction and transport limits still apply. Private tools return those details to
+the memory model instead of substituting an extension interpretation; automatic recall retains
+its failure-open boundary.
 
 ## Capture lifecycle and durability
 
@@ -369,8 +370,7 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    preparation-only pass. Carry failed/permission-paused branch exclusions across the drain cycle
    and its already-waiting settled callbacks; do not immediately spend their remaining attempts.
    Continue other healthy branches. Worker-lock contention uses delayed, cancellable rechecks
-   without taking ownership from a live worker. Foreground conflict resolution, including evidence
-   validation, takes priority between passes. Keep these passes on the existing serial lifecycle
+   without taking ownership from a live worker. Keep these passes on the existing serial lifecycle
    tail; no new daemon or queue is introduced.
 5. Complete a job only after all candidate outcomes are recorded. Advance the successful capture
    cursor without moving backwards; it is distinct from enqueue receipts and summary progress.
@@ -452,8 +452,8 @@ is then processed by the durable worker described above.
    from that query, the incompatible claims, source entries in the eligible snapshot, and why they
    concern the same fact. Each private capture submission has at most three attempts within its
    existing model request and deadline; rejected calls receive validation error tool results.
-7. Execute `create` or automatic `supersede` through the existing Forgetful API using the shared
-   resolution path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
+7. Execute `create` or automatic `supersede` through the existing Forgetful API using the automatic
+   write path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
    neither an ordinary duplicate nor permission to create a competing fact.
 8. If a decision is malformed, reject the write and record the reason. Retain a valid uncertain
    conflict for escalation. An arbitrary confidence score alone does not authorize supersession.
@@ -485,68 +485,41 @@ conditional write contract. This limitation remains explicit; no service change 
 
 ### Escalation to the active session
 
-The main model can resolve a pending conflict through an extension tool. The current
-`forgetful_recall` tool remains read-only; a separate, bounded `forgetful_resolve` tool accepts
-a pending conflict ID, a decision, and evidence entry IDs or a reason. The extension reads the
-actual session evidence. The tool cannot name arbitrary memories or supply an unvalidated
-replacement. A partial contradiction involving exactly one old memory can be resolved when that
-memory belongs only to the destination project. Shared, global, cross-project and multi-memory
-partial conflicts remain deferred or can be skipped.
-
-For an eligible single-memory conflict, ordinary and partial resolution both request a complete
-replacement from the configured model. `submit_memory_revision` includes the complete semantic
-fields, evidence IDs, explicit attachment/entity/memory reference selections, and source provenance.
-The model decides which old claims and references apply, including whether the conversation corrects
-an error or describes an actual change. Code validates arguments and scope, not that interpretation.
-Invalid submissions receive the existing three bounded adapter attempts.
-
-The durable execution order is:
-
-1. Supply the current predecessor, candidate, trusted evidence and bounded available resources to
-   the model. Checkpoint its explicit replacement and selected references. Do not union old/new
-   references or append associations that arrive after that decision.
-2. Check permission and destination access, record the create attempt, create the replacement and
-   checkpoint its returned ID. A lost create response is an unknown outcome, not a reason to create
-   again or find a same-title substitute.
-3. Execute the selected association operations, checkpointing completed operations. A receipt skips
-   that operation on resume; it does not authorize restoring an association changed by another
-   writer.
-4. Recheck endpoint access and write enablement, then execute the requested supersession and record
-   completion. An operation failure is reported to the model with the completed receipts. Code does
-   not change the plan or reinterpret the failure as a different semantic action.
-
-Repeating an unchanged resolution request resumes its unfinished operations. Changed evidence or
-reason requests a new model decision, with the earlier accepted request, replacement and receipts
-visible. The model explicitly chooses whether to update that replacement or create another.
-
-These execution rules supersede the earlier deterministic preservation/union workflow. Existing
-implicit replacement receipts require explicit review rather than being silently reinterpreted as
-new model instructions. The REST API has no create idempotency key or atomic multi-record writes.
-Actual service diagnostics remain visible through the tool. Service-created similarity links are
-separate from the model's requested additions; pruning unseen links is not implied.
+Uncertain conflicts are handed to the main model for discussion with the user. Applying the agreed
+resolution requires independently configured Forgetful MCP/CLI access and its skills. There is no
+extension resolver tool or fallback writer.
 
 1. Persist a pending conflict with its originating session/branch, destination project, old
    claim, proposed replacement, memory IDs, and source evidence in the existing queue store.
-2. Deliver up to three selected conflicts to that same live session using `pi.sendMessage()` with
-   `deliverAs: "nextTurn"`. Preserve their full sanitized reasons, claims and evidence; do not
-   character-clip the handoff. The main model sees it with the next user prompt; this handoff
-   does not interrupt current work or start an extra model turn. A compact status can show
-   that a conflict is pending. The durable record, not Pi's in-memory delivery queue, owns it.
-3. The main model uses the session context to resolve the conflict. If the missing information
-   is a user preference or an unconfirmed fact, it asks the user normally. It can then call
-   `forgetful_resolve` to supersede the old fact, retain it and reject the candidate, or defer.
-4. The tool validates the conflict identity, current enablement, project, evidence, and observed
-   memory state, then delegates to the same capture-service write path used automatically.
-   A later user clarification can supply new evidence; repeating the escalation alone cannot.
+2. Select up to three conflicts at `before_agent_start` and return a native message for that
+   user turn. Preserve their full sanitized reasons, claims and evidence; do not character-clip
+   the handoff. This keeps next-user-turn timing: no idle wake, interruption or extra model turn.
+   Selecting on the current branch avoids carrying a queued notice across navigation. The durable
+   conflict record owns pending delivery, not Pi's in-memory message queue.
+3. Keep the conflict pending until the matching notice is saved in the originating conversation.
+   Enqueueing a notice or rendering it transiently is insufficient. Only then record a local
+   handoff. This records delivery, not resolution in Forgetful or a successful external write.
+   Pending delivery survives restart; session and branch restrictions remain authoritative.
+4. The main model discusses the evidence with the user, obtains any missing clarification and
+   uses independent MCP/CLI access to apply the agreed resolution. If access is unavailable or
+   a write fails, it reports the conflict as unresolved instead of claiming success.
 
-Escalation messages and resolution tool results follow normal Pi session persistence. Exclude
-these messages, memory-operation results, and mere acknowledgements from new capture evidence
-to avoid repeated conflict loops. Do not deliver a worker's conflict into a replacement session
-or another branch. Pending conflicts remain available for later recovery, subject to the
-existing MVP boundary on exit. `capture off` blocks resolution writes as well as new capture.
+The extension does not track external resolution success, parse conversation prose as a receipt,
+or write a fallback resolution. Existing partial and uncertain writes and automatic capture
+receipts retain their current recovery rules. Those conflict records remain pending and retain
+source evidence even after their notice is saved; the saved notice prevents repeat delivery.
+Handoff neither replays nor discards them, and does not convert an uncertain mutation into a
+successful write.
 
-The MVP handoff does not request `triggerTurn` or launch a separate conversation. A user
-clarification stays in the existing session and can support a later resolution call.
+Escalation messages follow normal Pi session persistence and are excluded from capture evidence.
+Existing filtering also excludes results from recognized Forgetful tool names. This change does
+not add universal CLI/MCP output detection: generic `bash` calls and wrapper tools can carry memory
+output without being identified. Do not promise that every independent-client result is excluded
+or that prose acknowledgements establish server success.
+
+Never deliver a worker's conflict into a replacement session or unrelated branch. An unsaved notice
+remains eligible for later recovery within the existing live-process boundary; no post-exit worker
+is added. Extension enablement, scope and `capture off` controls do not govern independent clients.
 
 Query-before-create is the only duplicate boundary for this slice. Race and retry risk are
 accepted, so the extension must record per-candidate outcomes and must explicitly allow
@@ -609,11 +582,10 @@ The default verbosity is `warning`, showing warnings and errors:
 - hidden recall lifecycle messages are persisted as Pi custom session entries, but do not render in
   the UI;
 - lifecycle text is bounded and untrusted where it contains recalled historical context;
-- a `forgetful_recall` tool result may appear in normal Pi session history;
+- a `forgetful_recall_wait` tool result may appear in normal Pi session history;
 - no success or empty-result popup;
 - one transient activity widget above the editor, combining startup, recall, queue and capture
-  phases with a spinner and elapsed time; it is never saved in conversation history;
-- compact rendering for agent-initiated deeper recall.
+  phases with a spinner and elapsed time; it is never saved in conversation history.
 
 `/forgetful verbosity debug|info|warning|error` persists a user-level setting without resetting
 session memory work. Each level includes more severe messages. `info` adds brief recall counts
@@ -740,15 +712,15 @@ application services, scope policy, prompt policy, or capture queue.
 ## Delivery slices
 
 1. Separately configurable memory model, global-by-default recall with optional project scope,
-   silent recall injection, persisted agent-followable recall tool, and automatic capture with
+   silent recall injection, a bounded recall-wait tool, and automatic capture with
    project association, agent-selected destinations, and automatic contradiction resolution.
 2. Global and trusted-project prompt policy overlays.
 3. Debug, capture mode, enablement, and scope controls.
 4. Real-provider latency and capture-quality tuning.
 
-Each slice remains vertically usable and covered by regression tests.
+Each slice must remain vertically usable and have regression coverage.
 
-## Confirmed test seams
+## Validation seams
 
 The automated boundary starts after a model has made a structured decision. Tests do not claim
 to prove that a real model classifies, splits, or judges novelty correctly.
@@ -763,8 +735,8 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    failure terminal. Queued prompts return immediately and receive only their own job's context.
    A bounded wait cleans up listeners, does not cancel recall on timeout, and reports
    already-delivered state only after a context boundary.
-3. **Agent tool seam**: given a deeper recall request, the read-only tool returns correctly
-   scoped Forgetful data to the main agent.
+3. **Agent tool seam**: only `forgetful_recall_wait` is registered. Removed tools, manual skills
+   and the encoding command are absent; private recall and capture capabilities remain available.
 4. **Capture input seam**: the capture model receives pinned session/branch history (a successful
    summary plus original recent messages when compacted) and composed capture policy, including
    the current project and evidence for another destination. The watermark tracks work separately
@@ -794,8 +766,8 @@ to prove that a real model classifies, splits, or judges novelty correctly.
     result are hidden from the UI but persisted by Pi. Pending, retrieval, arriving, empty, and
     failed states are rendered transiently. Useful results are saved once for the matching request,
     survive restart, and are not published onto unrelated sessions or branches. Capture excludes
-    these entries and memory-operation results from evidence. Recall and wait tool results follow
-    normal Pi session persistence.
+    these entries and recognized Forgetful tool results from evidence. Generic shell/wrapper
+    memory output is not universally detected. Wait results follow normal Pi session persistence.
 11. **Latency seam**: first-token overhead and stage timings meet the agreed SLO.
 
 A black-box test can use Pi's faux model to supply predetermined decisions and a real throwaway
@@ -804,21 +776,20 @@ intelligence. For example:
 
 - hold the planner and assert the main model starts with pending context; then release recall
   and assert the reviewed memory reaches the next model-call boundary without duplicate replies;
-- invoke `forgetful_recall` and assert the returned result is rendered compactly while remaining
-  an expected normal Pi tool result;
+- invoke `forgetful_recall_wait` and assert bounded waiting and normal Pi tool-result persistence;
+- assert the removed main-agent tools and bundled manual skills are unavailable;
 - return a capture candidate and `create`, then assert the expected memory exists through the
   existing Forgetful API;
 - pre-seed an overlapping memory, return `skip`, and assert the memory count is unchanged;
 - pre-seed an incompatible decision, return `supersede` with valid source identities, and assert
   the replacement is created before the old memory is marked obsolete and linked to it;
 - return `escalate` and assert the conflicting IDs and evidence persist without a write;
-- reject a resolution referencing memory IDs outside the candidate's overlap results;
+- reject an automatic supersession referencing IDs outside the candidate's overlap results;
 - fail replacement creation and assert the old memory remains active; fail obsolescence after
   creation and assert retry uses the recorded replacement ID without creating another memory;
-- change the old memory before resolution and assert the model receives its current content;
+- change the old memory before automatic supersession and check the current-state boundary;
 - move an endpoint outside the authorized project and assert no mutation;
-- change resolution evidence after partial execution and assert a new model decision sees the
-  earlier request, replacement and actual execution outcomes;
+- preserve automatic partial-write receipts and expose actual outcomes to the next model decision;
 - with global recall enabled, create a candidate without an override and assert it belongs to
   the current project;
 - while working in this extension, return an evidenced Forgetful-project destination and assert
@@ -833,10 +804,13 @@ intelligence. For example:
   approval dialog;
 - document, rather than deny, the accepted race/retry behaviour of query-before-create.
 
-For the session handoff, verify that an escalation reaches the originating session at
-the next user prompt without starting a turn itself; resolving a pending conflict uses the same
-validated write path; unrelated conflict IDs and writes while capture is off are rejected; and
-resolution messages do not recursively become new capture candidates.
+For the session handoff, verify that an escalation reaches the originating session at the next
+user prompt without starting a turn. An unsaved notice must remain pending across restart; only
+a matching saved notice marks local handoff. Verify branch isolation and that handoff performs no
+server resolution write, parses no prose receipt and retains existing partial/uncertain outcomes.
+Instructions must direct the main model to discuss the conflict with the user and report unresolved
+status when independent access is missing or fails. Extension controls must not claim to govern
+independent clients. These are validation requirements, not a report of completed checks.
 
 Semantic classification, recall relevance, summary accuracy, semantic atomicity, novelty quality,
 contradiction accuracy, project assignment quality, and duplicate prevention remain model or service
@@ -851,15 +825,15 @@ behaviour. Real-model evaluations can explore these; they are not deterministic 
 - Query-before-create reduces obvious duplicates but does not provide atomic or idempotent
   writes. Automatic capture accepts that limitation and records outcomes rather than promising
   all-or-nothing behaviour.
-- Deep recall is intentionally useful to the main agent even though its normal Pi tool result
-  may be persisted in session history.
+- Deliberate knowledge access belongs to independent MCP/CLI clients. Their generic shell or
+  wrapper output is not universally recognized by the existing capture-evidence filter.
 - Global recall is the default; project recall remains strict when explicitly selected. Scope
   enforcement and returned-memory project filtering are treated as the existing Forgetful
   service contract rather than an extension-owned validation subsystem.
 - Capture destinations default to the current project and may be changed per candidate by the
   agent based on the work; global recall does not make captured knowledge project-free.
 - Clear, evidenced contradictions are resolved automatically by supersession. Uncertain cases
-  use the main-model handoff and bounded resolver tool described above.
+  use the saved-notice handoff and independent-client resolution described above.
 - Supersession preserves history but is a multi-step operation on the existing REST API.
   Partial outcomes and the remaining concurrent-write risk must stay visible in recorded state.
 - Post-exit capture completion is deferred beyond MVP; the durable queue remains in scope.
