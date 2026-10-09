@@ -412,6 +412,7 @@ interface Runtime {
   recoveryResult?: CaptureCheckpointResult;
   captureFeedbackFlush?: Promise<void>;
   captureCheckpointTail?: Promise<void>;
+  captureRetryScheduled?: boolean;
   captureTriggerId: number;
   /** Pending callbacks from turns already included in a drain cannot immediately retry failures. */
   captureDeferrals?: { throughTriggerId: number; branches: CaptureBranch[] };
@@ -1279,7 +1280,19 @@ function automaticCaptureFeedback(
   if (summary.ready === 0 && unavailable > 0)
     return { message: "Forgetful capture outcome unavailable.", terminalJobIds };
   const separator = summary.ready === 1 && parts.length === 1 ? " " : ": ";
-  return { message: `Forgetful capture${separator}${parts.join("; ")}.`, terminalJobIds };
+  let recovery = "";
+  if (summary.failures.length > 0) {
+    if (summary.failures.some((failure) => !failure.retryPending)) {
+      recovery = " Discarded work was not fully saved; " +
+        "the original Pi conversation is unchanged. " +
+        "Run /forgetful retry-queue for remaining eligible work; " +
+        "this does not restore discarded tasks.";
+    } else {
+      recovery = " Queued work is kept locally. Run /forgetful retry-queue to retry eligible work.";
+    }
+  }
+  return { message: `Forgetful capture${separator}${parts.join("; ")}.${recovery}`,
+    terminalJobIds };
 }
 
 export function createForgetfulExtension(
@@ -1712,9 +1725,10 @@ export function createForgetfulExtension(
         } else {
           const failed = pending.find((job) => job.status !== "running" && job.lastError);
           runtime.activity.notice(failed ? "capture retry pending — work kept locally" : undefined);
-          if (failed) showWarningOnce(ctx, runtime.config, `capture-failed:${failed.id}`,
+          if (failed) showWarningOnce(ctx, runtime.config,
+            `capture-failed:${failed.id}:${failed.attempts}:${failed.lastError}`,
             `Forgetful capture retry pending: ${boundedErrorDiagnostic(failed.lastError)}. ` +
-            "Queued work is kept locally.");
+            "Queued work is kept locally. Run /forgetful retry-queue to retry eligible work.");
         }
         return pending;
       } catch (error) {
@@ -1732,11 +1746,15 @@ export function createForgetfulExtension(
         runtime.config.verbosity !== "debug" || !runtime.pendingCaptureJobs.has(item.jobId));
       // Debug live-job feedback already reports its final diagnostic once.
       if (!discarded.length || !isCurrentRuntime(runtime, ctx)) return;
+      const reasons = [...new Set(discarded.map((item) =>
+        boundedErrorDiagnostic(item.error)))].slice(0, 3).join("; ");
       showWarningOnce(ctx, runtime.config,
         `capture-discarded:${discarded.map((item) => item.jobId).join(",")}`,
         `Forgetful capture discarded ${discarded.length} ` +
-        `${discarded.length === 1 ? "task" : "tasks"} after repeated failures. ` +
-        "That work was not fully saved to Forgetful; the original Pi conversation is unchanged.");
+        `${discarded.length === 1 ? "task" : "tasks"} after repeated failures: ${reasons}. ` +
+        "That work was not fully saved to Forgetful; the original Pi conversation is unchanged. " +
+        "Run /forgetful retry-queue for remaining eligible work; " +
+        "this does not restore discarded tasks.");
     };
 
     const prepareRuntime = async (
@@ -3011,6 +3029,43 @@ export function createForgetfulExtension(
       notify(ctx, `Forgetful capture set to ${value}.`);
     };
 
+    const handleRetryQueueCommand = async (
+      parts: string[], ctx: ExtensionContext, runtime: Runtime,
+    ): Promise<void> => {
+      if (parts.length !== 1) {
+        notify(ctx, "Usage: /forgetful retry-queue", "error");
+        return;
+      }
+      if (!ctx.isProjectTrusted() || !runtime.config.enabled ||
+          runtime.config.captureMode === "off") {
+        notify(ctx, "Forgetful queue retry requires project trust and enabled capture. " +
+          "Settings have not been changed.", "warning");
+        return;
+      }
+      if (!runtime.capture?.checkpoint) {
+        notify(ctx, "Forgetful capture is unavailable. Check /forgetful status.", "warning");
+        return;
+      }
+      if (runtime.captureRetryScheduled) {
+        notify(ctx, "Forgetful queue retry already scheduled.");
+        return;
+      }
+      runtime.captureRetryScheduled = true;
+      const previous = runtime.captureCheckpointTail ?? Promise.resolve();
+      runtime.captureCheckpointTail = previous.then(async () => {
+        if (!isCurrentRuntime(runtime, ctx)) return;
+        await runtime.queue.completeProjectDiscovery(runtime.context);
+        if (!isCurrentRuntime(runtime, ctx)) return;
+        // An explicit request opens one fresh retry cycle, using the normal worker and receipts.
+        await runCapturePasses(runtime, ctx);
+      }).catch((error) => {
+        if (isCurrentRuntime(runtime, ctx))
+          logFailure(ctx, runtime.config, "Forgetful queue retry failed", error);
+      }).finally(() => { runtime.captureRetryScheduled = false; });
+      notify(ctx, "Forgetful queue retry scheduled. Only remaining eligible work is retried; " +
+        "discarded tasks are not restored and uncertain saves are not repeated.");
+    };
+
     const handleEnablementCommand = async (
       action: "on" | "off",
       ctx: ExtensionContext,
@@ -3288,6 +3343,9 @@ export function createForgetfulExtension(
           case "capture":
             await handleCaptureCommand(parts, ctx, runtime);
             return;
+          case "retry-queue":
+            await handleRetryQueueCommand(parts, ctx, runtime);
+            return;
           case "on":
           case "off":
             await handleEnablementCommand(action, ctx, runtime);
@@ -3307,7 +3365,7 @@ export function createForgetfulExtension(
           default:
             notify(
               ctx,
-              "Usage: /forgetful setup|project init|status|scope|capture|on|off|" +
+              "Usage: /forgetful setup|project init|status|scope|capture|retry-queue|on|off|" +
                 "logging off|info|debug|verbosity|model (legacy: debug on|off)",
               "error",
             );

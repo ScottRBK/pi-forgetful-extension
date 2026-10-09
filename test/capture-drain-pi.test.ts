@@ -46,7 +46,7 @@ async function bounded<T>(promise: Promise<T>, description: string): Promise<T> 
 }
 
 /** Script the external provider; Pi lifecycle, session history and disk queue remain real. */
-async function startPi(t: TestContext, logging = false) {
+async function startPi(t: TestContext, logging = false, verbosity = "warning") {
   const root = await mkdtemp(join(tmpdir(), "pi-capture-drain-"));
   const agentDir = join(root, "agent");
   await mkdir(join(agentDir, "forgetful"), { recursive: true });
@@ -72,7 +72,7 @@ async function startPi(t: TestContext, logging = false) {
   await writeFile(join(agentDir, "forgetful/settings.json"), JSON.stringify({
     base_url: `http://127.0.0.1:${address.port}/api/v1`, model: "drain-test/memory",
     capture_mode: "auto", timeout_ms: 60_000, recall_model_timeout_ms: 60_000,
-    logging: logging ? "debug" : "off",
+    logging: logging ? "debug" : "off", verbosity,
   }));
   const runtime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false,
@@ -82,6 +82,7 @@ async function startPi(t: TestContext, logging = false) {
   let failSession: string | undefined;
   let holdFrom = Infinity;
   const provider = gate();
+  const captureStarted = gate();
   runtime.registerProvider("drain-test", {
     api: "faux", apiKey: "unused-test-key", baseUrl: "http://127.0.0.1/unused",
     models: ["main", "memory"].map((id) => ({
@@ -92,6 +93,7 @@ async function startPi(t: TestContext, logging = false) {
       const name = model.id === "memory" ? providerTools(context)[0]?.name : undefined;
       const input = name ? decodeProviderContext(context).input : undefined;
       if (name) calls.push({ name, input: input! });
+      if (name === "submit_capture_candidates") captureStarted.release();
       else mainCalls++;
       const failed = name === "submit_capture_candidates" &&
         input?.context?.sessionId === failSession;
@@ -173,7 +175,8 @@ async function startPi(t: TestContext, logging = false) {
   await bounded(session.bindExtensions({}), "Pi startup waited for project discovery");
   await bounded(discovery.promise, "Background discovery did not start");
   return {
-    session, calls, shutdown, notifications,
+    session, calls, shutdown, notifications, captureStarted: captureStarted.promise,
+    setTrusted(value: boolean) { settings.setProjectTrusted(value); },
     async diagnostics() {
       const directory = join(root, "agent", "forgetful", "logs");
       const files = await readdir(directory);
@@ -205,7 +208,8 @@ async function startPi(t: TestContext, logging = false) {
       this.ready();
       await bounded(session.bindExtensions({}), "Restart waited for queued capture");
     },
-    failSession(id: string) { failSession = id; },
+    failSession(id?: string) { failSession = id; },
+    releaseProvider() { provider.release(); },
     holdProviderFrom(index: number) { holdFrom = index; },
     ready() {
       ready = true;
@@ -217,7 +221,9 @@ async function startPi(t: TestContext, logging = false) {
       const queues = join(agentDir, "forgetful", "queues");
       const directories = await readdir(queues);
       assert.equal(directories.length, 1);
-      return new DurableQueueStore({ directory: join(queues, directories[0]!) });
+      const directory = join(queues, directories[0]!);
+      const [job] = await new DurableQueueStore({ directory }).listJobMetadata();
+      return new DurableQueueStore({ directory, ...job?.binding });
     },
     async earlyTurns(count: number, existing = 0) {
       for (let index = 0; index < count; index++) {
@@ -417,4 +423,201 @@ test("settled callbacks waiting on discovery share failure deferrals until a fre
     "A fresh user turn must schedule a new retry opportunity");
   assert.equal((await queue.getJob(original.id))?.attempts, 2);
   assert.equal(pi.calls.filter((call) => call.name === "submit_capture_candidates").length, 6);
+});
+
+test("retry-queue resumes deferred capture without reload and coalesces repeated commands", {
+  timeout: 15_000,
+}, async (t) => {
+  // Arrange: one failed drain, with the provider repaired before the explicit retry.
+  const pi = await startPi(t, true);
+  const queue = await pi.earlyTurns(1);
+  pi.failSession(pi.session.sessionManager.getSessionId());
+  pi.ready();
+  await until(() => pi.diagnostics(), (log) => log.includes("capture.batch_completed"),
+    "The first failed drain must settle before retrying");
+  const [original] = await queue.listJobs();
+  assert.equal(original?.attempts, 1);
+  pi.failSession();
+  pi.holdProviderFrom(4);
+
+  // Act: invoke the real Pi command, holding its provider to test non-blocking replies.
+  await bounded(pi.session.prompt("/forgetful retry-queue"),
+    "The retry command must not wait for background model completion");
+  await until(async () => pi.calls.length, (count) => count === 4,
+    "The command must retry deferred work without reload or another agent turn");
+  await bounded(pi.session.prompt("/forgetful retry-queue"),
+    "A duplicate command must return while the original retry is running");
+  assert.ok(pi.notifications.some((text) => /retry already scheduled/i.test(text)));
+  pi.releaseProvider();
+
+  // Assert: only one new attempt, no new foreground model turn or queued task.
+  const jobs = await until(() => queue.listJobs(),
+    (jobs) => jobs.length === 1 && jobs[0]?.status === "complete",
+    "The original queued job must complete after the provider recovers");
+  await bounded(pi.shutdown(), "Shutdown must await the scheduled retry");
+  assert.equal(jobs[0]?.id, original?.id);
+  assert.equal(jobs[0]?.attempts, 2);
+  assert.equal(pi.calls.length, 4);
+  assert.equal(pi.mainCalls, 1);
+});
+
+test("retry-queue does not enable disabled capture or change retained work", {
+  timeout: 15_000,
+}, async (t) => {
+  // Arrange: retain a failed task before changing settings through public commands.
+  const pi = await startPi(t, true);
+  const queue = await pi.earlyTurns(1);
+  pi.failSession(pi.session.sessionManager.getSessionId());
+  pi.ready();
+  await until(() => pi.diagnostics(), (log) => log.includes("capture.batch_completed"),
+    "The failed drain must finish before capture is disabled");
+  const [original] = await queue.listJobs();
+
+  // Act: both capture-off and extension-off must refuse an explicit retry.
+  await pi.session.prompt("/forgetful capture off");
+  await pi.session.prompt("/forgetful retry-queue");
+  await pi.session.prompt("/forgetful status");
+  assert.ok(pi.notifications.some((text) => /capture off/.test(text)));
+  assert.deepEqual(await queue.getJob(original!.id), original);
+  await pi.session.prompt("/forgetful capture auto");
+  await pi.session.prompt("/forgetful off");
+  await pi.session.prompt("/forgetful retry-queue");
+  await pi.session.prompt("/forgetful status");
+  await bounded(pi.shutdown(), "Disabled capture must not start a background retry");
+
+  // Assert: neither command quietly enables settings or spends another failure attempt.
+  assert.deepEqual(await queue.getJob(original!.id), original);
+  assert.equal(pi.calls.length, 3);
+  assert.equal(pi.mainCalls, 1);
+  assert.ok(pi.notifications.some((text) => /Forgetful off; capture auto/.test(text)));
+  assert.equal(pi.notifications.filter((text) => /Settings have not been changed/.test(text))
+    .length, 2);
+});
+
+for (const uncertain of ["flag", "receipt"] as const) {
+  test(`retry-queue preserves an uncertain ${uncertain} without replay`, {
+    timeout: 15_000,
+  }, async (t) => {
+    // Arrange: seed an unknown accepted write through the durable queue's public boundary.
+    const pi = await startPi(t, true);
+    const queue = await pi.earlyTurns(1);
+    const [job] = await queue.listJobs();
+    const outcomes = { storage: { creation: { status: "started" } } };
+    await queue.checkpoint(job!.id, { status: "paused", candidateOutcomes: outcomes });
+    if (uncertain === "flag") {
+      await queue.completeProjectDiscovery({ ...job!.snapshot.context,
+        projectDiscoveryPending: false,
+        project: { id: 7, name: "Capture drain", repo_name: "test/capture-drain" } });
+      await queue.checkpoint(job!.id, { status: "running" });
+      await queue.cancel(job!.id, false, "Earlier accepted save needs checking");
+    }
+    pi.ready();
+    await until(() => pi.diagnostics(), (log) => log.includes("capture.batch_completed"),
+      "Initial recovery must settle without repeating the uncertain save");
+    const original = await queue.getJob(job!.id);
+
+    // Act: ask Pi to retry the queue, then await its background worker via lifecycle shutdown.
+    await pi.session.prompt("/forgetful retry-queue");
+    await until(() => pi.diagnostics(), (log) =>
+      log.split("capture.batch_completed").length === 3,
+    "The explicit retry must finish its safe checkpoint");
+    await bounded(pi.shutdown(), "Uncertain writes must not leave a retry running");
+
+    // Assert: exact saved progress and evidence survive; no provider or write is dispatched.
+    assert.deepEqual(await queue.getJob(job!.id), original);
+    assert.equal(pi.calls.length, 0);
+    assert.equal(pi.mainCalls, 1);
+    assert.ok(pi.notifications.some((text) => /uncertain saves are not repeated/.test(text)));
+  });
+}
+
+for (const verbosity of ["warning", "debug"]) {
+  for (const attempt of [1, 3]) {
+    test(`Pi ${verbosity} names a capture timeout and suggests retry-queue on attempt ${attempt}`, {
+      timeout: 15_000,
+    }, async (t) => {
+      // Arrange: a real private model request whose external provider waits for abort.
+      const pi = await startPi(t, true, verbosity);
+      const queue = await pi.earlyTurns(1);
+      const [job] = await queue.listJobs();
+      if (attempt === 3) {
+        await queue.completeProjectDiscovery({ ...job!.snapshot.context,
+          projectDiscoveryPending: false,
+          project: { id: 7, name: "Capture drain", repo_name: "test/capture-drain" } });
+        for (let prior = 0; prior < 2; prior++) {
+          assert.ok(await queue.claimNext(job!.binding, job!.snapshot.context));
+          await queue.checkpoint(job!.id, { status: "pending", lastError: "Earlier failure" });
+        }
+      }
+      pi.holdProviderFrom(1);
+      const realTimeout = globalThis.setTimeout;
+      t.mock.method(globalThis, "setTimeout", (
+        callback: Parameters<typeof realTimeout>[0], milliseconds?: number, ...args: unknown[]
+      ) => realTimeout(callback, milliseconds === 180_000 ? 50 : milliseconds, ...args));
+
+      // Act: accelerate only the three-minute timer; the real deadline still aborts the provider.
+      pi.ready();
+      await pi.captureStarted;
+
+      // Assert: the public warning identifies the known deadline and the safe recovery command.
+      await until(async () => pi.notifications, (messages) => messages.some((text) =>
+        /timeout after 180 seconds/.test(text) && text.includes("/forgetful retry-queue")),
+      "The timeout warning must expose the actual cause and suggest an explicit retry");
+      if (attempt === 1) {
+        const retained = await queue.getJob(job!.id);
+        assert.equal(retained?.status, "pending");
+        assert.match(retained!.lastError!, /timeout after 180 seconds/);
+        assert.match(JSON.stringify(retained!.snapshot.entries), /Use SQLite/);
+      } else {
+        assert.equal(await queue.getJob(job!.id), undefined);
+        assert.ok(pi.notifications.some((text) =>
+          /discarded 1 task|Discarded work/.test(text) &&
+          /does not restore discarded tasks/.test(text)));
+      }
+
+      // Act: repair the provider and retry through Pi, without restarting the session.
+      pi.holdProviderFrom(Infinity);
+      pi.releaseProvider();
+      await pi.session.prompt("/forgetful retry-queue");
+      await until(() => pi.diagnostics(), (log) =>
+        log.split("capture.batch_completed").length === 3,
+      "The explicit retry must settle after the timeout");
+      await bounded(pi.shutdown(), "The retry after timeout must settle");
+
+      // Assert: eligible work completes, but an exhausted task is never restored.
+      if (attempt === 1) {
+        assert.equal((await queue.getJob(job!.id))?.status, "complete");
+        assert.equal((await queue.getJob(job!.id))?.attempts, 2);
+        assert.equal(pi.calls.length, 2);
+      } else {
+        assert.deepEqual(await queue.listJobs(), []);
+        assert.equal(pi.calls.length, 1);
+      }
+      assert.equal(pi.mainCalls, 1);
+    });
+  }
+}
+
+test("retry-queue refuses capture after project trust is revoked", {
+  timeout: 15_000,
+}, async (t) => {
+  // Arrange: a failed task and a now-untrusted project, using real Pi settings.
+  const pi = await startPi(t, true);
+  const queue = await pi.earlyTurns(1);
+  pi.failSession(pi.session.sessionManager.getSessionId());
+  pi.ready();
+  await until(() => pi.diagnostics(), (log) => log.includes("capture.batch_completed"),
+    "The failed drain must settle before trust is revoked");
+  const [original] = await queue.listJobs();
+  pi.setTrusted(false);
+
+  // Act: invoke the command, then await every existing background task.
+  await pi.session.prompt("/forgetful retry-queue");
+  await bounded(pi.shutdown(), "Revoked trust must not start another capture attempt");
+
+  // Assert: no settings are changed, no new model turn runs, and saved evidence stays intact.
+  assert.deepEqual(await queue.getJob(original!.id), original);
+  assert.equal(pi.calls.length, 3);
+  assert.equal(pi.mainCalls, 1);
+  assert.ok(pi.notifications.some((text) => /requires project trust/.test(text)));
 });

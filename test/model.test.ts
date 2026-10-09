@@ -533,7 +533,7 @@ test("memory model uses one timeout budget across recall review retries", async 
         throw new Error("summary requires a source");
       }),
     }),
-    /Memory model request failed/,
+    /Memory model timeout after 0.05 seconds/,
   );
   assert.equal(calls, 2);
   assert.equal(retrySignalAborted, true);
@@ -757,7 +757,7 @@ for (const purpose of ["capture", "overlap"] as const) {
     });
     let settled = false;
     void pending.finally(() => { settled = true; }).catch(() => undefined);
-    const rejected = assert.rejects(pending, /Memory model request failed/);
+    const rejected = assert.rejects(pending, /Memory model timeout after 180 seconds/);
     await new Promise<void>((resolve) => setImmediate(resolve));
     t.mock.timers.tick(179_999);
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -798,7 +798,7 @@ test("capture correction retries share the original three-minute deadline", asyn
   });
   let settled = false;
   void pending.finally(() => { settled = true; }).catch(() => undefined);
-  const rejected = assert.rejects(pending, /Memory model request failed/);
+  const rejected = assert.rejects(pending, /Memory model timeout after 180 seconds/);
   await new Promise<void>((resolve) => setImmediate(resolve));
   t.mock.timers.tick(120_000);
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -858,7 +858,7 @@ test("memory model keeps the capture deadline independent from classification", 
     }),
     (error: unknown) => {
       assert.ok(error instanceof Error);
-      assert.equal(error.message, "Memory model request failed");
+      assert.equal(error.message, "Memory model timeout after 0.01 seconds");
       assert.ok(error.cause instanceof Error);
       assert.equal(error.cause.message, "Memory model timeout");
       return true;

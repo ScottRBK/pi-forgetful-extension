@@ -286,7 +286,19 @@ function requestDeadline(
   };
 }
 
-function throwRequestFailure(error: unknown, request: ModelRequest): never {
+function throwRequestFailure(
+  error: unknown, request: ModelRequest, timedOut: boolean, timeoutMs: number,
+): never {
+  // The deadline flag also covers providers returning "aborted" after our timeout fires.
+  // Caller/lifecycle cancellation remains an abort, not a failed timeout attempt.
+  if (timedOut && !request.signal?.aborted) {
+    const seconds = timeoutMs / 1_000;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Memory model timeout after ${seconds} ` +
+      `${seconds === 1 ? "second" : "seconds"}`, {
+      cause: new Error(sanitizeText(detail).slice(0, 550)),
+    });
+  }
   if (error instanceof ModelSubmissionError || error instanceof ModelTaskPause) throw error;
   if (
     error instanceof Error &&
@@ -533,7 +545,8 @@ export class PiMemoryModel implements MemoryModelClient {
         prepare,
       );
     } catch (error) {
-      throwRequestFailure(error, request);
+      throwRequestFailure(error, request, deadline.timedOut,
+        requestTimeout(request, this.classificationTimeoutMs));
     } finally {
       this.emit("info", "model.calls", request, {
         providerCalls: deadline.providerCalls, compactionCalls: deadline.compactionCalls,

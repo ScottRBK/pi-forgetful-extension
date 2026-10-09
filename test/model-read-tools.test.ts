@@ -375,7 +375,8 @@ for (const stop of ["caller", "deadline"] as const) {
     const pending = model.complete({ purpose: "recall-review", policy: "Read then submit.",
       input: {}, submission, readConcurrency: 2, readTools: [memoryRead(http.client)],
       signal: controller.signal });
-    const rejected = assert.rejects(pending, stop === "caller" ? /aborted/ : /request failed/);
+    const rejected = assert.rejects(pending,
+      stop === "caller" ? /aborted/ : /Memory model timeout after 1 second/);
     await beforeCompletion(http.waitForCount(2), pending);
     if (stop === "caller") controller.abort();
     await rejected;
@@ -487,7 +488,8 @@ for (const stop of ["caller", "deadline"] as const) {
           finally { if (++finished === 2) notifyFinished(); }
         } }],
     });
-    const rejected = assert.rejects(pending, stop === "caller" ? /aborted/ : /request failed/);
+    const rejected = assert.rejects(pending,
+      stop === "caller" ? /aborted/ : /Memory model timeout after 1 second/);
     await beforeCompletion(bothStarted, pending);
     if (stop === "caller") controller.abort();
     await rejected;

@@ -45,8 +45,9 @@ function resolveLogDirectory(value: unknown, agentDir: string, warnings: string[
   const fallback = join(agentDir, "forgetful", "logs");
   if (value === undefined) return fallback;
   if (typeof value === "string" && value.trim() !== "" && !value.includes("\0")) {
-    const expanded = value === "~" ? homedir()
-      : value.startsWith(`~${sep}`) ? join(homedir(), value.slice(2)) : value;
+    let expanded = value;
+    if (value === "~") expanded = homedir();
+    else if (value.startsWith(`~${sep}`)) expanded = join(homedir(), value.slice(2));
     if (isAbsolute(expanded)) return resolve(expanded);
   }
   warnings.push("Invalid log_directory; use an absolute path or ~/path. " +

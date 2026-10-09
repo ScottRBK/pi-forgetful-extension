@@ -160,6 +160,7 @@ capture destination. Use `/forgetful project init` to create or link its project
 | `/forgetful capture observe` | Inspect candidates without writing memories. |
 | `/forgetful capture off` | Disable this extension’s extraction and capture writes. |
 | `/forgetful capture skip` | Skip the active run, or the next run when idle. |
+| `/forgetful retry-queue` | Retry remaining eligible capture work without reloading Pi. |
 | `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
 | `/forgetful scope` | Show recall scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
@@ -421,7 +422,15 @@ path. A divergent path without that entry gets a new branch; summaries never cro
 Capture runs in passes of at most eight job claims. While Pi remains open, healthy pending work
 continues in follow-on passes without another prompt. A preparation-only slice can also request a
 follow-on pass, even when fewer than eight jobs were claimed. Failed or permission-paused branches
-wait for a later settled turn or a restart rather than retrying repeatedly in the same cycle.
+wait for `/forgetful retry-queue`, a later settled turn, or a restart rather than retrying
+repeatedly in the same cycle. The command schedules one background drain, returning without
+waiting for model completion. Repeated commands while that retry is queued or running share the
+same retry. It does not enable disabled capture, reset attempt/model-call limits, restore
+discarded tasks, or replay uncertain saves. In observe mode it remains read-only. Existing worker
+locks and permissions apply.
+Capture timeout warnings name the deadline (180 seconds) and suggest the command for remaining
+eligible work. Discard warnings include the failure reason and make clear that retrying does not
+restore the discarded task.
 Callbacks already waiting when failure is reported share its deferrals. Other eligible branches
 continue; busy worker locks get delayed, cancellable checks. Live workers are never displaced,
 and unknown saves or pending project discovery do not trigger retry loops.

@@ -4671,7 +4671,10 @@ test("debug reports discarded capture once without reading deleted queue diagnos
     // Assert: failed work is no longer tracked; no missing-outcome notice or repeated failure.
     const feedback = fixture.notifications.filter((message) =>
       message.startsWith("Forgetful capture"));
-    assert.deepEqual(feedback, ["Forgetful capture failed: Final provider failure."]);
+    assert.deepEqual(feedback, ["Forgetful capture failed: Final provider failure. " +
+      "Discarded work was not fully saved; the original Pi conversation is unchanged. " +
+      "Run /forgetful retry-queue for remaining eligible work; " +
+      "this does not restore discarded tasks."]);
     assert.equal(diagnosticReads, 0);
   } finally {
     await fixture.cleanup();

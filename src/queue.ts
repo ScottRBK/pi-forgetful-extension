@@ -1523,13 +1523,13 @@ export class DurableQueueStore {
     if (!entryId) throw new Error("A saved conversation entry is required for conflict handoff");
     const identity = this.defaultIdentity();
     const pending = await this.getConflict(conflictId);
-    if (!pending || pending.status !== "pending" || !conflictIdentityMatches(pending, identity))
+    if (pending?.status !== "pending" || !conflictIdentityMatches(pending, identity))
       return;
     // Older processes may still be finishing a resolution on this branch. Never race their receipt.
     await this.withWorkerLock(identity, pending, () => this.mutate((state) => {
       const conflict = state.conflicts.find((item) => item.id === conflictId);
       const job = state.jobs.find((item) => item.id === conflict?.jobId);
-      if (!conflict || conflict.status !== "pending" ||
+      if (conflict?.status !== "pending" ||
           !conflictIdentityMatches(conflict, identity) || conflict.uncertainWrite ||
           conflict.replacementId !== undefined || conflict.replacement || conflict.supersession ||
           conflict.resolution || job?.uncertainWrite || (job && interruptedWrite(job))) {
