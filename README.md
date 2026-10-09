@@ -182,8 +182,25 @@ Existing `debug: true` settings select debug verbosity unless `verbosity` is exp
 `/forgetful logging off|info|debug` saves its setting in user settings, independently of terminal
 verbosity. `/forgetful status` shows only `logging on` or `logging off`, not the level or path.
 
-Logs are JSONL (one JSON event per line) under `<working-directory>/.pi/forgetful/logs/`.
+Logs are JSONL (one JSON event per line), shared across projects under
+`~/.pi/agent/forgetful/logs/` by default (`<agent-dir>/forgetful/logs/` with a custom Pi agent
+directory). They are not written into the working repository by default.
 Each runtime uses a unique file so concurrent Pi sessions do not write over one another.
+
+To override the location, add `log_directory` to your user Forgetful settings
+(`~/.pi/agent/forgetful/settings.json`):
+
+```json
+{
+  "logging": "info",
+  "log_directory": "~/private-logs/forgetful"
+}
+```
+
+Use an absolute path or `~/path`; relative paths and invalid values warn and use the default.
+Project settings cannot override the log directory. Omit `log_directory` to restore the default.
+Restart Pi or use `/reload` after editing the setting. Existing project-local logs are not moved
+or deleted automatically; older running sessions keep their original log location until reloaded.
 Events include timestamps, levels, session IDs, and relevant branch, job, candidate, and memory IDs.
 Info records progress and outcomes without transcript or model payload bodies. Debug additionally
 records capture evidence snapshots, accepted/rejected candidates and their cited entries, overlap
@@ -195,7 +212,9 @@ Capture debug events can contain the full active conversation, including earlier
 Model requests show the actual SDK context; transport/authentication options and
 headers are excluded. Debug logs can still contain private conversations and source code. Known
 secrets are redacted, but this cannot detect every secret. Do not commit or share logs unreviewed.
-This repository already ignores `.pi/`; check the ignore rules in other repositories.
+If you explicitly choose a log directory inside a repository, ensure Git ignores it.
+Older versions wrote logs to `<working-directory>/.pi/forgetful/logs/`; this repository ignores
+`.pi/`, but check other repositories for old logs before committing.
 
 Files rotate at 5 MiB, retaining the current file and two archives per writer. Individual events
 are limited to 256 KiB; oversized bodies are omitted with `truncated: true`, retaining correlation
@@ -214,7 +233,7 @@ Abrupt process termination can lose the final events.
 To inspect rejected candidates with `jq` (if installed):
 
 ```bash
-jq 'select(.event == "capture.candidate_rejected")' .pi/forgetful/logs/*.jsonl*
+jq 'select(.event == "capture.candidate_rejected")' ~/.pi/agent/forgetful/logs/*.jsonl*
 ```
 
 ### Recall and capture feedback

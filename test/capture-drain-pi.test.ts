@@ -175,7 +175,7 @@ async function startPi(t: TestContext, logging = false) {
   return {
     session, calls, shutdown, notifications,
     async diagnostics() {
-      const directory = join(root, ".pi", "forgetful", "logs");
+      const directory = join(root, "agent", "forgetful", "logs");
       const files = await readdir(directory);
       return (await Promise.all(files.map((file) =>
         readFile(join(directory, file), "utf8")))).join("\n");

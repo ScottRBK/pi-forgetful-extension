@@ -230,7 +230,7 @@ for (const failure of ["provider", "submission"] as const) {
       assert.equal(captureCalls, callsBeforeRestart, "restart must not replay exhausted work");
       assert.deepEqual((await readQueue()).jobs, []);
       assert.deepEqual(await readdir(directory), ["queue.json"]);
-      const logDir = join(root, ".pi/forgetful/logs");
+      const logDir = join(root, "agent", "forgetful", "logs");
       const events = (await Promise.all((await readdir(logDir)).map(async (name) =>
         (await readFile(join(logDir, name), "utf8")).trim().split("\n").map((line) =>
           JSON.parse(line))))).flat();

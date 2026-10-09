@@ -737,10 +737,39 @@ test("missing model warning directs the user to setup", async () => {
   }
 });
 
+test("user log_directory sends file logs outside both the project and agent directory", async t => {
+  // Arrange: a user-selected directory, including spaces, outside the project.
+  const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-custom logs-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fixture = await harness({
+    userSettings: { logging: "info", log_directory: directory },
+  });
+  try {
+    // Act: start logging through the normal extension control and flush on shutdown.
+    await fixture.command("status");
+    await fixture.emit("session_shutdown", {});
+
+    // Assert: the configured location contains real records; neither default is created.
+    const files = (await readdir(directory)).filter(name => name.endsWith(".jsonl"));
+    assert.ok(files.length > 0);
+    const records = (await readFile(join(directory, files[0]!), "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    assert.ok(records.length > 0);
+    assert.ok(records.every(record => record.sessionId === "session-1"));
+    await assert.rejects(readdir(join(fixture.agentDir, "forgetful", "logs")),
+      { code: "ENOENT" });
+    await assert.rejects(readdir(join(fixture.root, ".pi", "forgetful", "logs")),
+      { code: "ENOENT" });
+  } finally {
+    await fixture.emit("session_shutdown", {});
+    await fixture.cleanup();
+  }
+});
+
 test("file logs record recall lifecycle independently of terminal verbosity", async () => {
   // Arrange: no log files by default, even with terminal debug enabled.
   const fixture = await harness({ userSettings: { verbosity: "debug" } });
-  const directory = join(fixture.root, ".pi", "forgetful", "logs");
+  const directory = join(fixture.agentDir, "forgetful", "logs");
   try {
     await fixture.command("status");
     await assert.rejects(readdir(directory), { code: "ENOENT" });
@@ -767,6 +796,8 @@ test("file logs record recall lifecycle independently of terminal verbosity", as
     assert.ok(events.every((item) => item.sessionId === "session-1"));
     assert.doesNotMatch(text, /A private question/);
     assert.equal(fixture.notifications.length, 0);
+    await assert.rejects(readdir(join(fixture.root, ".pi", "forgetful", "logs")),
+      { code: "ENOENT" });
 
     // Act / Assert: switching off prevents further file writes.
     await fixture.command("logging off");
@@ -807,7 +838,7 @@ test("info file logs never inherit private errors from terminal debug verbosity"
 
       // Assert: terminal debug remains detailed, independently of the file level.
       assert.ok(fixture.notifications.some((text) => text.includes(privateText)));
-      const directory = join(fixture.root, ".pi", "forgetful", "logs");
+      const directory = join(fixture.agentDir, "forgetful", "logs");
       const text = (await Promise.all((await readdir(directory)).map((name) =>
         readFile(join(directory, name), "utf8")))).join("");
       assert.ok(text.includes("recall-unavailable"));
@@ -826,7 +857,7 @@ test("turning Forgetful off still completes while the log filesystem is stalled"
     let released: Promise<string> | undefined;
     try {
       await fixture.command("logging info");
-      const directory = join(fixture.root, ".pi", "forgetful", "logs");
+      const directory = join(fixture.agentDir, "forgetful", "logs");
       const path = join(directory, (await readdir(directory))[0]!);
       await rm(path);
       await new Promise<void>((resolve, reject) => {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_FORGETFUL_BASE_URL,
@@ -34,6 +34,56 @@ test("fresh projects use global scope and the default service endpoint", async (
   assert.equal(config.recallConcurrency, 2);
   assert.equal(config.contextLimitTokens, 100_000);
   assert.equal(config.verbosity, "warning");
+});
+
+test("log directory defaults to the agent directory and ignores project overrides", async t => {
+  // Arrange: project settings must not redirect private logs, even for a trusted project.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const settings = join(agentDir, "forgetful", "settings.json");
+  await mkdir(join(root, ".pi", "forgetful"), { recursive: true });
+  await writeFile(join(root, ".pi", "forgetful", "settings.json"),
+    JSON.stringify({ log_directory: join(root, "project-logs") }));
+
+  // Act / Assert: the default is shared, not under the project .pi directory.
+  const defaults = await loadForgetfulConfig({ agentDir, cwd: root, trusted: true });
+  assert.equal(defaults.logDirectory, join(agentDir, "forgetful", "logs"));
+
+  for (const [value, expected] of [
+    [join(root, "custom logs"), join(root, "custom logs")],
+    ["~/forgetful-test-logs", join(homedir(), "forgetful-test-logs")],
+  ]) {
+    // Act: save and reload the user's choice.
+    await updateUserSettings(settings, { log_directory: value });
+    const config = await loadForgetfulConfig({ agentDir, cwd: root, trusted: true });
+
+    // Assert.
+    assert.equal(config.logDirectory, expected);
+    assert.deepEqual(config.warnings, []);
+    assert.equal(JSON.parse(await readFile(settings, "utf8")).log_directory, value);
+  }
+});
+
+test("invalid log directories warn and never resolve relative to the project", async t => {
+  // Arrange.
+  const root = await tempDirectory();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const settings = join(root, "settings.json");
+  for (const value of ["", "   ", "logs", ".pi/forgetful/logs", "~someone/logs",
+    "/tmp/logs\0", null, true, 42, {}]) {
+    await writeFile(settings, JSON.stringify({ log_directory: value }));
+
+    // Act.
+    const config = await loadForgetfulConfig({
+      agentDir, cwd: root, trusted: true, userSettingsPath: settings,
+    });
+
+    // Assert.
+    assert.equal(config.logDirectory, join(agentDir, "forgetful", "logs"));
+    assert.match(config.warnings.join("\n"), /Invalid log_directory/);
+  }
 });
 
 test("private context limit persists in user settings and ignores project overrides", async t => {

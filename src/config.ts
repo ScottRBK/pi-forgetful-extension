@@ -1,7 +1,7 @@
 import { chmod, mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { CaptureMode, Scope } from "./contracts.ts";
 import type { FileLogLevel } from "./logging.ts";
 
@@ -39,6 +39,19 @@ export type ScopeSource = "default" | "project" | "invalid";
 export type PromptName = "classification" | "recall" | "capture";
 export function isFileLogLevel(value: unknown): value is FileLogLevel {
   return value === "off" || value === "info" || value === "debug";
+}
+
+function resolveLogDirectory(value: unknown, agentDir: string, warnings: string[]): string {
+  const fallback = join(agentDir, "forgetful", "logs");
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() !== "" && !value.includes("\0")) {
+    const expanded = value === "~" ? homedir()
+      : value.startsWith(`~${sep}`) ? join(homedir(), value.slice(2)) : value;
+    if (isAbsolute(expanded)) return resolve(expanded);
+  }
+  warnings.push("Invalid log_directory; use an absolute path or ~/path. " +
+    "Using the default logs directory.");
+  return fallback;
 }
 
 export type Verbosity = "debug" | "info" | "warning" | "error";
@@ -79,6 +92,7 @@ export interface ForgetfulConfig {
   captureMode: CaptureMode;
   verbosity: Verbosity;
   logging: FileLogLevel;
+  logDirectory: string;
   scope: Scope;
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
@@ -116,6 +130,7 @@ export interface PersistedUserSettings {
   debug?: unknown;
   verbosity?: unknown;
   logging?: unknown;
+  log_directory?: unknown;
   recall_model_timeout_ms?: unknown;
   recall_concurrency?: unknown;
   context_limit_tokens?: unknown;
@@ -366,6 +381,8 @@ export async function loadForgetfulConfig(
     captureMode,
     verbosity: resolveVerbosity(user, warnings),
     logging: isFileLogLevel(user.logging) ? user.logging : "off",
+    logDirectory: resolveLogDirectory(user.log_directory,
+      options.agentDir ?? defaultAgentDir(), warnings),
     scope,
     scopeSource,
     recallModelTimeoutMs: asPositiveInteger(
@@ -425,6 +442,7 @@ export async function updateUserSettings(
       | "debug"
       | "verbosity"
       | "logging"
+      | "log_directory"
       | "recall_model_timeout_ms"
       | "recall_concurrency"
       | "context_limit_tokens"

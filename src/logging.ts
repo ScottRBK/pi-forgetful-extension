@@ -86,7 +86,7 @@ export interface DiagnosticLogger {
 }
 
 /**
- * JSONL diagnostics for a local project directory. Defaults: 5 MiB/file, 3 files/writer,
+ * JSONL diagnostics for the configured logs directory. Defaults: 5 MiB/file, 3 files/writer,
  * 256 KiB/event (including newline), and 1 MiB of pending encoded data. Overflow is dropped.
  * Oversized events retain bounded correlation IDs and set truncated:true; bodies are omitted.
  * Limits too small for the envelope drop the event. Invalid limits use the defaults.

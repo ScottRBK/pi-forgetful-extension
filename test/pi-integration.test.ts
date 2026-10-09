@@ -86,7 +86,7 @@ test(
       finally {
         try { await closeServer?.(); }
         finally {
-          const directory = join(root, ".pi/forgetful/logs");
+          const directory = join(root, "agent", "forgetful", "logs");
           for (const name of await readdir(directory).catch(() => [])) {
             const lines = (await readFile(join(directory, name), "utf8")).trim().split("\n");
             for (const line of lines) {

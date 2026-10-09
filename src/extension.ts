@@ -1750,7 +1750,7 @@ export function createForgetfulExtension(
       config = resolvedClient.config;
       const client = resolvedClient.client;
       const logger = new FileLogger({
-        directory: join(ctx.cwd, ".pi", "forgetful", "logs"),
+        directory: config.logDirectory,
         sessionId,
         level: config.logging,
         onError: () => notify(ctx,
