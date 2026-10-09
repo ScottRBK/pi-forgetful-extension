@@ -282,9 +282,13 @@ export async function applyLinkReview(
     const operation = decision.action === "add" ? "link" : "unlink";
     await executeConnection(review, operation, decision.memoryId, async () => {
       await beforeWrite();
-      await authorizedMemory(client, review.memory!.id, destination);
+      const memory = await authorizedMemory(client, review.memory!.id, destination);
       await authorizedMemory(client, decision.memoryId, destination);
       assertCanWrite();
+      // Complete an explicit removal without DELETE when the fresh record proves it absent.
+      // Do not swallow HTTP failures: another client can still remove the link after this read.
+      if (operation === "unlink" && memory.linked_memory_ids &&
+          !memory.linked_memory_ids.includes(decision.memoryId)) return;
       if (operation === "link")
         return client.knowledge!.linkMemories(review.memory!.id, [decision.memoryId]);
       return client.knowledge!.unlinkMemories!(review.memory!.id, decision.memoryId);

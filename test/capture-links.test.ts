@@ -99,6 +99,51 @@ test("capture reviews stored automatic links and adds a useful missed connection
 
   });
 
+test("rejecting an unlinked overlap completes capture without deleting a missing link", realOptions,
+  async (t) => {
+    // Arrange: overlap search supplies a full record, but automatic linking is disabled.
+    const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: "0" });
+    const setup = new ApiForgetfulClient({ baseUrl });
+    const project = await setup.createProject({ name: "Absent link", description: "Reject no-op",
+      repo_name: "test/absent-link" });
+    const unrelated = await setup.create({ ...candidate(), title: "Unrelated experiment",
+      project_ids: [project.id] });
+    const deletions: string[] = [];
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (init?.method === "DELETE") deletions.push(String(url));
+      return fetch(url, init);
+    } });
+    const directory = await mkdtemp(join(tmpdir(), "capture-absent-link-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "links" });
+    const service = new CaptureService({ queue, client, instanceId: "links",
+      model: model((name, input) => {
+        if (name === "submit_capture_candidates") return { candidates: [candidate()] };
+        if (name === "submit_capture_decision") return { action: "create" };
+        const item = input.candidates[0];
+        assert.deepEqual(item.memory.linked_memory_ids, []);
+        assert.ok(item.memories.some((memory: any) => memory.id === unrelated.id));
+        return { reviews: [{ candidateId: "decision", decisions: [{ memoryId: unrelated.id,
+          action: "reject", reason: "This unrelated experiment is not a useful connection." }] }] };
+      }) });
+
+    // Act: process the public capture worker, then reopen its durable queue.
+    const queued = await service.enqueue(snapshot(project));
+    const result = await service.checkpoint();
+    const reopened = new DurableQueueStore({ directory, instanceId: "links" });
+    const job = (await reopened.getJob(queued.jobId))!;
+
+    // Assert: an already absent connection cannot strand otherwise completed capture.
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(deletions, []);
+    assert.equal(job.status, "complete", job.lastError);
+    const outcome = job.candidateOutcomes.decision as any;
+    assert.equal(outcome.linkReview.status, "complete");
+    assert.deepEqual((await setup.get(outcome.memoryId)).linked_memory_ids, []);
+    assert.deepEqual((await setup.get(unrelated.id)).linked_memory_ids, []);
+    assert.equal(job.callCount, 3);
+  });
+
 test("three candidates share one overlap task and reuse an earlier sibling", realOptions,
   async (t) => {
     // Arrange: the model judges semantic equivalence, without comparing strings in production.
