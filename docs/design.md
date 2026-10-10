@@ -27,9 +27,19 @@ remain available to automatic work.
 - Deliberate main-agent knowledge access uses independently configured Forgetful MCP/CLI clients
   and their skills. Explicit recall, knowledge read/write, agent project-init and resolver tools,
   the six bundled manual skills, and `/forgetful encode` are removed from this extension.
-- A wizard for configuring independent MCP/CLI access is future work, not part of this change.
-  `/forgetful setup` configures this extension's REST connection only. Extension enablement, scope
-  and capture settings do not control independent clients.
+- `/forgetful setup` offers agent-led help before collecting REST connection details. It first asks
+  whether a new instance is needed; otherwise it offers help configuring existing access for Pi.
+  Either help path offers CLI or native Pi MCP with upstream skills, then sends the main agent a
+  setup prompt instead of continuing the form. The prompt asks it to reuse working installations,
+  install a missing CLI, install skills, and configure MCP when selected. It also asks the agent to
+  validate and merge background REST settings directly, preserving unrelated configuration and
+  keeping credentials out of chat and JSON. Pi's normal reload activates those settings and skills;
+  changed environment variables may require a restart. No second setup run is needed.
+- Declining both help offers keeps the existing validated REST form. Cancelling any wizard prompt
+  leaves settings unchanged and sends no agent request. The extension remains a guide, not an
+  installer: it does not acquire dependencies, configure independent clients, or validate that
+  their connection matches background REST. Background work still needs a running HTTP service.
+  Extension enablement, scope and capture settings do not control independent clients.
 
 The shared `KnowledgeClient` capability extends the transport-neutral client. Its HTTP adapter
 uses the existing entity, document, code-artifact and file routes, preserving authentication,
@@ -760,7 +770,10 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    covered without duplicate extension work. Completion after process exit is not an MVP claim.
 8. **Configuration seam**: memory-model selection, Forgetful instance settings, toggles, prompt
    overlays, project setup, and scope take effect; instance settings remain user-level while
-   scope persists under `.pi/forgetful/settings.json`.
+   scope persists under `.pi/forgetful/settings.json`. Setup help sends the selected CLI/MCP
+   instructions without copying credentials; declining help retains REST validation and cancellation
+   changes nothing. Real Pi reload tests use settings and skills written through the agent's write
+   tool. They prove handoff and activation, not a live model's installation judgement.
 9. **Failure seam**: timeout, malformed output, and service failure do not block Pi.
 10. **Privacy seam**: the initial pending marker and each useful, bounded, untrusted reviewed
     result are hidden from the UI but persisted by Pi. Pending, retrieval, arriving, empty, and

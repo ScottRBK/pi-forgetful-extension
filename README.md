@@ -51,9 +51,9 @@ To install the latest source from GitHub instead:
 pi install git:github.com/ScottRBK/pi-forgetful-extension
 ```
 
-The extension does not start Forgetful or change its API. If you do not have a running endpoint,
-ask your coding agent to read the [Forgetful setup skill][forgetful-setup-skill], or follow the
-[Docker deployment instructions][forgetful-docker] manually.
+The extension does not start Forgetful or change its API. Run `/forgetful setup` to ask your
+agent for help creating an instance and configuring CLI or native Pi MCP access with skills.
+You can also follow the [Docker deployment instructions][forgetful-docker] manually.
 
 ## Getting Started
 
@@ -66,10 +66,23 @@ Inside Pi, connect to Forgetful:
 /forgetful setup
 ```
 
-The wizard asks for the REST endpoint and whether it needs a bearer token. Pi has no masked input,
-so bearer authentication asks for an environment variable name and never asks for or stores the
-token itself. The wizard validates the endpoint and authentication with `GET /projects` before
-saving anything.
+The wizard first offers help creating a new Forgetful instance. If you already have one, it
+instead offers help configuring access for the main agent. Choose **CLI + skills** or
+**MCP + skills** to start an agent conversation using Forgetful's corresponding setup skill.
+The agent is asked to reuse existing installations, install a missing CLI, install the appropriate
+skills, and add a native Pi MCP connection when you choose MCP. The extension itself does not
+install packages or change independent client settings.
+
+The setup prompt also asks the agent to validate and save the background REST connection directly,
+preserving unrelated settings. You do not need to run `/forgetful setup` again. After the agent
+finishes, run `/reload` to load the new settings and skills. New environment variables may require
+restarting Pi instead. The agent should verify access and report any unfinished steps.
+
+Decline both help offers to use the existing connection form. It asks for the REST endpoint and
+whether it needs a bearer token. Pi has no masked input, so bearer authentication asks for an
+environment variable name and never asks for or stores the token itself. The form validates the
+endpoint and authentication with `GET /projects` before saving anything. Cancelling a wizard prompt
+does not send an agent request or change settings.
 
 Then choose an authenticated memory model:
 
@@ -133,10 +146,15 @@ retain their private readers and writers, including `read_forgetful`. Human setu
 scope, capture, model and `/forgetful project init` controls remain available.
 
 For deliberate searches, record inspection, repository encoding or agreed conflict resolution,
-configure Forgetful MCP or CLI access and its skills independently. The extension no longer bundles
-manual memory skills or provides `/forgetful encode`, explicit recall, knowledge read/write, agent
-project-init or resolver tools. A wizard to configure independent access is future work and is not
-implemented here. `/forgetful setup` configures only this extension's warm REST connection.
+configure Forgetful MCP or CLI access and its skills. `/forgetful setup` can hand this work to your
+main agent using the upstream [MCP setup skill][forgetful-setup-skill] or
+[CLI setup skill][forgetful-cli-setup-skill]. The extension does not bundle manual memory skills or
+provide `/forgetful encode`, explicit recall, knowledge read/write, agent project-init or resolver
+tools.
+
+Background memory still needs a running HTTP REST service, even when the main agent uses local CLI
+or stdio MCP. The two connections are configured separately; setup does not require them to use the
+same instance.
 
 `/forgetful off`, scope and capture controls affect this extension only. They do not disable,
 restrict or configure independent MCP/CLI clients; those clients use their own permissions,
@@ -152,7 +170,7 @@ capture destination. Use `/forgetful project init` to create or link its project
 
 | Command | Effect |
 | --- | --- |
-| `/forgetful setup` | Connect to and validate a Forgetful REST endpoint. |
+| `/forgetful setup` | Get agent-led CLI/MCP help, or configure the REST connection manually. |
 | `/forgetful project init` | Create or link this repository's Forgetful project. |
 | `/forgetful status` | Show effective settings and memory status. |
 | `/forgetful on` / `/forgetful off` | Enable or disable this extension’s memory processing. |
@@ -596,4 +614,6 @@ See the [detailed design](docs/design.md) for the reviewed contracts, lifecycle,
 accepted trade-offs.
 
 [forgetful-setup-skill]: https://github.com/ScottRBK/forgetful/tree/main/skills/forgetful-mcp-setup
+[forgetful-cli-setup-skill]:
+  https://github.com/ScottRBK/forgetful/tree/main/skills/forgetful-cli-setup
 [forgetful-docker]: https://github.com/ScottRBK/forgetful#option-3-docker-deployment-productionscale

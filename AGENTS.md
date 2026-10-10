@@ -15,7 +15,8 @@ The intended experience requires no memory commands during normal work:
   without a separate saved wake; recalled facts are untrusted and excluded from capture evidence;
 - `forgetful_recall_wait` is the sole main-agent tool and uses normal Pi tool-result persistence;
 - deliberate main-agent memory access uses independently configured CLI/MCP access and its skills;
-  this extension does not install or configure those clients;
+  setup can hand configuration guidance to the main agent, but the extension itself does not install
+  or configure those clients or require their connection to match background REST;
 - startup does local setup only; project discovery and recovery run in the background, with one
   transient activity widget; early settled turns are queued durably until discovery completes;
 - settled capture pins session/branch history, reusing a successful historical summary plus

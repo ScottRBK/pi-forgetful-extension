@@ -377,9 +377,90 @@ async function harness(
   };
 }
 
+for (const newInstance of [true, false]) {
+for (const route of ["CLI", "MCP"]) {
+test(`setup hands ${newInstance ? "new-instance" : "existing-instance"} ${route} help to the agent`,
+  async () => {
+  // Arrange: connection secrets exist, but help must not copy them into the conversation.
+  const fixture = await harness({
+    userSettings: {
+      token: "saved-setup-secret",
+      base_url: "https://user:endpoint-secret@memory.example/api/v1?key=query-secret",
+    },
+    uiSelections: [
+      ...(newInstance ? ["Yes, help me set up a new instance"] : [
+        "No, I already have an instance", "Yes, help me configure Pi access",
+      ]),
+      `${route} + skills`,
+    ],
+    createClient: () => { throw new Error("Help must not connect before the agent sets it up"); },
+  });
+  try {
+    const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
+    const before = await readFile(settingsPath, "utf8");
+    fixture.ctx.ui.input = async () => assert.fail("Help must precede the REST form");
+
+    // Act: use the public command, not the prompt builder.
+    await fixture.command("setup");
+
+    // Assert: one agent handoff, with no settings write or secret disclosure by the wizard.
+    assert.equal(fixture.sentUserMessages.length, 1);
+    const { content, options } = fixture.sentUserMessages[0]!;
+    assert.equal(typeof content, "string");
+    const prompt = String(content);
+    const instanceDescription = newInstance
+      ? "new Forgetful instance" : "existing Forgetful instance";
+    assert.ok(prompt.includes(instanceDescription));
+    assert.ok(prompt.includes(
+      "https://raw.githubusercontent.com/ScottRBK/forgetful/main/skills/" +
+      `forgetful-${route.toLowerCase()}` +
+      "-setup/SKILL.md",
+    ));
+    if (route === "CLI") {
+      assert.match(prompt, /CLI.*installed.*install.*missing/i);
+      assert.doesNotMatch(prompt, /pi mcp add/);
+    } else {
+      assert.match(prompt, /native Pi MCP/);
+      assert.match(prompt, /pi mcp add/);
+      assert.match(prompt, /pi mcp list/);
+    }
+    assert.match(prompt, /do not require.*same instance/i);
+    assert.match(prompt, /supply.chain audit/i);
+    assert.match(prompt, /installed Pi documentation/);
+    assert.match(prompt, /skills\/README\.md/);
+    assert.doesNotMatch(prompt, /earendil-works\/pi\/blob\/main/);
+    assert.match(prompt, /HTTP/);
+    assert.match(prompt, /GET .*\/projects/);
+    assert.match(prompt, /base_url/);
+    assert.match(prompt, /token_env/);
+    assert.match(prompt, /legacy inline token only after/);
+    assert.match(prompt, /durably available to Pi and validated/);
+    assert.match(prompt, /leave authentication settings untouched/i);
+    assert.match(prompt, /preserve unrelated\s+settings/i);
+    assert.match(prompt, /malformed/i);
+    assert.match(prompt, /\/reload/);
+    assert.ok(prompt.includes(JSON.stringify(settingsPath)));
+    assert.ok(prompt.includes(JSON.stringify(fixture.agentDir)));
+    assert.doesNotMatch(prompt, /saved-setup-secret|endpoint-secret|query-secret/);
+    assert.deepEqual(options, { deliverAs: "followUp" });
+    assert.equal(await readFile(settingsPath, "utf8"), before);
+    assert.deepEqual(fixture.sentMessages, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+}
+}
+
+const DECLINE_SETUP_HELP = [
+  "No, I already have an instance", "No, continue with REST connection",
+];
+
 test("setup validates the real endpoint before saving user connection settings", async () => {
   const endpoint = "http://localhost:8020/api/v1";
   const fixture = await harness({
+    uiSelections: [...DECLINE_SETUP_HELP, "Unauthenticated"],
     userSettings: {
       model: undefined,
       custom_setting: "keep",
@@ -405,7 +486,6 @@ test("setup validates the real endpoint before saving user connection settings",
   });
   try {
     fixture.ctx.ui.input = async () => "";
-    fixture.ctx.ui.select = async () => "Unauthenticated";
 
     await fixture.command("setup");
 
@@ -444,7 +524,7 @@ test("setup keeps the current endpoint when its input is left blank", async () =
   const fixture = await harness({
     userSettings: { base_url: endpoint },
     uiInputs: [""],
-    uiSelections: ["Unauthenticated"],
+    uiSelections: [...DECLINE_SETUP_HELP, "Unauthenticated"],
     createClient: (options) => {
       validatedEndpoint = options.baseUrl;
       return new ApiForgetfulClient({
@@ -479,6 +559,7 @@ test("setup keeps the current endpoint when its input is left blank", async () =
 test("setup never displays credentials from a saved endpoint", async () => {
   const password = "saved-password";
   const fixture = await harness({
+    uiSelections: [...DECLINE_SETUP_HELP],
     userSettings: {
       base_url: `https://user:${password}@memory.example/api/v1`,
     },
@@ -505,6 +586,7 @@ test("setup sends a bearer token from the selected environment variable", async 
   const token = "setup-bearer-secret";
   process.env[tokenEnv] = token;
   const fixture = await harness({
+    uiSelections: [...DECLINE_SETUP_HELP, "Bearer token from environment variable"],
     createClient: (options) =>
       new ApiForgetfulClient({
         ...options,
@@ -524,8 +606,6 @@ test("setup sends a bearer token from the selected environment variable", async 
   try {
     fixture.ctx.ui.input = async (title: string) =>
       title.includes("environment") ? tokenEnv : "";
-    fixture.ctx.ui.select = async () =>
-      "Bearer token from environment variable";
 
     await fixture.command("setup");
 
@@ -548,15 +628,15 @@ test("setup sends a bearer token from the selected environment variable", async 
 });
 
 test("setup rejects an unsafe token environment name without echoing it", async () => {
-  const fixture = await harness();
+  const fixture = await harness({
+    uiSelections: [...DECLINE_SETUP_HELP, "Bearer token from environment variable"],
+  });
   try {
     const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
     const before = await readFile(settingsPath, "utf8");
     const pastedToken = "raw token with spaces";
     fixture.ctx.ui.input = async (title: string) =>
       title.includes("environment") ? pastedToken : "";
-    fixture.ctx.ui.select = async () =>
-      "Bearer token from environment variable";
 
     await fixture.command("setup");
 
@@ -572,11 +652,16 @@ test("setup rejects an unsafe token environment name without echoing it", async 
 
 test("setup cancellation at each prompt leaves settings unchanged", async () => {
   const cases = [
-    { inputs: [undefined], selections: [] },
-    { inputs: ["https://memory.example/api/v1"], selections: [undefined] },
+    { inputs: [], selections: [undefined] },
+    { inputs: [], selections: ["No, I already have an instance", undefined] },
+    { inputs: [], selections: ["Yes, help me set up a new instance", undefined] },
+    { inputs: [], selections: ["No, I already have an instance",
+      "Yes, help me configure Pi access", undefined] },
+    { inputs: [undefined], selections: [...DECLINE_SETUP_HELP] },
+    { inputs: ["https://memory.example/api/v1"], selections: [...DECLINE_SETUP_HELP, undefined] },
     {
       inputs: ["https://memory.example/api/v1", undefined],
-      selections: ["Bearer token from environment variable"],
+      selections: [...DECLINE_SETUP_HELP, "Bearer token from environment variable"],
     },
   ];
   for (const value of cases) {
@@ -594,6 +679,10 @@ test("setup cancellation at each prompt leaves settings unchanged", async () => 
       await fixture.command("setup");
 
       assert.equal(await readFile(settingsPath, "utf8"), before);
+      assert.deepEqual(fixture.sentUserMessages, []);
+      assert.match(fixture.notifications.join("\n"), /setup cancelled/);
+      assert.deepEqual(value.inputs, [], "Cancellation must occur at the intended prompt");
+      assert.deepEqual(value.selections, []);
     } finally {
       await fixture.cleanup();
     }
@@ -603,7 +692,7 @@ test("setup cancellation at each prompt leaves settings unchanged", async () => 
 test("setup failure keeps settings and shows endpoint installation guidance", async () => {
   const fixture = await harness({
     uiInputs: ["http://remote.example/api/v1"],
-    uiSelections: ["Unauthenticated"],
+    uiSelections: [...DECLINE_SETUP_HELP, "Unauthenticated"],
   });
   try {
     const settingsPath = join(fixture.agentDir, "forgetful", "settings.json");
@@ -630,7 +719,7 @@ test("setup failure keeps settings and shows endpoint installation guidance", as
 test("setup does not replace malformed user settings", async () => {
   const fixture = await harness({
     uiInputs: [""],
-    uiSelections: ["Unauthenticated"],
+    uiSelections: [...DECLINE_SETUP_HELP, "Unauthenticated"],
     createClient: (options) =>
       new ApiForgetfulClient({
         ...options,
@@ -672,7 +761,7 @@ test("setup invalidates an in-flight runtime built from old settings", async () 
     workContextGate,
     onWorkContext: reportWorkContextStarted,
     uiInputs: [""],
-    uiSelections: ["Unauthenticated"],
+    uiSelections: [...DECLINE_SETUP_HELP, "Unauthenticated"],
     createClient: (options) =>
       new ApiForgetfulClient({
         ...options,

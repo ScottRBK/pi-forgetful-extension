@@ -68,6 +68,7 @@ import {
   type RecallResult,
 } from "./recall.ts";
 import { DEFAULT_MEMORY_POLICIES } from "./policies.ts";
+import { buildSetupPrompt, promptSetupHelp } from "./setup.ts";
 
 const FORGETFUL_SETUP_GUIDANCE = [
   "Need a running Forgetful endpoint?",
@@ -3183,6 +3184,17 @@ export function createForgetfulExtension(
         trusted: ctx.isProjectTrusted(),
         ...options.config,
       });
+      const help = await promptSetupHelp(ctx);
+      if (help === undefined) {
+        notify(ctx, "Forgetful setup cancelled.");
+        return;
+      }
+      if (help !== "manual") {
+        pi.sendUserMessage(buildSetupPrompt(help, agentDir, current.paths.userSettings), {
+          deliverAs: "followUp",
+        });
+        return;
+      }
       const baseUrl = await promptSetupEndpoint(ctx, current);
       if (!baseUrl) return;
       const authentication = await promptSetupAuthentication(ctx);
