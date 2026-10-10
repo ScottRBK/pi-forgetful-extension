@@ -57,6 +57,9 @@ See [the approved design](docs/design.md).
 
 ## High-level architecture
 
+Before changing code or reasoning about this repository's architecture, read the
+[Mycelium class diagram](docs/assets/mycelium_class_diagram.md).
+
 Pi lifecycle code remains separate from memory policy and transport details. The MVP uses a warm
 HTTP REST service behind transport-neutral memory and knowledge ports. Background recall/capture
 does not use MCP. The main agent's independent CLI/MCP integration is outside this extension.
