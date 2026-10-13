@@ -52,9 +52,7 @@ const operation = Type.Union([
   Type.Literal("list_files"),
   Type.Literal("get_file"),
 ], {
-  description: "Read operation. Required inputs: search_memories=query; get_memory=memory_id; " +
-    "get_entity/get_entity_memories/get_relationships=entity_id; get_document=document_id; " +
-    "get_code_artifact=code_artifact_id; get_file=file_id.",
+  description: "Read operation; each field names the operations requiring it.",
 });
 const writeOperation = Type.Union([
   Type.Literal("create_memory"),
@@ -84,16 +82,17 @@ const MAX_LIST_RESULT_CHARS = 16_000;
 export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
   operation,
   repo_name: leftoverSearchField(
-    "Exact owner/repo filter for list_projects. Another repository's project metadata " +
-      "may verify a write destination; this does not widen knowledge-read scope.",
+    "Exact owner/repo filter for list_projects; does not widen read scope.",
   ),
-  query: leftoverSearchField("Required for search_memories and search_entities."),
+  query: leftoverSearchField(
+    "Required: semantic topic for search_memories; name/alias substring for search_entities.",
+  ),
   query_context: leftoverSearchField(
-    "Required for search_memories; explain why this query is being made.",
+    "Required for search_memories: task intent for optional reranking, not retrieval; " +
+      "put search terms in query.",
   ),
   project_id: leftoverSearchField(
-    "Optional project filter for list/search operations; " +
-      "project scope permits the current project.",
+    "Exact integer project ID for list/search; project scope permits only the current project.",
   ),
   memory_id: leftoverSearchField("Required for get_memory."),
   entity_id: leftoverSearchField(
@@ -103,21 +102,20 @@ export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
   code_artifact_id: leftoverSearchField("Required for get_code_artifact."),
   file_id: leftoverSearchField("Required for get_file."),
   k: leftoverSearchField(
-    "Primary memories for search_memories; defaults to 3 and is bounded from 1 to 20.",
+    "Primary search_memories results: 1-20, default 3.",
   ),
   max_links_per_primary: leftoverSearchField(
-    "Linked memories per primary search_memories result; integer from 0 to 10, defaults to 5.",
+    "Links per primary search_memories result: 0-10, default 5.",
   ),
   limit: Type.Optional(Type.Integer({
     minimum: 1, maximum: 5_000,
-    description: "Page size: list_projects, entity-memory/relationship, document, " +
-      "code-artifact and " +
-      "file lists use a maximum of 100; document/code/file content uses a maximum of 5000; " +
-      "search_memories uses k instead.",
+    description: "Page size: lists/search_entities max 100 records; document/code/file " +
+      "content max 5000 characters. search_memories uses k.",
   })),
   offset: Type.Optional(Type.Integer({
     minimum: 0, maximum: 10_000_000,
-    description: "Offset for list operations and readable content pages.",
+    description: "Lists: item offset (use returned next_offset); text: character offset. " +
+      "No search_memories pagination.",
   })),
   include_links: leftoverSearchField(
     "Include linked memories for search_memories; defaults to true.",

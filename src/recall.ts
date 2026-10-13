@@ -56,7 +56,8 @@ const RECALL_PLAN_PARAMETERS = Type.Object({
   search: Type.Boolean(),
   queries: Type.Array(Type.String({ minLength: 1 }), { maxItems: MAX_SEARCHES }),
   queryIntent: Type.String(),
-  entities: Type.Array(Type.String({ minLength: 1 }), { maxItems: MAX_ENTITIES }),
+  entities: Type.Array(Type.String({ minLength: 1 }), { maxItems: MAX_ENTITIES,
+    description: "Entity names/aliases for substring matching, not topics." }),
   repositorySpecific: Type.Optional(Type.Boolean()),
   projectId: Type.Optional(Type.Integer({ minimum: 1 })),
 }, { additionalProperties: false });

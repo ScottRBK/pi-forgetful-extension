@@ -80,7 +80,8 @@ export const CAPTURE_LINK_PARAMETERS = Type.Object({
       codeArtifactIds: Type.Array(Type.Unknown()),
       entityIds: Type.Array(Type.Unknown()),
       reason: Type.Optional(Type.String()),
-    })),
+    }, { description: "documentIds/codeArtifactIds replace attachment lists; [] clears them. " +
+      "entityIds adds links. Omit preservation to leave these unchanged." })),
   }), { maxItems: 3 }),
 });
 

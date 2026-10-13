@@ -348,7 +348,7 @@ const MAX_RICH_RELATIONSHIPS = 12;
 const SUBMIT_CAPTURE_CANDIDATES = "submit_capture_candidates";
 const CAPTURE_CANDIDATES_DESCRIPTION =
   "Submit candidate memories supported by one to eight eligible evidence IDs. " +
-  "Use [] when nothing durable changed. Stored fields are validated by Forgetful.";
+  "Use [] when nothing durable changed. Keep resource keys stable.";
 // Private envelopes and evidence stay validated. Stored payload fields belong to Forgetful.
 const CAPTURE_RESOURCE_PROVENANCE = {
   key: Type.Optional(Type.Any()),
@@ -357,42 +357,49 @@ const CAPTURE_RESOURCE_PROVENANCE = {
   input: Type.Optional(Type.Any()),
 };
 const CAPTURE_ENTITY_RESOURCE = Type.Object({ ...CAPTURE_RESOURCE_PROVENANCE,
-  input: Type.Optional(Type.Any({ description: 'Example: {"name":"API",' +
-    '"entity_type":"System","notes":"Service component","tags":[],"aka":[]}. ' +
-    'Optional custom_type, project_ids and source provenance. Forgetful validates fields.' })),
+  input: Type.Optional(Type.Any({ description: 'Required "name" and "entity_type": ' +
+    'Organization, Individual, Team, Device, System, Other. Other requires "custom_type".' })),
 });
 const CAPTURE_DOCUMENT_RESOURCE = Type.Object({ ...CAPTURE_RESOURCE_PROVENANCE,
-  input: Type.Optional(Type.Any({ description: 'Example: {"title":"Design",' +
-    '"description":"Storage decision","content":"Use SQLite.","tags":[]}. ' +
-    'Optional document_type, project_id and source provenance. Forgetful validates fields.' })),
+  input: Type.Optional(Type.Any({ description: 'Required nonblank "title", "description", ' +
+    '"content" strings; use for long-form text.' })),
 });
 const CAPTURE_CODE_RESOURCE = Type.Object({ ...CAPTURE_RESOURCE_PROVENANCE,
-  input: Type.Optional(Type.Any({ description: 'Example: {"title":"Example",' +
-    '"description":"Usage","code":"const value = 1;","language":"javascript","tags":[]}. ' +
-    'Optional project_id and source provenance. Forgetful validates fields.' })),
+  input: Type.Optional(Type.Any({ description: 'Required nonblank "title", "description", ' +
+    '"code", "language" strings; use full language names.' })),
 });
 const CAPTURE_RELATIONSHIP_RESOURCE = Type.Object({
   ...CAPTURE_RESOURCE_PROVENANCE,
-  input: Type.Optional(Type.Any({ description: 'Example: {"relationship_type":"uses",' +
-    '"strength":0.8}. Select endpoint keys in ' +
-    'sourceEntityKey and targetEntityKey. Forgetful validates fields.' })),
+  input: Type.Optional(Type.Any({ description: 'Required "relationship_type"; ' +
+    'sourceEntityKey/targetEntityKey must refer to different entities. ' +
+    'Optional "strength" and "confidence": 0-1.' })),
   sourceEntityKey: Type.Optional(Type.Any()),
   targetEntityKey: Type.Optional(Type.Any()),
 });
 const CAPTURE_CANDIDATE = Type.Object({
   id: Type.Optional(Type.Any()),
-  title: Type.Optional(Type.Any()), content: Type.Optional(Type.Any()),
-  context: Type.Optional(Type.Any()), keywords: Type.Optional(Type.Any()),
-  tags: Type.Optional(Type.Any()),
+  title: Type.Optional(Type.Any({ description: "Required string: concise title." })),
+  content: Type.Optional(Type.Any({ description: "Required string: one self-contained concept." })),
+  context: Type.Optional(Type.Any({
+    description: "Required string: why this matters and when it applies.",
+  })),
+  keywords: Type.Optional(Type.Any({
+    description: "Required string array: search terms; [] allowed.",
+  })),
+  tags: Type.Optional(Type.Any({ description: "Required string array: categories; [] allowed." })),
   importance: Type.Optional(Type.Any({
-    description: "Importance is a whole-number score from 1 to 10, not a 0-1 probability. " +
-      "Use 7 for useful knowledge, or omit to use Forgetful's default of 7.",
+    description: "Whole-number score 1-10, not a 0-1 probability; omit for default 7.",
   })),
   sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 8 }),
   evidenceType: Type.Optional(StringEnum(
     ["userDecision", "verifiedToolChange", "observation"] as const)),
-  destinationProjectId: Type.Optional(Type.Any()),
-  destinationProjectName: Type.Optional(Type.Any()),
+  destinationProjectId: Type.Optional(Type.Any({
+    description: "Existing integer project ID; overrides destinationProjectName.",
+  })),
+  destinationProjectName: Type.Optional(Type.Any({
+    description: "Exact unique project name (case-sensitive); used only without " +
+      "destinationProjectId. Omit both for current project.",
+  })),
   destinationRationale: Type.Optional(Type.Any()),
   sourceFiles: Type.Optional(Type.Any()), sourceRepo: Type.Optional(Type.Any()),
   sourceUrl: Type.Optional(Type.Any()), encodingVersion: Type.Optional(Type.Any()),
@@ -2667,7 +2674,8 @@ export class CaptureService {
       input: { candidate, outcome, ...captureWorkMetadata(current.snapshot) },
       conversation: captureConversation(current.snapshot),
       submission: { name: "submit_capture_correction", parameters, validate,
-        description: "Correct rejected payload fields while retaining completed receipts." },
+        description: "Resubmit the complete corrected candidate, retaining unchanged fields " +
+          "and resource keys; completed receipts are kept." },
     });
     const corrected = validate(response);
     current = await this.queue.checkpoint(current.id, {
