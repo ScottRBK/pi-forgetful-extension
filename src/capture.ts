@@ -383,7 +383,11 @@ const CAPTURE_CANDIDATE = Type.Object({
   id: Type.Optional(Type.Any()),
   title: Type.Optional(Type.Any()), content: Type.Optional(Type.Any()),
   context: Type.Optional(Type.Any()), keywords: Type.Optional(Type.Any()),
-  tags: Type.Optional(Type.Any()), importance: Type.Optional(Type.Any()),
+  tags: Type.Optional(Type.Any()),
+  importance: Type.Optional(Type.Any({
+    description: "Importance is a whole-number score from 1 to 10, not a 0-1 probability. " +
+      "Use 7 for useful knowledge, or omit to use Forgetful's default of 7.",
+  })),
   sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 8 }),
   evidenceType: Type.Optional(StringEnum(
     ["userDecision", "verifiedToolChange", "observation"] as const)),
