@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { CaptureService } from "../src/capture.ts";
-import { ApiForgetfulClient } from "../src/http.ts";
+import { ApiForgetfulClient, ForgetfulHttpError } from "../src/http.ts";
 import type {
   CaptureSnapshot,
   CodeArtifactInput,
@@ -141,8 +141,9 @@ function snapshot(): CaptureSnapshot {
   };
 }
 
-test("capture file correlates failed write and retry despite sink errors", async (t) => {
-  // Arrange: a transient server write error must preserve the job and its accepted candidate.
+test("capture file correlates rejected write and field correction despite sink errors",
+  async (t) => {
+  // Arrange: a definite server rejection preserves the candidate for field correction.
   const directory = await mkdtemp(join(tmpdir(), "capture-retry-log-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   class ThrowingLogger extends FileLogger {
@@ -157,15 +158,18 @@ test("capture file correlates failed write and retry despite sink errors", async
   class UnavailableClient extends FakeClient {
     calls = 0;
     override async create(input: MemoryInput): Promise<{ id: number }> {
-      if (++this.calls === 1) throw new Error("Write unavailable; password=private-write-secret");
+      if (++this.calls === 1) throw new ForgetfulHttpError(
+        'HTTP 422: {"detail":"title rejected; password=private-write-secret"}', 422);
       return super.create(input);
     }
   }
   const client = new UnavailableClient();
-  const model = new FakeModel({ candidates: [{ id: "retry-candidate", title: "SQLite locally",
+  const candidate = { id: "retry-candidate", title: "Rejected title",
     content: "Use SQLite for development", context: "Database decision", keywords: [], tags: [],
-    sourceEntryIds: ["user-1"] }] }, { action: "create", reason: "Novel SQLite decision" },
-    { action: "retry", reason: "Retry the unavailable write." });
+    sourceEntryIds: ["user-1"] };
+  const model = new FakeModel({ candidates: [candidate] },
+    { action: "create", reason: "Novel SQLite decision" },
+    { candidate: { ...candidate, title: "SQLite locally" } });
   const service = new CaptureService({ queue, client, model, logger, instanceId: "instance-a" });
 
   // Act.
@@ -185,10 +189,12 @@ test("capture file correlates failed write and retry despite sink errors", async
   const retry = events.find((entry) => entry.event === "capture.retry");
   assert.equal(retry.data.attempt, 2);
   assert.equal(events.at(-1).event, "capture.completed");
-  assert.match(text, /Write unavailable/);
+  assert.match(text, /HTTP 422/);
+  assert.equal(client.created[0]?.title, "SQLite locally");
+  assert.match(JSON.stringify(model.requests[2]?.input), /title rejected/);
   assert.doesNotMatch(text, /private-write-secret/);
   const info = events.filter((entry) => entry.level === "info");
-  assert.doesNotMatch(JSON.stringify(info), /Write unavailable|SQLite|Implemented the migration/);
+  assert.doesNotMatch(JSON.stringify(info), /HTTP 422|SQLite|Implemented the migration/);
 });
 
 test("large rejected candidate keeps reason, evidence and bounded raw details", async (t) => {
@@ -214,7 +220,7 @@ test("large rejected candidate keeps reason, evidence and bounded raw details", 
   const rejected = lines.map((line) => JSON.parse(line))
     .find((entry) => entry.event === "capture.candidate_rejected");
   assert.equal(rejected.data?.jobId, queued.jobId);
-  assert.equal(rejected.data.reason, "content is missing, empty, or longer than 2000 characters");
+  assert.equal(rejected.data.reason, "assistant messages are not eligible evidence");
   assert.equal(rejected.data.entries[0].role, "assistant");
   assert.equal(rejected.data.candidate.truncated, true);
   assert.match(rejected.data.candidate.preview, /Oversized title/);
@@ -302,8 +308,8 @@ test("CaptureService gives Pi the complete persisted evidence and capture contex
   assert.match(String(contexts[0]?.systemPrompt), new RegExp(`${policy.slice(-100)}$`));
 });
 
-test("tool evidence correction explains observation as well as verified changes", async (t) => {
-  // Arrange: a failed read is an observation, not a user decision or successful change.
+test("eligible failed tool evidence is accepted without role-class correction", async (t) => {
+  // Arrange: the model classifies an eligible failed read as userDecision.
   const directory = await mkdtemp(join(tmpdir(), "capture-observation-feedback-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
@@ -332,10 +338,10 @@ test("tool evidence correction explains observation as well as verified changes"
   const queued = await service.enqueue(input);
   await service.checkpoint();
 
-  // Assert: actionable correction reaches the provider, and the permitted observation is accepted.
-  assert.equal(contexts.length, 2);
-  const feedback = contexts[1]!.messages.find(message => message.role === "toolResult");
-  assert.match(JSON.stringify(feedback), /verifiedToolChange or observation/);
+  // Assert: evidence eligibility is retained without requiring a matching role classification.
+  assert.equal(contexts.length, 1);
+  const job = await queue.getJob(queued.jobId);
+  assert.equal((job?.candidateOutcomes["read-failure"] as { stage: string }).stage, "observed");
   assert.equal((await queue.getJob(queued.jobId))?.status, "complete");
 });
 
@@ -426,7 +432,7 @@ class FakeClient implements ForgetfulClient {
   async supersede(oldId: number, replacementId: number): Promise<void> {
     if (this.failSupersedeCount > 0) {
       this.failSupersedeCount -= 1;
-      throw new Error("temporary obsolescence failure");
+      throw new ForgetfulHttpError("temporary obsolescence failure", 422);
     }
     this.superseded.push({ oldId, replacementId });
   }
@@ -566,9 +572,9 @@ test("capture candidate submission retries through the durable checkpoint flow",
     context.tools?.[0]?.name === "submit_capture_candidates");
   const candidateTool = captureContexts[0]?.tools?.[0];
   assert.equal(candidateTool?.name, "submit_capture_candidates");
-  assert.match(candidateTool?.description ?? "", /when no durable.*candidates.*\[\]/i);
-  assert.match(candidateTool?.description ?? "", /every candidate must include/i);
-  assert.match(candidateTool?.description ?? "", /never cite assistant/i);
+  assert.match(candidateTool?.description ?? "", /\[\].*nothing durable/i);
+  assert.match(candidateTool?.description ?? "", /eligible evidence IDs/i);
+  assert.match(contexts[0]?.systemPrompt ?? "", /Assistant text.*cannot serve as evidence/i);
   const candidateParameters = candidateTool?.parameters as {
     properties?: {
       candidates?: {
@@ -587,18 +593,18 @@ test("capture candidate submission retries through the durable checkpoint flow",
     Object.keys(candidateProperties).slice(0, 4),
     ["id", "title", "content", "context"],
   );
-  for (const name of ["id", "title", "content", "context", "keywords", "tags"]) {
-    assert.ok(candidateProperties[name]?.description, `${name} must describe its meaning`);
+  const required = (candidateParameters.properties?.candidates?.items as any).required;
+  assert.deepEqual(required, ["sourceEntryIds"]);
+  for (const name of ["title", "content", "context", "keywords", "tags"]) {
+    assert.equal((candidateProperties[name] as any)?.maxLength, undefined);
   }
   assert.deepEqual(candidateProperties.evidenceType?.enum, [
     "userDecision",
     "verifiedToolChange",
     "observation",
   ]);
-  assert.match(candidateProperties.sourceEntryIds?.description ?? "", /never.*assistant/i);
-  assert.match(candidateProperties.evidenceType?.description ?? "", /userDecision.*user/i);
-  assert.match(candidateProperties.evidenceType?.description ?? "", /verifiedToolChange.*tool/i);
-  assert.match(candidateProperties.evidenceType?.description ?? "", /observation.*source/i);
+  assert.doesNotMatch(candidateProperties.evidenceType?.description ?? "",
+    /user entries only|successful named tool/i);
   assert.equal(candidateProperties.entities?.items?.type, "object");
   const feedback = captureContexts[1]?.messages.at(-1) as Record<string, any>;
   assert.equal(feedback.role, "toolResult");
@@ -650,7 +656,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
                 context: "The user adopted the database decision.",
                 keywords: ["sqlite"],
                 tags: ["decision"],
-                sourceEntryIds: ["user-1"],
+                sourceEntryIds: ["unknown-entry"],
                 evidenceType: "verifiedToolChange",
               },
               {
@@ -707,7 +713,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
   assert.equal(feedback?.role, "toolResult");
   assert.equal(feedback?.toolCallId, "capture-invalid-evidence");
   assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /verified tool changes require/i);
+  assert.match(feedback?.content?.[0]?.text ?? "", /references unknown evidence/i);
   assert.match(feedback?.content?.[0]?.text ?? "", /assistant messages are not eligible/i);
   assert.equal(client.created.length, 1);
   const diagnostics = await service.diagnostics();
@@ -720,10 +726,13 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
 });
 
 test("capture corrects overlong stored fields and preserves service-sized resources", async (t) => {
-  // Arrange: the first document exceeds Forgetful's limit; the correction stays within its schemas.
+  // Arrange: Forgetful rejects overlong notes; corrected fields preserve the accepted memory.
   const directory = await mkdtemp(join(tmpdir(), "capture-resource-limits-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
+  const entityRequests: EntityInput[] = [];
+  const entityError = 'HTTP 422: {"detail":[{"loc":["body","notes"],' +
+    '"msg":"String should have at most 4000 characters"}]}';
   const entities: EntityInput[] = [];
   const documents: DocumentInput[] = [];
   const codeArtifacts: CodeArtifactInput[] = [];
@@ -738,6 +747,9 @@ test("capture corrects overlong stored fields and preserves service-sized resour
   const knowledge: Partial<KnowledgeClient> = {
     searchEntities: async () => [],
     createEntity: async (input) => {
+      entityRequests.push(input);
+      if ((input.notes?.length ?? 0) > 4000)
+        throw new ForgetfulHttpError(entityError, 422);
       entities.push(input);
       return { ...input, id: 201 };
     },
@@ -830,26 +842,19 @@ test("capture corrects overlong stored fields and preserves service-sized resour
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
-        const candidate = captureAttempts === 1
-          ? {
-              ...baseCandidate,
-              entities: [{
-                key: "system",
-                sourceEntryIds: ["user-1"],
-                input: {
-                  name: "System",
-                  entity_type: "System",
-                  notes: "z".repeat(4_001),
-                  tags: [],
-                  aka: [],
-                },
-              }],
-            }
-          : correctedCandidate;
+        const candidate = { ...correctedCandidate, entities: [{
+          ...correctedCandidate.entities[0], input: {
+            ...correctedCandidate.entities[0]!.input, notes: "z".repeat(4_001),
+          },
+        }] };
         return providerTool(`capture-resource-${captureAttempts}`, "submit_capture_candidates", {
           candidates: [candidate],
         });
       }
+      if (context.tools?.[0]?.name === "submit_capture_correction")
+        return providerTool("correction-resource", "submit_capture_correction", {
+          candidate: correctedCandidate,
+        });
       return providerTool("overlap-resource", "submit_capture_decision", {
         action: "create",
         reason: "No overlap.",
@@ -866,13 +871,21 @@ test("capture corrects overlong stored fields and preserves service-sized resour
 
   // Act.
   await service.enqueue(snapshot());
+  const first = await service.checkpoint();
+  assert.deepEqual(first.errors, [entityError]);
+  assert.equal(client.created.length, 1);
+  assert.equal(entities.length, 0);
   const result = await service.checkpoint();
 
-  // Assert.
-  assert.equal(captureAttempts, 2);
-  const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
-  assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /entities.*notes.*4000/i);
+  // Assert: server error reaches correction and accepted memory is never created again.
+  assert.equal(captureAttempts, 1);
+  const correction = contexts.find(context =>
+    context.tools?.[0]?.name === "submit_capture_correction");
+  assert.ok(correction);
+  assert.ok(JSON.stringify(decodeProviderContext(correction).input).includes("at most 4000"));
+  assert.equal(entityRequests.length, 2);
+  assert.equal(entityRequests[0]?.notes?.length, 4001);
+  assert.equal(client.created.length, 1);
   assert.deepEqual(result.errors, []);
   assert.equal(entities[0]?.notes, largeEntityNotes);
   assert.equal(documents[0]?.title, largeDocumentTitle);
@@ -884,7 +897,7 @@ test("capture corrects overlong stored fields and preserves service-sized resour
 });
 
 test("capture overlap submission retries through the durable checkpoint flow", async (t) => {
-  // Arrange: an existing overlap receives one invalid ID, then a corrected decision.
+  // Arrange: an existing overlap receives an unknown action, then a corrected decision.
   const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-overlap-submission-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
@@ -935,8 +948,8 @@ test("capture overlap submission retries through the durable checkpoint flow", a
       }
       if (overlapAttempts === 1) {
         return providerTool("decision-1", "submit_capture_decision", {
-          action: "supersede",
-          conflictingMemoryId: old.id + 1,
+          action: "overwrite",
+          conflictingMemoryId: old.id,
           oldClaim: old.content,
           newClaim: candidate.content,
           reason: "The project migrated databases.",
@@ -977,7 +990,7 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   const decisionTool = overlapContexts[0]?.tools?.[0];
   assert.equal(decisionTool?.name, "submit_capture_decision");
   assert.match(decisionTool?.description ?? "", /create.*skip.*supersede.*escalate/i);
-  assert.match(decisionTool?.description ?? "", /only.*supplied overlap/i);
+  assert.match(decisionTool?.description ?? "", /intended memory targets/i);
   const decisionParameters = decisionTool?.parameters as {
     properties?: Record<string, { description?: string; enum?: string[] }>;
   };
@@ -1006,7 +1019,7 @@ test("capture overlap submission retries through the durable checkpoint flow", a
   assert.equal(feedback?.toolCallId, "decision-1");
   assert.equal(feedback?.toolName, "submit_capture_decision");
   assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /outside the overlap search/);
+  assert.match(feedback?.content?.[0]?.text ?? "", /action|union|constant/i);
   assert.equal(client.created.length, 1);
   assert.equal(client.created[0]!.context, "The user changed the database decision.");
   assert.deepEqual(client.superseded, [{ oldId: old.id, replacementId: 100 }]);
@@ -1150,7 +1163,7 @@ test("CaptureService creates a novel user-evidenced candidate in the current pro
     model.requests.map((request) => request.purpose),
     ["capture", "overlap"],
   );
-  assert.match(model.requests[0]?.policy ?? "", /Capture policy contract/);
+  assert.match(model.requests[0]?.policy ?? "", /eligible source IDs/);
   assert.match(
     model.requests[0]?.policy ?? "",
     /Capture only durable decisions with direct evidence/,
@@ -1159,7 +1172,7 @@ test("CaptureService creates a novel user-evidenced candidate in the current pro
     (model.requests[0]?.input as { context?: { cwd?: string } }).context?.cwd,
     "/repo",
   );
-  assert.match(model.requests[1]?.policy ?? "", /Overlap policy contract/);
+  assert.match(model.requests[1]?.policy ?? "", /create.*skip.*supersede.*escalate/i);
   assert.equal(
     (await queue.listPending({ instanceId: "instance-a" })).length,
     0,
@@ -1210,10 +1223,12 @@ test("capture stores the complete semantic context without appended provenance",
       if (path.endsWith("/memories") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { context?: unknown };
         createdBodies.push(body);
+        if (typeof body.context === "string" && body.context.length > 500)
+          return new Response('context must have at most 500 characters', { status: 422 });
         return new Response(JSON.stringify({ id: 101, linked_memory_ids: [] }), { status: 201 });
       }
       if (path.endsWith("/memories/101") && init?.method === "GET") {
-        return new Response(JSON.stringify({ ...createdBodies[0], id: 101, is_obsolete: false,
+        return new Response(JSON.stringify({ ...createdBodies.at(-1), id: 101, is_obsolete: false,
           linked_memory_ids: [] }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: "unexpected request" }), {
@@ -1247,6 +1262,13 @@ test("capture stores the complete semantic context without appended provenance",
           }],
         });
       }
+      if (context.tools?.[0]?.name === "submit_capture_correction")
+        return providerTool("correct-context", "submit_capture_correction", {
+          candidate: { id: "candidate-long-context", title: "Use SQLite",
+            content: "Local development uses SQLite.", context: "x".repeat(500),
+            keywords: ["sqlite"], tags: ["decision"], sourceEntryIds: ["user-1"],
+            evidenceType: "userDecision" },
+        });
       if (context.tools?.[0]?.name === "submit_capture_links")
         return providerTool("links-context", "submit_capture_links", {
           reviews: [{ candidateId: "candidate-long-context", decisions: [] }],
@@ -1266,14 +1288,20 @@ test("capture stores the complete semantic context without appended provenance",
   });
 
   await service.enqueue(snapshot());
-  await service.checkpoint();
+  const first = await service.checkpoint();
+  assert.match(first.errors[0] ?? "", /HTTP 422: context must have at most 500 characters/);
+  const second = await service.checkpoint();
 
-  assert.equal(captureAttempts, 2);
-  const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
-  assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /context.*500 characters/i);
-  assert.equal(createdBodies.length, 1);
-  assert.equal(createdBodies[0]?.context, "x".repeat(500));
+  assert.deepEqual(second.errors, []);
+  assert.equal(captureAttempts, 1);
+  const correction = contexts.find(context =>
+    context.tools?.[0]?.name === "submit_capture_correction");
+  assert.ok(correction);
+  assert.match(JSON.stringify(decodeProviderContext(correction).input),
+    /context must have at most 500 characters/);
+  assert.equal(createdBodies.length, 2);
+  assert.equal(createdBodies[0]?.context, "x".repeat(501));
+  assert.equal(createdBodies[1]?.context, "x".repeat(500));
   assert.equal(
     (await queue.listJobs({ instanceId: "instance-a" }))[0]?.status,
     "complete",
@@ -1491,7 +1519,8 @@ test("capture stops model and network calls when live mode switches off", async 
   assert.equal(client.created.length, 0);
 });
 
-test("malformed supersession evidence never writes a replacement", async () => {
+test("supersession uses eligible candidate evidence without redundant decision evidence",
+  async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-bad-supersede-"),
   );
@@ -1539,13 +1568,13 @@ test("malformed supersession evidence never writes a replacement", async () => {
   await service.enqueue(snapshot());
   await service.checkpoint();
 
-  assert.equal(client.created.length, 0);
-  assert.equal(client.superseded.length, 0);
+  assert.equal(client.created.length, 1);
+  assert.deepEqual(client.superseded, [{ oldId: 41, replacementId: 100 }]);
   const job = (await queue.listJobs({ instanceId: "instance-a" }))[0];
   assert.equal(
     (job?.candidateOutcomes["candidate-bad-supersede"] as { stage?: string })
       ?.stage,
-    "skipped",
+    "superseded",
   );
 });
 
@@ -1707,7 +1736,7 @@ test("observe snapshots cannot write during a persisted supersession retry", asy
   assert.equal(client.superseded.length, 0);
 });
 
-test("supersede requires one selected memory and does not reinterpret partial instructions",
+test("supersede executes selected memories without reinterpreting partial instructions",
   async (t) => {
     for (const ids of [[], [41], [41, 42]]) {
       // Arrange: the model requests supersession, including when it labels the change partial.
@@ -1732,16 +1761,19 @@ test("supersede requires one selected memory and does not reinterpret partial in
 
       // Act.
       await service.enqueue(snapshot());
-      await service.checkpoint();
+      const result = await service.checkpoint();
 
-      // Assert: one target executes; invalid arity never becomes an escalation instruction.
-      assert.equal(client.created.length, ids.length === 1 ? 1 : 0);
-      assert.deepEqual(client.superseded,
-        ids.length === 1 ? [{ oldId: 41, replacementId: 100 }] : []);
+      // Assert: every selected target uses one replacement; no target is an explicit error.
+      if (!ids.length) {
+        assert.match(result.errors.join(" "), /supersession has no selected memory/);
+        assert.equal(client.created.length, 0);
+        assert.deepEqual(client.superseded, []);
+      } else {
+        assert.deepEqual(result.errors, []);
+        assert.equal(client.created.length, 1);
+        assert.deepEqual(client.superseded, ids.map(oldId => ({ oldId, replacementId: 100 })));
+      }
       assert.deepEqual(await service.pendingConflicts(), []);
-      const job = (await queue.listJobs({ instanceId: "instance-a" }))[0]!;
-      assert.equal((job.candidateOutcomes.sqlite as { stage: string }).stage,
-        ids.length === 1 ? "superseded" : "skipped");
     }
   });
 
@@ -1881,7 +1913,8 @@ test("the model explicitly escalates an already-obsolete memory", async () => {
   assert.equal(conflicts.length, 1);
 });
 
-test("the model escalates shared-project memories; resolution still enforces scope", async () => {
+test("the model escalates shared-project memories and the confirmed revision reaches the server",
+  async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-shared-project-"),
   );
@@ -1919,6 +1952,10 @@ test("the model escalates shared-project memories; resolution still enforces sco
       reason: "The shared project decision needs review.",
       sourceEntryIds: ["user-1"],
     },
+    { title: "Use SQLite", content: "The project uses SQLite.", context: "Confirmed migration.",
+      keywords: ["database"], tags: ["decision"], importance: 7, sourceEntryIds: ["user-1"],
+      entityIds: [], memoryIds: [], documentIds: [], codeArtifactIds: [], fileIds: [],
+      sourceFiles: [] },
   );
   const service = new CaptureService({
     queue,
@@ -1934,17 +1971,13 @@ test("the model escalates shared-project memories; resolution still enforces sco
   const conflict = (await service.pendingConflicts())[0];
   assert(conflict);
   assert.match(conflict.reason, /shared|project/i);
-  await assert.rejects(
-    () =>
-      service.resolveConflict(conflict.id, {
-        action: "supersede",
-        reason: "The user confirmed the migration.",
-        evidenceEntryIds: ["user-1"],
-      }),
-    /shared|project|destination/i,
-  );
-  assert.equal(client.created.length, 0);
-  assert.equal(client.superseded.length, 0);
+  const resolved = await service.resolveConflict(conflict.id, {
+    action: "supersede", reason: "The user confirmed the migration.",
+    evidenceEntryIds: ["user-1"],
+  });
+  assert.equal(resolved.status, "resolved");
+  assert.equal(client.created.length, 1);
+  assert.deepEqual(client.superseded, [{ oldId: 41, replacementId: 100 }]);
 });
 
 test("one plural conflict ID is retained as the selected memory", async () => {
@@ -2128,12 +2161,20 @@ test("invalid candidates are recorded as skipped while valid candidates continue
   );
 });
 
-test("capture diagnostics report exact extraction validation reasons", async () => {
+test("capture diagnostics distinguish evidence errors, project warnings and server rejection",
+  async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-validation-reasons-"),
   );
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
-  const client = new FakeClient();
+  class RejectingClient extends FakeClient {
+    attempted: MemoryInput[] = [];
+    override async create(input: MemoryInput): Promise<{ id: number }> {
+      this.attempted.push(input);
+      throw new ForgetfulHttpError('HTTP 422: {"detail":"title field required"}', 422);
+    }
+  }
+  const client = new RejectingClient();
   const candidate = {
     content: "A durable fact.",
     context: "A user decision.",
@@ -2143,7 +2184,6 @@ test("capture diagnostics report exact extraction validation reasons", async () 
   };
   const model = new FakeModel({
     candidates: [
-      { ...candidate, id: "missing-title" },
       {
         ...candidate,
         id: "unknown-evidence",
@@ -2156,8 +2196,9 @@ test("capture diagnostics report exact extraction validation reasons", async () 
         title: "Invalid destination",
         destinationProjectId: 0,
       },
+      { ...candidate, id: "missing-title" },
     ],
-  });
+  }, { action: "create", reason: "Durable fact; service validates stored fields." });
   const service = new CaptureService({
     queue,
     client,
@@ -2170,17 +2211,22 @@ test("capture diagnostics report exact extraction validation reasons", async () 
 
   const diagnostics = await service.diagnostics();
   const reasons = Object.fromEntries(
-    diagnostics.jobs[0]?.candidates.map(({ id, reason }) => [id, reason]) ?? [],
+    diagnostics.jobs[0]?.candidates.filter(({ reason }) => reason !== undefined)
+      .map(({ id, reason }) => [id, reason]) ?? [],
   );
   assert.deepEqual(reasons, {
-    "missing-title": "title is missing, empty, or longer than 200 characters",
     "unknown-evidence": "sourceEntryIds references unknown evidence",
     "invalid-destination":
-      "destination project requires a positive ID or non-empty name",
+      "No matching capture project; create a project to save this knowledge.",
   });
+  assert.equal(diagnostics.jobs[0]?.lastError, 'HTTP 422: {"detail":"title field required"}');
+  assert.equal(client.attempted.length, 1);
+  assert.equal(client.attempted[0]?.title, undefined);
+  assert.equal(client.created.length, 0);
 });
 
-test("model-authorized supersession retries log both memory IDs and destination", async (t) => {
+test("supersession correction preserves replacement and logs both memory IDs and destination",
+  async (t) => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-retry-"),
   );
@@ -2221,7 +2267,9 @@ test("model-authorized supersession retries log both memory IDs and destination"
       reason: "The project migrated databases.",
       sourceEntryIds: ["user-1"],
     },
-    { action: "retry", reason: "Retry temporary obsolescence failure." },
+    { candidate: { id: "candidate-retry", title: "Use SQLite",
+      content: "The project uses SQLite.", context: "A changed database decision.",
+      keywords: ["database"], tags: ["decision"], sourceEntryIds: ["user-1"] } },
   );
   const service = new CaptureService({
     queue,
@@ -2402,7 +2450,8 @@ test("resolution accepts later user evidence from the originating session", asyn
   assert.deepEqual(client.superseded, [{ oldId: 41, replacementId: 100 }]);
 });
 
-test("sensitive overlap results are rejected before the overlap model or any write", async () => {
+test("sensitive overlap results are redacted for the model without vetoing a new write",
+  async () => {
   const directory = await mkdtemp(
     join(tmpdir(), "pi-forgetful-capture-overlap-secret-"),
   );
@@ -2444,11 +2493,12 @@ test("sensitive overlap results are rejected before the overlap model or any wri
   await service.enqueue(snapshot());
   await service.checkpoint();
 
-  assert.equal(client.created.length, 0);
+  assert.equal(client.created.length, 1);
   assert.deepEqual(
     model.requests.map((request) => request.purpose),
-    ["capture"],
+    ["capture", "overlap"],
   );
+  assert.doesNotMatch(JSON.stringify(model.requests[1]?.input), /super-secret-value/);
 });
 
 test("an unresolved capture destination is recorded as a skip without falling back", async () => {
@@ -2817,8 +2867,10 @@ test("partial memory 87 resolution submits a complete revision retaining unaffec
     const tool = f.contexts[0]!.tools![0]!;
     assert.equal(tool.name, "submit_memory_revision");
     assert.deepEqual((tool.parameters as any).required,
-      ["title", "content", "context", "keywords", "tags", "importance", "sourceEntryIds",
-        "documentIds", "codeArtifactIds", "entityIds", "memoryIds", "fileIds", "sourceFiles"]);
+      ["sourceEntryIds", "entityIds", "memoryIds"]);
+    for (const field of ["title", "content", "context", "keywords", "tags", "importance"]) {
+      assert.equal((tool.parameters as any).properties[field].maxLength, undefined);
+    }
     const { input: modelInput } = decodeProviderContext(f.contexts[0]!);
     assert.deepEqual(modelInput.oldMemory, f.old);
     assert.deepEqual(modelInput.candidate, f.conflict.candidate);
@@ -2929,24 +2981,20 @@ for (const operation of ["create", "update"] as const) {
   });
 }
 
-test("partial revision retries invalid fields and evidence, then leaves exhaustion pending",
+test("partial revision retries invalid private evidence and envelopes, leaving exhaustion pending",
   async (t) => {
-    // Arrange: every semantic field is mandatory; evidence must be selected and trusted.
+    // Arrange: private evidence must be selected and the submission envelope must remain valid.
     const f = await partialConflictFixture(t);
-    const invalid: unknown[] = Object.keys(f.revision).map((key) => {
+    const invalid: unknown[] = ["sourceEntryIds", "entityIds", "memoryIds"].map((key) => {
       const value = { ...f.revision } as Record<string, unknown>;
       delete value[key];
       return value;
     });
-    for (const field of ["documentIds", "codeArtifactIds", "entityIds", "memoryIds", "fileIds"]) {
-      invalid.push({ ...f.revision, [field]: [999] },
-        { ...f.revision, [field]: [999, 999] }, { ...f.revision, [field]: [-1] });
-    }
     invalid.push({ ...f.revision, sourceEntryIds: ["assistant-1"] },
-      { ...f.revision, title: " " }, { ...f.revision, importance: "9" },
-      { ...f.revision, sourceEntryIds: ["user-1", "user-1"] },
-      { ...f.revision, content: "api_key=private-revision-secret" },
-      { cannotRevise: true });
+      { ...f.revision, sourceEntryIds: [] },
+      { ...f.revision, sourceEntryIds: ["not-selected"] },
+      { ...f.revision, sourceEntryIds: Array(9).fill("user-1") },
+      { ...f.revision, unexpected: true }, { cannotRevise: true });
 
     // Act / Assert: invalid submissions consume only the adapter's three attempts, no writes.
     for (const value of invalid) {
@@ -3165,9 +3213,9 @@ test("partial resolution never repeats a create whose outcome or ID checkpoint i
     assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
   });
 
-test("partial resolution blocks invalid IDs, global/shared scope and multiple selected memories",
+test("partial resolution forwards stored scope and keeps conflict selection coherent",
   async (t) => {
-    // Arrange / Act / Assert: every unsafe target stays pending without model or write calls.
+    // Arrange / Act / Assert: stored scope is server-owned; conflict identity remains local.
     for (const scenario of ["global", "shared", "other-project",
       "multiple", "inconsistent-id", "obsolete"] as const) {
       const f = await partialConflictFixture(t);
@@ -3182,12 +3230,21 @@ test("partial resolution blocks invalid IDs, global/shared scope and multiple se
       if (scenario === "inconsistent-id")
         await f.queue.updateConflict(f.conflict.id, { oldMemoryIds: [88] });
       f.client.memories.set(87, current);
-      await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
-        /obsolete|destination|multi-memory|selected memory/i, scenario);
-      assert.equal(f.contexts.length, 0, scenario);
-      assert.equal(f.client.created.length, 0, scenario);
-      assert.equal(f.client.superseded.length, 0, scenario);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+      if (["multiple", "inconsistent-id"].includes(scenario)) {
+        await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
+          /multi-memory|selected memory/i, scenario);
+        assert.equal(f.contexts.length, 0, scenario);
+        assert.equal(f.client.created.length, 0, scenario);
+        assert.equal(f.client.superseded.length, 0, scenario);
+        assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+      } else {
+        const result = await f.service.resolveConflict(f.conflict.id, f.input);
+        assert.equal(result.status, "resolved", scenario);
+        assert.equal(f.contexts.length, 1, scenario);
+        assert.equal(f.client.created.length, 1, scenario);
+        assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+        assert.deepEqual(decodeProviderContext(f.contexts[0]!).input.oldMemory, current);
+      }
     }
   });
 
@@ -3213,7 +3270,7 @@ test("resolution gives fresh predecessor claims to the model without an equality
     }
   });
 
-test("partial resolution rechecks destination and live enablement after model submission",
+test("partial resolution permits server-owned scope changes but rechecks live enablement",
   async (t) => {
     // Arrange: the model round trip races scope or enablement revocation.
     for (const scenario of ["scope", "disabled"] as const) {
@@ -3230,11 +3287,18 @@ test("partial resolution rechecks destination and live enablement after model su
         instanceId: "instance-a", isEnabled: () => enabled });
 
       // Act / Assert: a valid submission cannot authorize a write after permission changes.
-      await assert.rejects(service.resolveConflict(f.conflict.id, f.input), /destination|disabled/);
+      if (scenario === "disabled") {
+        await assert.rejects(service.resolveConflict(f.conflict.id, f.input), /disabled/);
+        assert.equal(f.client.created.length, 0);
+        assert.equal(f.client.superseded.length, 0);
+        assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+      } else {
+        const result = await service.resolveConflict(f.conflict.id, f.input);
+        assert.equal(result.status, "resolved");
+        assert.equal(f.client.created.length, 1);
+        assert.deepEqual(f.client.superseded, [{ oldId: 87, replacementId: 100 }]);
+      }
       assert.equal(f.contexts.length, 1);
-      assert.equal(f.client.created.length, 0);
-      assert.equal(f.client.superseded.length, 0);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
     }
   });
 

@@ -155,7 +155,7 @@ test("missing-link HTTP 404 reaches the retry provider intact after reopening th
     linkReview: CaptureLinkReview;
   }).linkReview;
   assert.deepEqual(pendingReview.executionResults, [
-    { operation: "unlink", targetId: 42, status: "failed", error: expectedError },
+    { operation: "unlink", targetId: 42, status: "failed", error: expectedError, httpStatus: 404 },
   ]);
   const reopened = new DurableQueueStore({ directory, instanceId });
   const restarted = new CaptureService({ queue: reopened, client: client(), model: model(),
@@ -181,14 +181,14 @@ test("missing-link HTTP 404 reaches the retry provider intact after reopening th
   assert.deepEqual(linkTask(linkRequests[0]!).executionFailures, []);
   const retried = linkTask(linkRequests[1]!);
   assert.deepEqual(retried.executionResults, [
-    { operation: "unlink", targetId: 42, status: "failed", error: expectedError },
+    { operation: "unlink", targetId: 42, status: "failed", error: expectedError, httpStatus: 404 },
   ]);
   assert.deepEqual(retried.executionFailures, [{ operation: "connections", error: expectedError }]);
   assert.equal(retried.completedWrites.memoryId, 99);
   const finished = await reopened.getJob(queued.jobId);
   assert.equal(finished?.status, "complete", finished?.lastError);
   assert.equal(finished?.attempts, 2);
-  assert.equal(finished?.callCount, 4);
+  assert.equal(finished?.callCount, 1);
   assert.equal((finished?.candidateOutcomes.decision as { memoryId: number }).memoryId, 99);
   assert.deepEqual(mutations, ["POST /api/v1/memories", "DELETE /api/v1/memories/99/links/42"],
     "retry must not recreate the saved memory or repeat a deletion without a new instruction");

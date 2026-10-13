@@ -65,32 +65,26 @@ test("knowledge read validation keeps list and content bounds distinct", () => {
     () => validateKnowledgeReadRequest({ operation: "get_document", document_id: 1, offset: -1 }),
     /non-negative/,
   );
-  assert.throws(
-    () => validateKnowledgeReadRequest({ operation: "get_relationships" }),
-    /entity_id is required/,
-  );
+  assert.deepEqual(validateKnowledgeReadRequest({ operation: "get_relationships" }),
+    { operation: "get_relationships" });
   assert.throws(
     () => validateKnowledgeReadRequest({
       operation: "search_memories", query: "database", query_context: "Test", limit: 3,
     }),
     /uses k.*limit is not supported/,
   );
-  assert.throws(
-    () => validateKnowledgeReadRequest({ operation: "search_memories", query: "database" }),
-    /query_context is required/,
-  );
+  assert.deepEqual(validateKnowledgeReadRequest({
+    operation: "search_memories", query: "database",
+  }), { operation: "search_memories", query: "database" });
   assert.throws(
     () => validateKnowledgeReadRequest({
       operation: "search_memories", query: "database", query_context: "Test", offset: 0,
     }),
     /does not support offset/,
   );
-  assert.throws(
-    () => validateKnowledgeReadRequest({
-      operation: "search_memories", query: "database", query_context: "Test", k: 21,
-    }),
-    /at most 20/,
-  );
+  assert.equal(validateKnowledgeReadRequest({
+    operation: "search_memories", query: "database", query_context: "Test", k: 21,
+  }).k, 21);
   assert.throws(
     () => validateKnowledgeReadRequest({
       operation: "search_memories", query: "database", query_context: "Test",

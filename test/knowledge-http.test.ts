@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiForgetfulClient } from "../src/http.ts";
+import { ApiForgetfulClient, ForgetfulHttpError } from "../src/http.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
 
-test("memory creation validates importance and accepts both score boundaries",
+test("memory creation forwards server importance validation and accepts both score boundaries",
   realOptions, async (t) => {
     const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t), timeoutMs: 4000 });
     const project = await client.createProject({ name: "Scores", description: "Score validation",
@@ -12,7 +12,8 @@ test("memory creation validates importance and accepts both score boundaries",
       keywords: [], tags: [], project_ids: [project.id] };
     for (const importance of [0, 11, 1.5]) {
       await assert.rejects(client.create({ ...input, importance }),
-        (error: unknown) => error instanceof TypeError && /importance/.test(error.message));
+        (error: unknown) => error instanceof ForgetfulHttpError && error.status === 400 &&
+          /importance/.test(error.responseBody ?? ""));
     }
     for (const importance of [1, 10]) {
       const created = await client.create({ ...input, importance });
@@ -173,7 +174,10 @@ test("entity search passes complete query text to Forgetful without an extra cha
 
     // Act / Assert: a long search is valid and has no results in the isolated empty database.
     assert.deepEqual(await client.knowledge.searchEntities(query), []);
-    await assert.rejects(client.knowledge.searchEntities("   "), /non-empty|whitespace/);
+    assert.deepEqual(await client.knowledge.searchEntities("   "), []);
+    await assert.rejects(client.knowledge.searchEntities(""), (error: unknown) =>
+      error instanceof ForgetfulHttpError && error.status === 400 &&
+      /query is required/.test(error.responseBody ?? ""));
   });
 
 test("stored list text follows Forgetful's contract without extra item-width caps",
@@ -194,3 +198,21 @@ test("stored list text follows Forgetful's contract without extra item-width cap
     assert.deepEqual(read.aka, [alias]);
     assert.deepEqual(read.source_files, [path]);
   });
+
+test("server-accepted empty context survives readback and search", realOptions, async (t) => {
+  // Arrange: C3b no longer rejects empty context, which Forgetful already accepts.
+  const client = new ApiForgetfulClient({ baseUrl: await startForgetful(t) });
+  const project = await client.createProject({ name: "Context", description: "Read compatibility",
+    repo_name: "test/empty-context" });
+
+  // Act: round-trip through the actual create and read/search routes.
+  const created = await client.create({ title: "Context-free fact", content: "Use two retries.",
+    context: "", keywords: ["retries"], tags: [], project_ids: [project.id] });
+  const read = await client.get(created.id);
+  const search = await client.search({ query: "retries", query_context: "Verify round-trip",
+    strict_project_filter: true, project_ids: [project.id] });
+
+  // Assert: a successful write must not strand capture on its following read.
+  assert.equal(read.context, "");
+  assert.equal(search.find((item) => item.id === created.id)?.context, "");
+});

@@ -7,7 +7,7 @@ import type {
 import { ForgetfulSchemaError } from "./http.ts";
 
 export type KnowledgeRequest = (
-  path: string, method: string, body: Record<string, unknown> | undefined,
+  path: string, method: string, body: unknown,
   signal: AbortSignal | undefined, statuses: number[],
 ) => Promise<unknown>;
 
@@ -172,8 +172,15 @@ function summary(value: unknown, code: boolean): DocumentSummary | CodeArtifactS
   return code ? { ...result, language: text(item.language, 100) } : result;
 }
 
+/** Keep caller-controlled IDs within one URL segment, including dot-only segments. */
+export function requestSegment(value: unknown): string {
+  const segment = encodeURIComponent(String(value));
+  return segment === "." || segment === ".." ? segment.replaceAll(".", "%252E") : segment;
+}
+
 function projectPath(path: string, projectId?: number): string {
-  return projectId === undefined ? path : `${path}?project_id=${id(projectId)}`;
+  return projectId === undefined ? path
+    : `${path}?project_id=${encodeURIComponent(String(projectId))}`;
 }
 
 function fileSummary(value: unknown): FileSummary {
@@ -199,9 +206,6 @@ export class ApiKnowledgeClient implements KnowledgeClient {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new TypeError("Entity search limit must be between 1 and 100");
     }
-    if (typeof query !== "string" || !query.trim()) {
-      throw new ForgetfulSchemaError("Forgetful query must be a non-empty string.");
-    }
     const result = await this.request("/entities/search", "POST", {
       query, limit,
     }, signal, [200]);
@@ -209,21 +213,22 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async getEntity(entityId: number, signal?: AbortSignal): Promise<Entity> {
-    return entity(await this.request(`/entities/${id(entityId)}`, "GET", undefined, signal, [200]));
+    return entity(await this.request(`/entities/${requestSegment(entityId)}`, "GET",
+      undefined, signal, [200]));
   }
 
   async createEntity(input: EntityInput, signal?: AbortSignal): Promise<Entity> {
-    return entity(await this.request("/entities", "POST", entityBody(input), signal, [201]));
+    return entity(await this.request("/entities", "POST", input, signal, [201]));
   }
 
   async updateEntity(entityId: number, input: Partial<EntityInput>, signal?: AbortSignal) {
     return entity(await this.request(
-      `/entities/${id(entityId)}`, "PUT", entityBody(input, true), signal, [200],
+      `/entities/${requestSegment(entityId)}`, "PUT", { ...input }, signal, [200],
     ));
   }
 
   async getEntityMemories(entityId: number, signal?: AbortSignal) {
-    const result = await this.request(`/entities/${id(entityId)}/memories`, "GET",
+    const result = await this.request(`/entities/${requestSegment(entityId)}/memories`, "GET",
       undefined, signal, [200]);
     return records(result, "memories").map((raw) => {
       const item = object(raw);
@@ -232,20 +237,22 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async linkEntityMemory(entityId: number, memoryId: number, signal?: AbortSignal): Promise<void> {
-    const result = object(await this.request(`/entities/${id(entityId)}/memories`, "POST",
-      { memory_id: id(memoryId) }, signal, [200]));
+    const result = object(await this.request(
+      `/entities/${requestSegment(entityId)}/memories`, "POST",
+      { memory_id: memoryId }, signal, [200]));
     if (result.success !== true) throw new ForgetfulSchemaError("Entity memory link failed");
   }
 
   async getRelationships(entityId: number, signal?: AbortSignal): Promise<EntityRelationship[]> {
-    const result = await this.request(`/entities/${id(entityId)}/relationships`, "GET",
+    const result = await this.request(`/entities/${requestSegment(entityId)}/relationships`, "GET",
       undefined, signal, [200]);
     return records(result, "relationships").map(relationship);
   }
 
   async createRelationship(input: EntityRelationshipInput, signal?: AbortSignal) {
-    return relationship(await this.request(`/entities/${id(input.source_entity_id)}/relationships`,
-      "POST", relationshipBody(input), signal, [201]));
+    return relationship(await this.request(
+      `/entities/${requestSegment(input.source_entity_id)}/relationships`,
+      "POST", { ...input }, signal, [201]));
   }
 
   async listDocuments(projectId?: number, signal?: AbortSignal): Promise<DocumentSummary[]> {
@@ -255,18 +262,18 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async getDocument(documentId: number, signal?: AbortSignal): Promise<Document> {
-    return document(await this.request(`/documents/${id(documentId)}`, "GET",
+    return document(await this.request(`/documents/${requestSegment(documentId)}`, "GET",
       undefined, signal, [200]));
   }
 
   async createDocument(input: DocumentInput, signal?: AbortSignal): Promise<Document> {
-    return document(await this.request("/documents", "POST", resourceBody(input, false),
+    return document(await this.request("/documents", "POST", input,
       signal, [201]));
   }
 
   async updateDocument(documentId: number, input: Partial<DocumentInput>, signal?: AbortSignal) {
-    return document(await this.request(`/documents/${id(documentId)}`, "PUT",
-      resourceBody(input, false, true), signal, [200]));
+    return document(await this.request(`/documents/${requestSegment(documentId)}`, "PUT",
+      { ...input }, signal, [200]));
   }
 
   async listCodeArtifacts(
@@ -279,48 +286,36 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async getCodeArtifact(artifactId: number, signal?: AbortSignal): Promise<CodeArtifact> {
-    return artifact(await this.request(`/code-artifacts/${id(artifactId)}`, "GET",
+    return artifact(await this.request(`/code-artifacts/${requestSegment(artifactId)}`, "GET",
       undefined, signal, [200]));
   }
 
   async createCodeArtifact(input: CodeArtifactInput, signal?: AbortSignal): Promise<CodeArtifact> {
-    return artifact(await this.request("/code-artifacts", "POST", resourceBody(input, true),
+    return artifact(await this.request("/code-artifacts", "POST", input,
       signal, [201]));
   }
 
   async updateCodeArtifact(
     artifactId: number, input: Partial<CodeArtifactInput>, signal?: AbortSignal,
   ) {
-    return artifact(await this.request(`/code-artifacts/${id(artifactId)}`, "PUT",
-      resourceBody(input, true, true), signal, [200]));
+    return artifact(await this.request(`/code-artifacts/${requestSegment(artifactId)}`, "PUT",
+      { ...input }, signal, [200]));
   }
 
   async updateMemory(memoryId: number, input: Partial<MemoryInput>, signal?: AbortSignal) {
-    const value = object(input);
-    const body = memoryMetadata(value);
-    for (const [key, max] of [["title", 200], ["content", 2000], ["context", 500]] as const) {
-      if (value[key] !== undefined) body[key] = text(value[key], max, key === "context", key);
-    }
-    for (const key of ["keywords", "tags"] as const) {
-      if (value[key] !== undefined) body[key] = strings(value[key]);
-    }
-    if (value.project_ids !== undefined) body.project_ids = ids(value.project_ids);
-    if (value.importance !== undefined) {
-      if (!Number.isInteger(value.importance) || Number(value.importance) < 1 ||
-          Number(value.importance) > 10) throw new TypeError("Importance must be between 1 and 10");
-      body.importance = value.importance;
-    }
-    return this.parseMemory(await this.request(`/memories/${id(memoryId)}`, "PUT", body,
+    return this.parseMemory(await this.request(
+      `/memories/${requestSegment(memoryId)}`, "PUT", { ...input },
       signal, [200]));
   }
 
   async linkMemories(memoryId: number, relatedIds: number[], signal?: AbortSignal): Promise<void> {
-    const expected = ids(relatedIds);
-    const result = object(await this.request(`/memories/${id(memoryId)}/links`, "POST",
+    const expected = relatedIds;
+    const result = object(await this.request(`/memories/${requestSegment(memoryId)}/links`, "POST",
       { related_ids: expected }, signal, [200]));
     const newlyLinked = ids(result.linked_ids);
     if (expected.some((item) => !newlyLinked.includes(item))) {
-      const current = this.parseMemory(await this.request(`/memories/${id(memoryId)}`, "GET",
+      const current = this.parseMemory(await this.request(
+        `/memories/${requestSegment(memoryId)}`, "GET",
         undefined, signal, [200]));
       if (expected.some((item) => !current.linked_memory_ids?.includes(item))) {
         throw new ForgetfulSchemaError("Forgetful did not confirm all requested memory links");
@@ -329,8 +324,8 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async unlinkMemories(memoryId: number, targetId: number, signal?: AbortSignal): Promise<void> {
-    if (id(memoryId) === id(targetId)) throw new TypeError("A memory cannot unlink itself");
-    const result = object(await this.request(`/memories/${id(memoryId)}/links/${id(targetId)}`,
+    const path = `/memories/${requestSegment(memoryId)}/links/${requestSegment(targetId)}`;
+    const result = object(await this.request(path,
       "DELETE", undefined, signal, [200]));
     if (result.success !== true) throw new ForgetfulSchemaError("Forgetful did not confirm unlink");
   }
@@ -342,7 +337,7 @@ export class ApiKnowledgeClient implements KnowledgeClient {
   }
 
   async getFile(fileId: number, signal?: AbortSignal): Promise<StoredFile> {
-    const result = object(await this.request(`/files/${id(fileId)}`, "GET",
+    const result = object(await this.request(`/files/${requestSegment(fileId)}`, "GET",
       undefined, signal, [200]));
     const summary = fileSummary(result);
     const data = text(result.data, 14_000_000);

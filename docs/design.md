@@ -264,7 +264,8 @@ Capture destination is independent of recall scope. Each candidate defaults to t
 project, even when recall searched globally. The agent can override that destination to another
 existing project when supported by the completed work. For example, a fix to Forgetful made while
 working on this extension belongs to the Forgetful project. The capture model may use the main
-agent's project context as evidence and returns a target project and rationale per candidate.
+agent's project context as evidence and selects an existing target project per candidate.
+A separate override rationale is not required.
 
 Resolve and validate the destination before overlap checks. Query for duplicates and
 contradictions using that project's ID and `strict_project_filter: true`, then use the same
@@ -432,10 +433,12 @@ is then processed by the durable worker described above.
 1. Read the whole pinned conversation. The watermark marks processed work; it does not remove
    context. Capture exclusions remain attached to original entry IDs across branches. Evidence
    eligibility is separate from visibility; failed tools establish failures, not successful changes.
-2. Ask the configured Pi memory model for zero to three atomic, evidenced candidates, each with
-   a target project and rationale. It may inspect trusted repository text and source URLs through
-   a read-only tool before submitting candidates. Actual observations carry durable evidence IDs
-   and provenance; source editing, shell execution and uploads are unavailable. It may also use
+2. Ask the configured Pi memory model for atomic, evidenced candidates, without a fixed candidate
+   count cap. Resolve each to an existing target project; if none matches, skip it and warn the user
+   to create a project. Do not create projects automatically. It may inspect trusted repository text
+   and source URLs through a read-only tool before submitting candidates. Actual observations carry
+   durable evidence IDs and provenance; source editing, shell execution and uploads are unavailable.
+   It may also use
    `read_capture_evidence` to selectively read this task's pinned originals by entry ID, without
    changing evidence identity or eligibility. Reads are optional, not a required read-before-cite
    check or a guarantee that every fact omitted from a summary will be discovered. Text pages
@@ -445,23 +448,24 @@ is then processed by the durable worker described above.
    tool feedback that permits another provider turn or an empty successful capture.
    Accept exactly one private `submit_capture_candidates` submission; do not parse text output
    as fallback JSON.
-3. Apply deterministic structural and sensitive-data validation to the original tool arguments.
-   Candidates use only schema-declared fields. Destination selection accepts only the declared
-   `destinationProjectId`, `destinationProjectName`, and `destinationRationale` fields, not aliases.
-   JSON strings are never decoded into candidates, decisions, destinations, or other instructions.
-   Reject the submission for correction if any candidate or attached resource is invalid. Do not
-   silently discard an invalid record or write valid siblings before the submission is corrected.
-   Then resolve each accepted destination.
+3. Validate the private submission envelope and one to eight eligible evidence IDs per candidate.
+   Assistant text, memory operations and excluded entries remain ineligible. Evidence categories
+   do not impose source-role checks. Missing or duplicate candidate keys receive stable local keys.
+   JSON strings are never decoded into instructions. Stored memory/resource field requirements,
+   types and lengths belong to Forgetful, not a second extension validator. Forward those fields
+   unchanged, including invalid values, and return actual server errors for correction. Redact
+   model context and diagnostics; do not silently rewrite the model's stored payload.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
 5. Give candidates, their evidence and full destination-scoped records to the memory model.
    Accept a private `submit_capture_decision` or batched `submit_capture_decisions` call with
    `create`, `skip`, `supersede` or `escalate`. Resource reuse requires explicit existing IDs;
    entity-memory links require selected keys. `skip` writes nothing unless `enrich: true`
    explicitly requests resource additions and connection review for the selected memory.
-6. Validate the original decision arguments. A contradiction must identify conflicting memories
-   from that query, the incompatible claims, source entries in the eligible snapshot, and why they
-   concern the same fact. Each private capture submission has at most three attempts within its
-   existing model request and deadline; rejected calls receive validation error tool results.
+6. Validate action names and one decision per candidate, including known, unique candidate IDs.
+   Existing-memory targets need not come from the overlap query. The model judges contradiction,
+   replacement completeness and resource suitability; code does not require explanatory claims,
+   restrict sibling reuse to earlier same-project candidates, or revalidate selected resource keys
+   against the neighborhood. Each private submission retains three attempts under its deadline.
 7. Execute `create` or automatic `supersede` through the existing Forgetful API using the automatic
    write path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
    neither an ordinary duplicate nor permission to create a competing fact.
@@ -479,17 +483,31 @@ consider SQLite cannot. Retain the superseded memory as history, linked to its r
 
 The capture service applies supersession in this order:
 
-1. Check the selected endpoints' project access and write enablement. Content changes do not
-   authorize the executor to replace the model's instruction with escalation.
-2. Record the create attempt, create the complete model-supplied replacement and durably record
-   its returned ID. Ask the model which supplied connections and references to keep or change;
-   execute the selected operations, not an automatic union of old and new associations.
-3. Mark the old memory obsolete with the requested reason and replacement ID, then record
-   completion. If an operation fails, return the actual outcome and completed receipts to the
-   next funded model task. Only a new instruction authorizes retry of unfinished work.
+1. Check capture enablement, auto mode and live write permission. Content or destination changes
+   do not authorize the executor to replace the model's instruction with escalation.
+2. Record the create attempt, create the model-supplied replacement and durably record its ID.
+   Execute explicit connection/reference selections; omitted preservation leaves attachments alone.
+   Do not require replacement attachment selections to come from supplied records or satisfy local
+   resource caps, reasons or project checks. The API owns stored-resource validation.
+3. Mark each selected old memory obsolete with the requested replacement ID, recording each result.
+   If an operation fails, return its actual error and completed receipts to the next funded task.
+   `submit_capture_correction` can revise rejected fields without replaying completed operations.
+   HTTP 400/422 create rejections allow correction; uncertain creates remain blocked across
+   restarts.
+
+Automatic link selection still limits full records to eight active, exclusive, safe endpoints.
+Each link submission contains at most three reviews and eight decisions per review, covering every
+selected endpoint. Extra explicit targets are allowed within that decision limit. Targets remain
+unique, reasons nonblank and non-sensitive, and opposing add/remove commands on one edge fail.
+Before link mutation, both memories must remain active and include the destination project; shared
+membership is allowed. Completed/uncertain receipts and the fresh absent-link deletion check remain.
+Automatic attachment reads stay bounded to four documents, four code artifacts and eight entities;
+coverage is reported separately. These read limits do not cap the model's attachment selections.
 
 If creation fails or its outcome is unknown, do not obsolete the old memory. If obsolescence
 fails, the replacement may already exist alongside it; preserve that partial outcome for retry.
+Supersession retires the predecessor in every project. The replacement uses the chosen capture
+destination; it does not inherit project memberships the model did not select.
 Other clients can still race between validation and mutation because the existing API has no
 conditional write contract. This limitation remains explicit; no service change is assumed.
 
@@ -626,7 +644,7 @@ Initial SLO candidates to validate:
 
 - warm planner/retrieval p50 below 700 ms;
 - warm planner/retrieval p95 below 1.5 seconds;
-- hard fail-open timeout of 10 seconds by default (configurable);
+- hard fail-open recall timeout of 30 seconds by default (configurable);
 - each classification/review request defaults to 5 seconds, independently configurable from the
   overall deadline.
 
@@ -636,8 +654,11 @@ model calls are measured separately because they are not on the asynchronous rec
 implementation bounds recall to one planner path and one review path per prompt, with at most three
 private submission attempts per path. The reviewer may explore only stored Forgetful records through
 read-only tools in that same path. Capture extraction, overlap and connection review each consume
-a task from the four-task durable budget. Read turns, compaction and at most three submission
-attempts share each task's three-minute deadline. Debug counts provider invocations separately.
+a task from the four-task budget for the current attempt. A failed-job retry resets that task count;
+preparation yields and ordinary cancellation retain the current allowance. The three failed-attempt
+limit is unchanged. Read turns, compaction and at most three submission attempts share each task's
+three-minute deadline. Debug counts provider invocations separately. HTTP requests retain their
+10-second default; explicit `timeout_ms` overrides both HTTP and overall recall, as before.
 
 ### Model capacity and record validation
 
@@ -665,9 +686,10 @@ source identity, arbitrary tool payloads and original session/evidence files rem
 
 Selected evidence, policies, rich records and private correction history are not character-clipped.
 The model adapter does not reject complete responses merely for exceeding an extension byte cap.
-Character limits belong to the final recall summary and Forgetful's stored fields. Their submission
-schemas return validation failures to the model for correction rather than silently shortening
-content. Corrections remain subject to the existing attempt count and request deadline.
+Character limits for the final recall summary remain locally enforced. Forgetful validates its
+stored fields and read-request fields; actual server errors reach the private model for correction.
+Read-only operation allowlisting, local pagination and configured recall scope remain local rules.
+Corrections remain subject to the attempt count and request deadline, without shortening payloads.
 
 Stored-record selection counts, trust and scope checks, secret redaction, transport safety, queue
 index capacity and diagnostic preview limits remain separate safeguards. Snapshot and historical
@@ -704,8 +726,8 @@ application services, scope policy, prompt policy, or capture queue.
 - real Pi abort, session replacement, branch change, or memory-off: cancel the matching recall job;
 - normal assistant stop: retain a live recall job so a late terminal result can be delivered;
 - repeated failures: open a short-lived circuit breaker;
-- capture failure: record actual outcomes and ask the model at a later checkpoint whether to retry
-  unfinished operations or stop; completed operations are not automatically repaired or repeated.
+- capture failure: record actual outcomes and let the model correct rejected fields at a later
+  checkpoint without automatically repairing or repeating completed operations.
   After three failed attempts total, discard the job and all associated conflicts and evidence;
 - project cannot be resolved in project mode: skip rather than search globally.
 - capture destination cannot be resolved: skip that candidate with setup guidance; global recall

@@ -6,7 +6,7 @@
   "description": "Automatic Forgetful recall and capture for Pi",
   "pi": { "extensions": ["./index.ts"] },
   "scripts": {
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=2 test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"
   },

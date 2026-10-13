@@ -83,39 +83,25 @@ const MAX_LIST_RESULT_CHARS = 16_000;
 /** Keep this root schema as an object; some providers reject a root anyOf/oneOf. */
 export const KNOWLEDGE_READ_PARAMETERS = Type.Object({
   operation,
-  repo_name: Type.Optional(Type.String({
-    maxLength: 300,
-    description: "Exact owner/repo filter for list_projects. Another repository's project " +
-      "metadata may verify a write destination; this does not widen knowledge-read scope.",
-  })),
-  query: Type.Optional(Type.String({
-    minLength: 1,
-    description: "Required for search_memories and search_entities.",
-  })),
-  query_context: Type.Optional(Type.String({
-    description: "Required for search_memories; explain why this foreground query is being made.",
-  })),
-  project_id: Type.Optional(Type.Integer({
-    minimum: 1,
-    description: "Optional project filter for list/search operations; project scope only " +
-      "permits the current project.",
-  })),
-  memory_id: Type.Optional(Type.Integer({
-    minimum: 1, description: "Required for get_memory.",
-  })),
-  entity_id: Type.Optional(Type.Integer({
-    minimum: 1,
-    description: "Required for get_entity, get_entity_memories, and get_relationships.",
-  })),
-  document_id: Type.Optional(Type.Integer({
-    minimum: 1, description: "Required for get_document.",
-  })),
-  code_artifact_id: Type.Optional(Type.Integer({
-    minimum: 1, description: "Required for get_code_artifact.",
-  })),
-  file_id: Type.Optional(Type.Integer({
-    minimum: 1, description: "Required for get_file.",
-  })),
+  repo_name: leftoverSearchField(
+    "Exact owner/repo filter for list_projects. Another repository's project metadata " +
+      "may verify a write destination; this does not widen knowledge-read scope.",
+  ),
+  query: leftoverSearchField("Required for search_memories and search_entities."),
+  query_context: leftoverSearchField(
+    "Required for search_memories; explain why this query is being made.",
+  ),
+  project_id: leftoverSearchField(
+    "Optional project filter for list/search operations; " +
+      "project scope permits the current project.",
+  ),
+  memory_id: leftoverSearchField("Required for get_memory."),
+  entity_id: leftoverSearchField(
+    "Required for get_entity, get_entity_memories, and get_relationships.",
+  ),
+  document_id: leftoverSearchField("Required for get_document."),
+  code_artifact_id: leftoverSearchField("Required for get_code_artifact."),
+  file_id: leftoverSearchField("Required for get_file."),
   k: leftoverSearchField(
     "Primary memories for search_memories; defaults to 3 and is bounded from 1 to 20.",
   ),
@@ -239,17 +225,6 @@ function boundedId(value: unknown, field: string, maximum: number): number | und
   return result;
 }
 
-function boundedNonNegativeInteger(
-  value: unknown,
-  field: string,
-  maximum: number,
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum)
-    throw new Error(`${field} must be an integer from 0 to ${maximum}.`);
-  return Number(value);
-}
-
 function requiredIds(value: unknown, field: string): number[] {
   if (!Array.isArray(value) || value.length > 100 || value.length === 0)
     throw new Error(`${field} must contain one to 100 IDs.`);
@@ -316,16 +291,9 @@ function need(input: Record<string, unknown>, fields: Array<[string, number]>): 
 }
 
 function validateReadSearch(input: Record<string, unknown>, op: string): void {
-  if (op !== "search_memories" && op !== "search_entities") return;
-  requiredText(input.query, "query");
-  optionalId(input.project_id, "project_id");
-  if (op === "search_entities") {
-    boundedId(input.limit, "limit", 100);
-    return;
-  }
-  requiredText(input.query_context, "query_context");
-  boundedId(input.k, "k", 20);
-  boundedNonNegativeInteger(input.max_links_per_primary, "max_links_per_primary", 10);
+  if (op !== "search_memories") return;
+  // This port translates a boolean to REST's traversal depth 0/1. Other server fields
+  // pass through unchanged so Forgetful can return its own validation errors.
   if (input.include_links !== undefined && typeof input.include_links !== "boolean")
     throw new Error("include_links must be a boolean.");
   if (input.limit !== undefined)
@@ -334,20 +302,9 @@ function validateReadSearch(input: Record<string, unknown>, op: string): void {
     throw new Error("search_memories does not support offset pagination.");
 }
 
-function validateReadIdentity(input: Record<string, unknown>, op: string): void {
-  if (op === "list_projects") optionalText(input.repo_name, "repo_name", 300);
-  if (op === "get_memory") requiredId(input.memory_id, "memory_id");
-  if (["get_entity", "get_entity_memories", "get_relationships"].includes(op))
-    requiredId(input.entity_id, "entity_id");
-  if (op === "get_document") requiredId(input.document_id, "document_id");
-  if (op === "get_code_artifact") requiredId(input.code_artifact_id, "code_artifact_id");
-  if (op === "get_file") requiredId(input.file_id, "file_id");
-  if (["list_documents", "list_code_artifacts", "list_files"].includes(op))
-    optionalId(input.project_id, "project_id");
-}
-
 function validateReadPagination(input: Record<string, unknown>, op: string): void {
-  const listOperations = new Set(["list_projects", "get_entity_memories", "get_relationships",
+  const listOperations = new Set(["list_projects", "search_entities",
+    "get_entity_memories", "get_relationships",
     "list_documents", "list_code_artifacts", "list_files"]);
   if (listOperations.has(op)) boundedId(input.limit, "limit", 100);
   if (input.offset !== undefined &&
@@ -358,7 +315,7 @@ function validateReadPagination(input: Record<string, unknown>, op: string): voi
     boundedId(input.limit, "limit", 5_000);
 }
 
-/** Provider validation is intentionally repeated here for callers that bypass Pi's schema. */
+/** Keep local paging and read-only access checks for callers that bypass Pi's schema. */
 export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadRequest {
   const input = record(value, "Knowledge read arguments");
   const op = checkOperation(input.operation, READ_OPS);
@@ -366,7 +323,6 @@ export function validateKnowledgeReadRequest(value: unknown): KnowledgeReadReque
   // k, include_links and max_links_per_primary are search_memories fields. The flat schema
   // advertises them on every op with loose leftover types, so Pi and runtime ignore them
   // rather than reject other operations.
-  validateReadIdentity(input, op);
   validateReadPagination(input, op);
   return input as KnowledgeReadRequest;
 }
@@ -721,7 +677,7 @@ async function readMemories(read: KnowledgeReadContext): Promise<KnowledgeToolRe
     query_context: read.request.query_context as string,
     strict_project_filter: read.context.scope === "project" || requestedProject !== undefined,
     ...(requestedProject === undefined ? {} : { project_ids: [requestedProject] }),
-    k: (read.request.k as number | undefined) ?? 3,
+    k: read.request.k === undefined ? 3 : read.request.k as number,
     include_links: (read.request.include_links as boolean | undefined) ?? true,
     ...(read.request.max_links_per_primary === undefined ? {} : {
       max_links_per_primary: read.request.max_links_per_primary as number,

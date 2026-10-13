@@ -9,7 +9,7 @@ import type {
   ProjectInput,
   SearchRequest,
 } from "./contracts.ts";
-import { ApiKnowledgeClient, memoryMetadata } from "./http-knowledge.ts";
+import { ApiKnowledgeClient, memoryMetadata, requestSegment } from "./http-knowledge.ts";
 import { repositoryName } from "./repository.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -82,10 +82,10 @@ function directEntityId(edge: unknown, memoryId: number): number | undefined {
   return requiredInteger(Number(other.slice(7)), "graph.entity_id");
 }
 
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.length === 0) {
+function requiredString(value: unknown, field: string, allowEmpty = false): string {
+  if (typeof value !== "string" || (!allowEmpty && value.length === 0)) {
     throw new ForgetfulSchemaError(
-      `Forgetful response field ${field} must be a non-empty string`,
+      `Forgetful response field ${field} must be ${allowEmpty ? "a string" : "a non-empty string"}`,
     );
   }
   return value;
@@ -159,7 +159,7 @@ function parseMemory(value: unknown, where: string): Memory {
   const id = requiredInteger(value.id, `${where}.id`);
   const title = requiredString(value.title, `${where}.title`);
   const content = requiredString(value.content, `${where}.content`);
-  const context = requiredString(value.context, `${where}.context`);
+  const context = requiredString(value.context, `${where}.context`, true);
   const keywords = stringArray(value.keywords, `${where}.keywords`);
   const tags = stringArray(value.tags, `${where}.tags`);
   if (
@@ -281,73 +281,26 @@ function makeAbortError(): ForgetfulAbortError {
   return new ForgetfulAbortError();
 }
 
-function validatedSearchOptions(request: SearchRequest): {
-  k: number;
-  maxLinks: number;
-} {
-  if (typeof request.query !== "string" || request.query.length === 0) {
-    throw new TypeError("Forgetful search query must be a non-empty string");
-  }
-  if (
-    typeof request.query_context !== "string" ||
-    request.query_context.length === 0
-  ) {
-    throw new TypeError(
-      "Forgetful search query_context must be a non-empty string",
-    );
-  }
-  if (typeof request.strict_project_filter !== "boolean") {
-    throw new TypeError(
-      "Forgetful search strict_project_filter must be boolean",
-    );
-  }
-  const k = request.k ?? 3;
-  if (!Number.isSafeInteger(k) || k < 1 || k > 20) {
-    throw new TypeError("Forgetful search k must be an integer from 1 to 20");
-  }
-  const requestedMaxLinks = request.max_links_per_primary ?? request.max_links;
-  const maxLinks = requestedMaxLinks ?? 0;
-  if (!Number.isSafeInteger(maxLinks) || maxLinks < 0 || maxLinks > 10) {
-    throw new TypeError(
-      "Forgetful search max_links_per_primary must be an integer from 0 to 10",
-    );
-  }
-  return { k, maxLinks };
-}
-
-function addSearchProjectFilter(
-  body: Record<string, unknown>,
-  request: SearchRequest,
-): void {
-  if (request.project_ids === undefined) return;
-  if (
-    !Array.isArray(request.project_ids) ||
-    request.project_ids.length === 0 ||
-    request.project_ids.length > 20 ||
-    request.project_ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
-  ) {
-    throw new TypeError(
-      "Forgetful search project_ids must be a bounded array of positive integers",
-    );
-  }
-  body.project_ids = request.project_ids;
+/** Explicit null is a submitted value for Forgetful to validate, not an omitted field. */
+function defaultWhenOmitted<T>(value: T | undefined, fallback: T): T {
+  if (value === null) return value;
+  return value ?? fallback;
 }
 
 function searchBody(request: SearchRequest): Record<string, unknown> {
-  const { k, maxLinks } = validatedSearchOptions(request);
-  const body: Record<string, unknown> = {
+  if (request.include_links !== undefined && typeof request.include_links !== "boolean") {
+    throw new TypeError("Forgetful include_links must be boolean");
+  }
+  const maxLinks = defaultWhenOmitted(request.max_links_per_primary, request.max_links);
+  return {
     query: request.query,
     query_context: request.query_context,
     strict_project_filter: request.strict_project_filter,
-    k,
+    k: defaultWhenOmitted(request.k, 3),
     include_links: request.include_links ? 1 : 0,
-    max_links_per_primary: maxLinks,
+    max_links_per_primary: defaultWhenOmitted(maxLinks, 0),
+    ...(request.project_ids === undefined ? {} : { project_ids: request.project_ids }),
   };
-  addSearchProjectFilter(body, request);
-  if (request.strict_project_filter && request.project_ids === undefined) {
-    throw new TypeError("Forgetful strict project search requires project_ids");
-  }
-  return body;
 }
 
 function uniqueMemories(memories: Memory[]): Memory[] {
@@ -520,9 +473,10 @@ export class ApiForgetfulClient implements ForgetfulClient {
       "POST",
       searchBody({
         ...request,
-        k: request.k ?? 3,
-        include_links: request.include_links ?? true,
-        max_links_per_primary: request.max_links_per_primary ?? request.max_links ?? 5,
+        k: defaultWhenOmitted(request.k, 3),
+        include_links: defaultWhenOmitted(request.include_links, true),
+        max_links_per_primary: defaultWhenOmitted(request.max_links_per_primary,
+          defaultWhenOmitted(request.max_links, 5)),
       }),
       signal,
       [200],
@@ -593,7 +547,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
     const payload = await this.request(
       "/memories",
       "POST",
-      this.createBody(input),
+      { ...input },
       signal,
       [200, 201],
     );
@@ -610,7 +564,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
   }
 
   async get(id: number, signal?: AbortSignal): Promise<Memory> {
-    const memoryId = this.validId(id);
+    const memoryId = requestSegment(id);
     const payload = await this.request(
       `/memories/${memoryId}`,
       "GET",
@@ -622,10 +576,10 @@ export class ApiForgetfulClient implements ForgetfulClient {
   }
 
   async getMemoryEntityIds(id: number, signal?: AbortSignal): Promise<number[]> {
-    const memoryId = this.validId(id);
+    const memoryId = requestSegment(id);
     const payload = await this.request(`/graph/memory/${memoryId}?depth=1`, "GET",
       undefined, signal, [200]);
-    if (!isObject(payload) || payload.center_memory_id !== memoryId ||
+    if (!isObject(payload) || payload.center_memory_id !== Number(id) ||
         !Array.isArray(payload.edges) || payload.edges.length > 2_000) {
       throw new ForgetfulSchemaError("Forgetful memory graph is invalid or exceeds link limits");
     }
@@ -633,7 +587,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
       throw new ForgetfulSchemaError("Forgetful memory graph is incomplete");
     const ids = new Set<number>();
     for (const edge of payload.edges) {
-      const entityId = directEntityId(edge, memoryId);
+      const entityId = directEntityId(edge, Number(id));
       if (entityId !== undefined) ids.add(entityId);
     }
     if (ids.size > 100)
@@ -647,13 +601,8 @@ export class ApiForgetfulClient implements ForgetfulClient {
     reason: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const memoryId = this.validId(id);
-    const replacement = this.validId(replacementId);
-    if (typeof reason !== "string" || reason.trim().length === 0) {
-      throw new TypeError(
-        "Forgetful supersede reason must be a non-empty string",
-      );
-    }
+    const memoryId = requestSegment(id);
+    const replacement = replacementId;
     const payload = await this.request(
       `/memories/${memoryId}`,
       "DELETE",
@@ -666,67 +615,6 @@ export class ApiForgetfulClient implements ForgetfulClient {
         "Forgetful supersede response.success must be true",
       );
     }
-  }
-
-  private createBody(input: MemoryInput): Record<string, unknown> {
-    if (!input || typeof input !== "object") {
-      throw new TypeError("Forgetful memory input must be an object");
-    }
-    if (typeof input.title !== "string" || input.title.length === 0) {
-      throw new TypeError("Memory title is required");
-    }
-    if (input.title.length > MEMORY_TITLE_MAX) {
-      throw new TypeError("Memory title is too long");
-    }
-    if (typeof input.content !== "string" || input.content.length === 0) {
-      throw new TypeError("Memory content is required");
-    }
-    if (input.content.length > MEMORY_CONTENT_MAX) {
-      throw new TypeError("Memory content is too long");
-    }
-    if (typeof input.context !== "string") {
-      throw new TypeError("Memory context is required");
-    }
-    if (input.context.length > MEMORY_CONTEXT_MAX) {
-      throw new TypeError("Memory context is too long");
-    }
-    if (
-      !Array.isArray(input.keywords) ||
-      !Array.isArray(input.tags) ||
-      input.keywords.length > MEMORY_LIST_MAX ||
-      input.tags.length > MEMORY_LIST_MAX ||
-      input.keywords.some((item) => typeof item !== "string") ||
-      input.tags.some((item) => typeof item !== "string")
-    ) {
-      throw new TypeError(
-        "Memory keywords and tags must be bounded string arrays",
-      );
-    }
-    if (
-      !Array.isArray(input.project_ids) ||
-      input.project_ids.length === 0 ||
-      input.project_ids.length > 20 ||
-      input.project_ids.some((id) => !Number.isSafeInteger(id) || id <= 0)
-    ) {
-      throw new TypeError(
-        "Memory project_ids must be a bounded array of positive integers",
-      );
-    }
-    const body: Record<string, unknown> = {
-      ...memoryMetadata(input as unknown as Record<string, unknown>),
-      title: input.title,
-      content: input.content,
-      context: input.context,
-      keywords: input.keywords,
-      tags: input.tags,
-      project_ids: input.project_ids,
-    };
-    if (input.importance !== undefined) {
-      if (!Number.isInteger(input.importance) || input.importance < 1 || input.importance > 10)
-        throw new TypeError("Memory importance must be an integer from 1 to 10");
-      body.importance = input.importance;
-    }
-    return body;
   }
 
   private validId(id: number): number {
@@ -748,7 +636,7 @@ export class ApiForgetfulClient implements ForgetfulClient {
   private async request(
     pathOrUrl: string | URL,
     method: string,
-    body: Record<string, unknown> | undefined,
+    body: unknown,
     callerSignal: AbortSignal | undefined,
     expectedStatuses: number[],
   ): Promise<unknown> {

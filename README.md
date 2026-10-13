@@ -101,7 +101,6 @@ directory. The effective settings can also be represented as:
 {
   "base_url": "http://localhost:8020/api/v1",
   "token_env": "FORGETFUL_TOKEN",
-  "timeout_ms": 10000,
   "recall_model_timeout_ms": 5000,
   "recall_concurrency": 2,
   "context_limit_tokens": 100000,
@@ -324,8 +323,9 @@ recall result.
 
 Recoverable recall failures, including timeouts, are warnings; invalid endpoint configuration and
 capture enqueue failures are errors. Debug failure warnings name the failing step and exception.
-Overall recall timeouts show the `timeout_ms` limit shared by planning, search, enrichment and
-review. Caller cancellations are reported separately with their supplied reason when available.
+Overall recall timeouts show the limit shared by planning, search, enrichment and review
+(default 30 seconds; an explicit `timeout_ms` overrides it). Caller cancellations are reported
+separately with their supplied reason when available.
 Details are bounded and redacted; recalled text also passes through known-secret redaction.
 
 Retrieved content is untrusted historical context, never executable instructions. Deliberate
@@ -391,13 +391,15 @@ tool arguments, results, errors and original entry IDs. Older history can be rep
 from a successful capture; recent messages remain intact. Summaries are context, not source
 evidence. Original unprocessed evidence survives compaction and retries. A separate watermark
 prevents replay.
-Skipped work stays visible but cannot be cited as capture evidence. A live worker extracts zero
-to three candidates through the private `submit_capture_candidates` tool. It validates evidence and
-destinations, then checks overlap in the destination project. The overlap model submits `create`,
-`skip`, `supersede`, or `escalate` through the private `submit_capture_decision` tool. The worker
+Skipped work stays visible but cannot be cited as capture evidence. A live worker extracts
+candidates through the private `submit_capture_candidates` tool, without a fixed candidate cap.
+It validates eligible evidence IDs and resolves an existing destination, then checks overlap there.
+If no project matches, it skips the candidate and warns that a project needs creating. The overlap
+model submits `create`, `skip`, `supersede`, or `escalate` through the private
+`submit_capture_decision` tool. The worker
 then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
 conflict for the originating session. Queue records include per-candidate outcomes so partial
-writes can be reported to the model before it chooses whether to retry unfinished operations.
+writes are retained while the model corrects rejected fields using the actual Forgetful error.
 
 The extraction model can investigate a missing fact with the read-only `inspect_source` tool:
 repository text files and HTTP(S) URLs, without shell execution, editing or uploads. Actual reads
@@ -443,9 +445,10 @@ follow-on pass, even when fewer than eight jobs were claimed. Failed or permissi
 wait for `/forgetful retry-queue`, a later settled turn, or a restart rather than retrying
 repeatedly in the same cycle. The command schedules one background drain, returning without
 waiting for model completion. Repeated commands while that retry is queued or running share the
-same retry. It does not enable disabled capture, reset attempt/model-call limits, restore
-discarded tasks, or replay uncertain saves. In observe mode it remains read-only. Existing worker
-locks and permissions apply.
+same retry. Each new failed-job attempt gets four fresh model tasks; preparation yields and
+ordinary cancellations do not refresh that allowance. Retrying does not enable disabled capture,
+reset the three-attempt limit, restore discarded tasks, or replay uncertain saves. In observe mode
+it remains read-only. Existing worker locks and permissions apply.
 Capture timeout warnings name the deadline (180 seconds) and suggest the command for remaining
 eligible work. Discard warnings include the failure reason and make clear that retrying does not
 restore the discarded task.
@@ -491,19 +494,25 @@ create similarity links; explicit additions do not promise an exact final graph.
 
 Each private capture tool allows at most three attempts within its existing model request and
 three-minute deadline. Invalid calls receive validation feedback so the model can correct them;
-text-only replies and JSON strings inside arguments are not parsed as instructions. Candidates
-must use declared fields, including `destinationProjectId`, `destinationProjectName`, and
-`destinationRationale`; undeclared destination aliases are rejected. If any candidate or attached
-resource is invalid, reject the submission for correction before writing its valid siblings.
-Nothing is silently discarded. Diagnostic rejection previews remain bounded and redacted.
+text-only replies and JSON strings inside arguments are not parsed as instructions. Private
+submission structure, eligible evidence IDs, action names and decision coverage remain validated.
+Forgetful owns stored-field requirements, types and lengths. These payloads reach REST unchanged;
+HTTP 400/422 rejections can receive a corrected candidate through `submit_capture_correction` on
+retry. Completed operations are retained; uncertain creates cannot be retried automatically.
+Diagnostic previews and model context remain redacted, without rewriting proposed stored fields.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind
 a memory. The model selects existing records by ID; the executor does not guess identity from names.
 Entity-memory links require an explicit selection. A `skip` does no enrichment unless the model
-requests it. Partial work is checkpointed; actual failures reach the model before a retry decision.
+requests it. Partial work is checkpointed; actual failures reach the model for correction.
+Link reviews keep their three-review/eight-decision bounds and must cover every selected memory.
+Additional explicit targets are allowed; link mutations recheck active destination membership,
+including shared memories. Replacement attachment selections are optional, and omission leaves
+attachments unchanged. Completed or uncertain link operations are not automatically replayed.
 Capture does not upload files; `source_files` records provenance paths only. Clear contradictions
-are
-resolved automatically, while uncertain conflicts still return to the originating session.
+are resolved automatically, while uncertain conflicts still return to the originating session.
+Superseding a shared or foreign-project memory retires it everywhere; its replacement uses the
+chosen capture project, without automatically copying the old memory's project memberships.
 
 ## Configuration
 
@@ -512,10 +521,11 @@ scope setting means global recall. A malformed scope setting also uses global re
 warning. Scope preference is independent of capture destination.
 
 `recall_model_timeout_ms` limits each classification and review request (default 5,000 ms).
-`timeout_ms` limits the overall recall operation and each Forgetful HTTP request (default
-10,000 ms). Both settings are positive integer milliseconds in the user settings file. The
-overall deadline still applies when the model deadline is longer. Each capture and overlap task
-has a separate fixed three-minute model budget. Select a memory model that fits these limits.
+Without `timeout_ms`, overall recall and recall wait default to 30,000 ms; each Forgetful HTTP
+request still defaults to 10,000 ms. An explicit `timeout_ms` overrides both, preserving existing
+configuration behavior. Timeout settings are positive integer milliseconds in the user settings
+file. The overall deadline still applies when the model deadline is longer. Each capture and overlap
+task has a separate fixed three-minute model budget. Select a memory model that fits these limits.
 Restart or reload the extension after editing settings directly.
 
 `recall_concurrency` controls overlapping initial searches and read calls requested together by

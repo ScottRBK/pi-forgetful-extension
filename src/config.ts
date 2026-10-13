@@ -7,6 +7,7 @@ import type { FileLogLevel } from "./logging.ts";
 
 export const DEFAULT_FORGETFUL_BASE_URL = "http://localhost:8020/api/v1";
 export const DEFAULT_FORGETFUL_TIMEOUT_MS = 10_000;
+export const DEFAULT_RECALL_DEADLINE_MS = 30_000;
 export const DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS = 5_000;
 export const DEFAULT_MEMORY_CONTEXT_LIMIT_TOKENS = 100_000;
 export const DEFAULT_RECALL_CONCURRENCY = 2;
@@ -97,6 +98,7 @@ export interface ForgetfulConfig {
   scope: Scope;
   scopeSource: ScopeSource;
   instance: ForgetfulInstanceConfig;
+  recallDeadlineMs: number;
   recallModelTimeoutMs: number;
   recallConcurrency: number;
   contextLimitTokens: number;
@@ -386,6 +388,8 @@ export async function loadForgetfulConfig(
       options.agentDir ?? defaultAgentDir(), warnings),
     scope,
     scopeSource,
+    // Explicit timeout_ms historically controlled both transport and overall recall.
+    recallDeadlineMs: asPositiveInteger(user.timeout_ms, DEFAULT_RECALL_DEADLINE_MS),
     recallModelTimeoutMs: asPositiveInteger(
       user.recall_model_timeout_ms,
       DEFAULT_FORGETFUL_RECALL_MODEL_TIMEOUT_MS,

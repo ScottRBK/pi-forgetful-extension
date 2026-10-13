@@ -76,8 +76,9 @@ test("existingId selects exact resources without comparing names or content", re
     assert.deepEqual((await client.get(plan.memoryId)).code_artifact_ids, [artifact.id]);
   });
 
-test("resource creates recheck destination scope after beforeWrite", realOptions, async (t) => {
-  // Arrange: each create loses authorization while the asynchronous guard is running.
+test("resource creates keep model targets when the destination moves during beforeWrite",
+  realOptions, async (t) => {
+  // Arrange: the selected memory moves while the asynchronous guard is running.
   const { client, plan, writer } = await setup(t);
   const foreign = await client.createProject({ name: "Foreign", description: "Other scope",
     repo_name: "test/foreign" });
@@ -86,17 +87,19 @@ test("resource creates recheck destination scope after beforeWrite", realOptions
     const operation = { ...plan, entities: [], documents: [], codeArtifacts: [],
       [kind]: plan[kind] };
 
-    // Act / Assert: no operation may use authorization from before the guard.
-    await assert.rejects(writer.execute(operation, {}, undefined, undefined, async () => {
+    // Act: target scope is model-owned; the guard still runs before the create.
+    const state = await writer.execute(operation, {}, undefined, undefined, async () => {
       await client.knowledge.updateMemory(plan.memoryId, { project_ids: [foreign.id] });
-    }), /outside the project/);
+    });
+    assert.equal(state[kind].length, 1);
+    assert.deepEqual((await client.get(plan.memoryId)).project_ids, [foreign.id]);
   }
-  assert.equal((await client.knowledge.searchEntities("API", 10)).length, 0);
-  assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 0);
-  assert.equal((await client.knowledge.listCodeArtifacts(plan.projectId)).length, 0);
+  assert.equal((await client.knowledge.searchEntities("API", 10)).length, 1);
+  assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 1);
+  assert.equal((await client.knowledge.listCodeArtifacts(plan.projectId)).length, 1);
 });
 
-test("explicit selection rechecks scope after beforeWrite without expanding membership",
+test("explicit selection accepts moved resources without expanding membership",
   realOptions, async (t) => {
     // Arrange: selected resources move to another project during the guard.
     const { client, plan, writer } = await setup(t);
@@ -119,9 +122,11 @@ test("explicit selection rechecks scope after beforeWrite without expanding memb
     for (const kind of ["entities", "documents", "codeArtifacts"] as const) {
       const operation = { ...plan, entities: [], documents: [], codeArtifacts: [],
         [kind]: plan[kind] };
-      await assert.rejects(writer.execute(operation, {}, undefined, undefined, async () => {
+      const state = await writer.execute(operation, {}, undefined, undefined, async () => {
         await move[kind]();
-      }), /outside the destination project/);
+      });
+      assert.deepEqual(state[kind], [{ key: plan[kind]![0]!.key,
+        id: plan[kind]![0]!.existingId }]);
     }
     assert.deepEqual((await client.knowledge.getEntity(entity.id)).project_ids, [foreign.id]);
     assert.equal((await client.knowledge.getDocument(document.id)).project_id, foreign.id);
@@ -137,7 +142,7 @@ test("expectedClaim does not decide whether an explicit operation remains releva
     // Act.
     const result = await writer.execute(plan);
 
-    // Assert: scope still authorizes the operation; relevance belongs to the model.
+    // Assert: the model decides relevance; an outdated claim cannot veto the operation.
     assert.equal(result.entities.length, 1);
     assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 1);
     assert.equal((await client.knowledge.listCodeArtifacts(plan.projectId)).length, 1);
@@ -302,9 +307,9 @@ test("a lost relationship response is not reconstructed or blindly retried", rea
     assert.equal((await client.knowledge.getRelationships(saved.entities![0]!.id)).length, 1);
   });
 
-test("create arguments cannot place resources outside the destination project", realOptions,
+test("create arguments preserve model-selected resource projects", realOptions,
   async (t) => {
-    // Arrange: valid resource inputs name an unauthorized project.
+    // Arrange: valid resource inputs name shared and different projects.
     const { client, plan, writer } = await setup(t);
     const foreign = await client.createProject({ name: "Foreign", description: "Other scope",
       repo_name: "test/foreign" });
@@ -312,18 +317,23 @@ test("create arguments cannot place resources outside the destination project", 
     plan.documents![0]!.input.project_id = foreign.id;
     plan.codeArtifacts![0]!.input.project_id = foreign.id;
 
-    // Act / Assert: reject arguments rather than silently rewriting their scope.
+    // Act: forward the selected projects without rewriting them.
     for (const kind of ["entities", "documents", "codeArtifacts"] as const) {
       const operation = { ...plan, entities: [], documents: [], codeArtifacts: [],
         [kind]: plan[kind] };
-      await assert.rejects(writer.execute(operation), /outside the destination project/);
+      await writer.execute(operation);
     }
-    assert.equal((await client.knowledge.searchEntities("API", 10)).length, 0);
-    assert.equal((await client.knowledge.listDocuments(foreign.id)).length, 0);
-    assert.equal((await client.knowledge.listCodeArtifacts(foreign.id)).length, 0);
+    const entities = await client.knowledge.searchEntities("API", 10);
+    assert.equal(entities.length, 1);
+    assert.deepEqual((await client.knowledge.getEntity(entities[0]!.id)).project_ids,
+      [plan.projectId, foreign.id]);
+    assert.equal((await client.knowledge.listDocuments(foreign.id)).length, 1);
+    assert.equal((await client.knowledge.listCodeArtifacts(foreign.id)).length, 1);
+    assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 0);
+    assert.equal((await client.knowledge.listCodeArtifacts(plan.projectId)).length, 0);
   });
 
-test("ADD rejects another plan's receipts and uses fresh state for named resources", realOptions,
+test("ADD preserves completed receipts while executing a newly named attachment", realOptions,
   async (t) => {
     // Arrange: previous completed work created a document without attaching it.
     const { client, plan, writer } = await setup(t);
@@ -331,13 +341,14 @@ test("ADD rejects another plan's receipts and uses fresh state for named resourc
     const named = await client.knowledge.createDocument({ ...plan.documents![0]!.input,
       title: "Explicitly named attachment" });
 
-    // Act: a new instruction must use fresh state; keep the old successful receipt intact.
+    // Act: revised instructions keep completed receipts and execute unfinished work.
     const operation = { ...plan, operationId: "add-named", entities: [], documents: [],
       codeArtifacts: [], attachResources: true, existingDocumentIds: [named.id] };
-    await assert.rejects(writer.execute(operation, previous), /receipt.*instruction.*mismatch/i);
-    await writer.execute(operation);
+    const resumed = await writer.execute(operation, previous);
 
-    // Assert: fresh execution attaches only the explicitly named resource.
+    // Assert: only the explicitly named resource is attached; the completed create survives.
+    assert.deepEqual(resumed.documents, previous.documents);
+    assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 2);
     assert.deepEqual((await client.get(plan.memoryId)).document_ids, [named.id]);
   });
 
@@ -385,39 +396,42 @@ test("an API rejection preserves its body and successful receipts without substi
     assert.equal((await client.knowledge.getRelationships(source.id)).length, 1);
   });
 
-test("the synchronous enabled guard runs after fresh authorization", realOptions, async (t) => {
-  // Arrange: configuration changes during the final scope read.
+test("the synchronous enabled guard runs after beforeWrite revokes permission", realOptions,
+  async (t) => {
+  // Arrange: configuration changes during the public asynchronous write guard.
   const { client, plan } = await setup(t);
   let enabled = true;
-  const writer = new KnowledgeWriter(client.knowledge, async (id, signal) => {
-    const memory = await client.get(id, signal);
-    enabled = false;
-    return memory;
-  }, () => { if (!enabled) throw new Error("Writes disabled"); });
+  const writer = new KnowledgeWriter(client.knowledge, (id, signal) => client.get(id, signal),
+    () => { if (!enabled) throw new Error("Writes disabled"); });
   let saved: Partial<KnowledgeWriteState> = {};
 
   // Act / Assert: the guard prevents the first create after all awaited checks.
   await assert.rejects(writer.execute(plan, {}, async (state) => { saved = state; }, undefined,
-    async () => { enabled = true; }), /Writes disabled/);
-  assert.equal(saved.pendingCreates, undefined);
+    async () => { enabled = false; }), /Writes disabled/);
+  assert.deepEqual(saved.pendingCreates, undefined);
   assert.equal((await client.knowledge.searchEntities("API", 10)).length, 0);
   assert.equal((await client.knowledge.listDocuments(plan.projectId)).length, 0);
 });
 
-test("duplicate operation keys are rejected before any resource is created", realOptions,
+test("duplicate proposed keys do not silently drop a distinct requested resource", realOptions,
   async (t) => {
     // Arrange: two requested creates cannot share one completion receipt.
     const { client, plan, writer } = await setup(t);
     plan.entities!.push({ ...plan.entities![0]!, input: { ...plan.entities![0]!.input,
       name: "Another system" } });
 
-    // Act / Assert: do not silently treat the second requested create as complete.
-    await assert.rejects(writer.execute(plan), /duplicate.*key/i);
-    assert.equal((await client.knowledge.searchEntities("API", 10)).length, 0);
-    assert.equal((await client.knowledge.searchEntities("Another system", 10)).length, 0);
+    // Act: C19 removes key rejection; both distinct model-requested creates must execute.
+    const completed = await writer.execute(plan);
+    const restarted = new KnowledgeWriter(client.knowledge, (id, signal) => client.get(id, signal));
+    const resumed = await restarted.execute(plan, JSON.parse(JSON.stringify(completed)));
+    // Assert via REST: distinct creates survive shared keys and neither replays after restart.
+    assert.equal(completed.entities.length, 2);
+    assert.deepEqual(resumed.entities, completed.entities);
+    assert.equal((await client.knowledge.searchEntities("API", 10)).length, 1);
+    assert.equal((await client.knowledge.searchEntities("Another system", 10)).length, 1);
   });
 
-test("receipts reject changed instructions before writes, even with the same operationId",
+test("changed instructions preserve completed operations across operationId changes",
   realOptions, async (t) => {
     // Arrange: completed creates and attachments have durable receipts.
     const { client, plan, writer } = await setup(t);
@@ -441,15 +455,15 @@ test("receipts reject changed instructions before writes, even with the same ope
         content: "A changed create instruction" } }] },
     ];
 
-    // Act / Assert: neither an operation ID nor a resource key can hide changed arguments.
+    // Act / Assert: revised fields and operation IDs cannot repeat completed operations.
     for (const change of changes) {
       for (const operationId of [plan.operationId, "new-operation"]) {
-        let checkpointed = false;
         let guarded = false;
-        await assert.rejects(writer.execute({ ...plan, operationId, ...change }, completed,
-          async () => { checkpointed = true; }, undefined,
-          async () => { guarded = true; }), /receipt.*instruction.*mismatch/i);
-        assert.equal(checkpointed, false);
+        const resumed = await writer.execute({ ...plan, operationId, ...change }, completed,
+          undefined, undefined, async () => { guarded = true; });
+        assert.deepEqual(resumed.entities, completed.entities);
+        assert.deepEqual(resumed.documents, completed.documents);
+        assert.deepEqual(resumed.codeArtifacts, completed.codeArtifacts);
         assert.equal(guarded, false);
       }
     }
@@ -461,7 +475,7 @@ test("receipts reject changed instructions before writes, even with the same ope
       [completed.codeArtifacts[0]!.id]);
   });
 
-test("legacy receipts require explicit review and are never silently bound or discarded",
+test("legacy completed receipts prevent replay without a whole-plan identity gate",
   realOptions, async (t) => {
     // Arrange: old persisted state has successes but no instruction identity.
     const { client, plan, writer } = await setup(t);
@@ -471,12 +485,15 @@ test("legacy receipts require explicit review and are never silently bound or di
     delete legacy.instructionId;
     const before = structuredClone(legacy);
 
-    // Act / Assert: neither the original plan nor a changed plan can prove legacy ownership.
+    // Act / Assert: completed operations stay protected when diagnostic identity is absent.
     for (const operationId of [plan.operationId, "another-operation"]) {
-      let checkpointed = false;
-      await assert.rejects(writer.execute({ ...plan, operationId }, legacy,
-        async () => { checkpointed = true; }), /legacy.*receipt.*review/i);
-      assert.equal(checkpointed, false);
+      let guarded = false;
+      const resumed = await writer.execute({ ...plan, operationId }, legacy,
+        undefined, undefined, async () => { guarded = true; });
+      assert.equal(guarded, false);
+      assert.deepEqual(resumed.entities, completed.entities);
+      assert.deepEqual(resumed.documents, completed.documents);
+      assert.deepEqual(resumed.codeArtifacts, completed.codeArtifacts);
     }
     assert.deepEqual(legacy, before);
     assert.equal((await client.knowledge.searchEntities("API", 10)).length, 1);
@@ -538,8 +555,8 @@ test("legacy pending-only state cannot be discarded to repeat an uncertain creat
     delete legacy.instructionId;
     const before = structuredClone(legacy);
 
-    // Act / Assert: unbound legacy attempts require review; bound attempts remain unknown.
-    await assert.rejects(writer.execute(plan, legacy), /legacy.*receipt.*review/i);
+    // Act / Assert: legacy and bound attempts remain unknown, even under a revised operation ID.
+    await assert.rejects(writer.execute({ ...plan, operationId: "changed" }, legacy), /unknown/i);
     await assert.rejects(writer.execute(plan, saved), /unknown/i);
     assert.deepEqual(legacy, before);
     assert.deepEqual(legacy.entities, []);

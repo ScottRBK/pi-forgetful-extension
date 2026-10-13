@@ -1657,7 +1657,7 @@ export function createForgetfulExtension(
       if (dependencies.createRecall)
         return dependencies.createRecall(client, model, config);
       return new RecallService(client, model, {
-        deadlineMs: config.instance.timeoutMs,
+        deadlineMs: config.recallDeadlineMs,
         concurrency: config.recallConcurrency,
       });
     };
@@ -2466,6 +2466,18 @@ export function createForgetfulExtension(
       checkpointResult: CaptureCheckpointResult | undefined,
     ): Promise<void> => {
       if (!isCurrentRuntime(runtime, ctx)) return;
+      const outcomes = new Map<string, AutomaticCaptureJobOutcome | undefined>();
+      for (const jobId of captureProcessedJobIds(checkpointResult)) {
+        const outcome = await readCaptureOutcome(capture, runtime, jobId, checkpointResult);
+        outcomes.set(jobId, outcome);
+        if (!isCurrentRuntime(runtime, ctx)) return;
+        if (outcome?.candidateStages.some((item) => item.stage === "skipped" &&
+            item.reason?.startsWith("No matching capture project;"))) {
+          showWarningOnce(ctx, runtime.config, "capture-project-required",
+            "No matching capture project; create a project to save this knowledge. " +
+            "Use /forgetful project init, or your Forgetful CLI/MCP access.");
+        }
+      }
       const processedLiveJobIds = captureProcessedJobIds(checkpointResult).filter(
         (id) => runtime.pendingCaptureJobs.has(id),
       );
@@ -2483,9 +2495,7 @@ export function createForgetfulExtension(
         );
         if (jobIds.length === 0) return;
         let unavailable = 0;
-        const results = await Promise.all(jobIds.map(async (jobId) => ({
-          jobId, outcome: await readCaptureOutcome(capture, runtime, jobId, checkpointResult),
-        })));
+        const results = jobIds.map((jobId) => ({ jobId, outcome: outcomes.get(jobId) }));
         if (!isCurrentRuntime(runtime, ctx)) return;
         const items: CaptureFeedbackItem[] = [];
         for (const { jobId, outcome } of results) {
@@ -2820,7 +2830,7 @@ export function createForgetfulExtension(
           const outcome = await boundedWait(
             pending.promise,
             [signal, ctx.signal],
-            runtime.config.instance.timeoutMs,
+            runtime.config.recallDeadlineMs,
           );
           if (outcome.kind === "aborted")
             throw new Error("Forgetful recall wait was cancelled.");

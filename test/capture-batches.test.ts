@@ -142,7 +142,7 @@ test("bounded passes drain more than eight claims while deferring a failed branc
   assert.deepEqual(later.errors, ["Provider failure"]);
 });
 
-test("preparation cancellation retains its summary and never refunds an earlier extraction",
+test("preparation cancellation retains its summary and earlier failed attempt after budget reset",
   { timeout: 10_000 }, async (t) => {
     // Arrange: a previous extraction failed, consuming one genuine attempt and model call.
     const directory = await mkdtemp(join(tmpdir(), "capture-batches-cancel-"));
@@ -179,11 +179,11 @@ test("preparation cancellation retains its summary and never refunds an earlier 
     queue = new DurableQueueStore({ directory, ...identity });
     const pending = await queue.getJob(queued.jobId);
 
-    // Assert: only the interrupted claim is refunded; earlier extraction allowance is retained.
+    // Assert: cancellation refunds this claim; the previous failed attempt remains counted.
     assert.equal(cancelled.continuation, undefined);
     assert.equal(pending?.status, "paused");
     assert.equal(pending?.attempts, 1);
-    assert.equal(pending?.callCount, 1);
+    assert.equal(pending?.callCount, 0);
     assert.equal(pending?.snapshot.historySummary?.text, "Durable partial summary.");
     assert.deepEqual(pending?.snapshot.entries, input.entries);
     assert.deepEqual(pending?.snapshot.sourceConversation, input.conversation);
@@ -203,7 +203,7 @@ test("preparation cancellation retains its summary and never refunds an earlier 
     const completed = await queue.getJob(queued.jobId);
     assert.equal(completed?.status, "complete");
     assert.equal(completed?.attempts, 2);
-    assert.equal(completed?.callCount, 2);
+    assert.equal(completed?.callCount, 1);
   });
 
 test("three genuine preparation failures discard evidence without extraction charges",
@@ -445,8 +445,8 @@ test("permission-paused work is deferred while another branch drains", async (t)
   for (const id of healthyIds) assert.equal((await queue.getJob(id))?.status, "complete");
 });
 
-test("an exhausted extraction allowance does not start paid preparation", async (t) => {
-  // Arrange: an older interrupted job has no extraction calls left.
+test("a retry resets exhausted extraction allowance before preparation", async (t) => {
+  // Arrange: an older interrupted job spent all four calls on its previous attempt.
   const directory = await mkdtemp(join(tmpdir(), "capture-batches-exhausted-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, ...identity });
@@ -456,22 +456,24 @@ test("an exhausted extraction allowance does not start paid preparation", async 
   const provider: PreparedModel = {
     async prepareCapture(request) {
       preparations++;
-      await request.onConversationCompacted!({ summary: "Unusable preparation progress.",
+      await request.onConversationCompacted!({ summary: "Reusable preparation progress.",
         summarizedThroughEntryId: "a1", retainedConversation: request.conversation!.slice(2) });
-      return "progress";
+      return "ready";
     },
-    async complete() { throw new Error("No extraction allowance remains"); },
+    async complete() { return { candidates: [] }; },
   };
 
-  // Act: a bounded pass must reject the exhausted job before any provider work.
+  // Act: the new attempt prepares and extracts using its fresh allowance.
   const result = await service(queue, provider).checkpoint();
 
-  // Assert: unavailable extraction is a real failure, not an endlessly resumable preparation.
-  assert.equal(preparations, 0);
-  assert.match(result.errors.join(" "), /model call budget/i);
+  // Assert: the retry completes with one charged extraction and durable preparation.
+  assert.equal(preparations, 1);
+  assert.deepEqual(result.errors, []);
   assert.equal(result.continuation, undefined);
   const job = await queue.getJob(queued.jobId);
   assert.equal(job?.attempts, 1);
-  assert.equal(job?.callCount, 4);
-  assert.equal(job?.snapshot.historySummary, undefined);
+  assert.equal(job?.callCount, 1);
+  assert.equal(job?.status, "complete");
+  assert.equal((await queue.getWatermark(branch.sessionId, branch.branchId)).historyThroughEntryId,
+    "a1");
 });

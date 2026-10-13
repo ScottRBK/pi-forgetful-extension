@@ -21,7 +21,6 @@ type WriteClient = Pick<
   | "createDocument"
   | "getCodeArtifact"
   | "createCodeArtifact"
-  | "getRelationships"
   | "createRelationship"
   | "linkEntityMemory"
   | "linkMemories"
@@ -78,10 +77,12 @@ export interface KnowledgeWritePlan {
 export interface KnowledgeWriteReceipt {
   key: string;
   id: number;
+  /** Zero-based occurrence of this model key; absent on legacy/first-slot receipts. */
+  occurrence?: number;
 }
 
 export interface KnowledgeWriteState {
-  /** Exact instruction digest; omitted only by legacy or empty initial state. */
+  /** Latest instruction digest for diagnostics; it does not gate receipt reuse. */
   instructionId?: string;
   entities: KnowledgeWriteReceipt[];
   documents: KnowledgeWriteReceipt[];
@@ -106,6 +107,19 @@ export type KnowledgeMemoryReader = (
 ) => Promise<Memory>;
 
 type KnowledgeWriteSave = () => Promise<void>;
+
+type ResourceSlot<T> = T & { occurrence: number };
+
+// Payload corrections keep their slot when duplicate keys retain their relative order.
+// Separate occurrence metadata avoids collisions with arbitrary model keys and legacy receipts.
+function resourceSlots<T extends { key: string }>(resources: T[] = []): ResourceSlot<T>[] {
+  const occurrences = new Map<string, number>();
+  return resources.map((resource) => {
+    const occurrence = occurrences.get(resource.key) ?? 0;
+    occurrences.set(resource.key, occurrence + 1);
+    return { ...resource, occurrence };
+  });
+}
 
 interface KnowledgeAttachmentIds {
   documentIds: number[];
@@ -132,39 +146,45 @@ function positiveId(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function rejectedCreate(error: unknown): boolean {
+  if (!(error instanceof Error) || !("status" in error)) return false;
+  return error.status === 400 || error.status === 422;
+}
+
 function stateWithNumber(
   values: KnowledgeWriteReceipt[],
   key: string,
   id: number,
+  occurrence: number,
 ): void {
   if (!positiveId(id)) throw new Error(`Invalid knowledge ID for ${key}`);
-  const index = values.findIndex((receipt) => receipt.key === key);
-  const receipt = { key, id };
+  const index = values.findIndex((receipt) =>
+    receipt.key === key && (receipt.occurrence ?? 0) === occurrence);
+  const receipt = { key, id, ...(occurrence ? { occurrence } : {}) };
   if (index < 0) values.push(receipt);
   else values[index] = receipt;
 }
 
-function stateId(values: KnowledgeWriteReceipt[], key: string): number | undefined {
-  return values.find((receipt) => receipt.key === key)?.id;
+function stateId(
+  values: KnowledgeWriteReceipt[], key: string, occurrence = 0,
+): number | undefined {
+  return values.find((receipt) =>
+    receipt.key === key && (receipt.occurrence ?? 0) === occurrence)?.id;
 }
 
 function selectedIds(
   values: KnowledgeWriteReceipt[],
   resources: { key: string }[] = [],
 ): number[] {
-  return resources.map(({ key }) => {
-    const id = stateId(values, key);
+  return resourceSlots(resources).map(({ key, occurrence }) => {
+    const id = stateId(values, key, occurrence);
     if (!positiveId(id)) throw new Error(`Missing knowledge receipt for ${key}`);
     return id;
   });
 }
 
-function uniqueIds(values: number[], label: string): number[] {
-  const ids = [...new Set(values)];
-  if (ids.some((id) => !positiveId(id))) {
-    throw new Error(`Invalid knowledge ${label} ID`);
-  }
-  return ids;
+function uniqueIds(values: number[]): number[] {
+  return [...new Set(values)];
 }
 
 function sameIds(left: number[] | undefined, right: number[]): boolean {
@@ -242,135 +262,34 @@ export class KnowledgeWriter {
     private readonly assertCanWrite?: () => void,
   ) {}
 
-  private async currentMemory(
+  private async attachmentMemory(
     plan: KnowledgeWritePlan,
     signal?: AbortSignal,
   ): Promise<Memory> {
     if (!this.readMemory) {
-      throw new Error("Knowledge writes require a memory validation reader");
+      throw new Error("Knowledge attachments require a memory reader");
     }
-    const memory = await this.readMemory(plan.memoryId, signal);
-    if (memory.is_obsolete) {
-      throw new Error("Destination memory is obsolete");
-    }
-    if (!memory.project_ids.includes(plan.projectId)) {
-      throw new Error("Destination memory is outside the project");
-    }
-    return memory;
-  }
-
-  private async entityInProject(
-    id: number,
-    projectId: number,
-    signal?: AbortSignal,
-  ): Promise<Entity> {
-    const entity = await this.client.getEntity(id, signal);
-    if (!entity.project_ids.includes(projectId)) {
-      throw new Error("Knowledge entity is outside the destination project");
-    }
-    return entity;
-  }
-
-  private async documentInProject(
-    id: number,
-    projectId: number,
-    signal?: AbortSignal,
-  ): Promise<Document> {
-    const document = await this.client.getDocument(id, signal);
-    if (document.project_id !== projectId) {
-      throw new Error("Knowledge document is outside the destination project");
-    }
-    return document;
-  }
-
-  private async codeArtifactInProject(
-    id: number,
-    projectId: number,
-    signal?: AbortSignal,
-  ): Promise<CodeArtifact> {
-    const artifact = await this.client.getCodeArtifact(id, signal);
-    if (artifact.project_id !== projectId) {
-      throw new Error(
-        "Knowledge code artifact is outside the destination project",
-      );
-    }
-    return artifact;
-  }
-
-  private async validateAttachments(
-    documentIds: number[],
-    codeArtifactIds: number[],
-    projectId: number,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    for (const id of documentIds) {
-      await this.documentInProject(id, projectId, signal);
-    }
-    for (const id of codeArtifactIds) {
-      await this.codeArtifactInProject(id, projectId, signal);
-    }
-  }
-
-  private validatePlan(plan: KnowledgeWritePlan): void {
-    if (!positiveId(plan.projectId)) {
-      throw new Error("Invalid knowledge project ID");
-    }
-    if (!positiveId(plan.memoryId)) {
-      throw new Error("Invalid knowledge memory ID");
-    }
-    if (!plan.operationId.trim()) {
-      throw new Error("Missing knowledge operation ID");
-    }
-    for (const resources of [plan.entities, plan.documents, plan.codeArtifacts, plan.relationships])
-      this.validateResourceKeys(resources ?? []);
-    for (const resource of plan.entities ?? []) {
-      if (resource.existingId === undefined &&
-          (!resource.input.project_ids.length ||
-            resource.input.project_ids.some((id) => id !== plan.projectId))) {
-        throw new Error("Knowledge entity create is outside the destination project");
-      }
-    }
-    for (const resource of [...(plan.documents ?? []), ...(plan.codeArtifacts ?? [])]) {
-      if (resource.existingId === undefined && resource.input.project_id !== plan.projectId) {
-        throw new Error("Knowledge resource create is outside the destination project");
-      }
-    }
-  }
-
-  private validateResourceKeys(resources: { key: string }[]): void {
-    const keys = new Set<string>();
-    for (const resource of resources) {
-      if (keys.has(resource.key)) throw new Error(`Duplicate knowledge key: ${resource.key}`);
-      keys.add(resource.key);
-    }
+    return this.readMemory(plan.memoryId, signal);
   }
 
   private async createOnce<T extends { id: number }>(
     operation: {
       kind: string;
       key: string;
+      occurrence: number;
       create: () => Promise<T>;
-      authorize?: () => Promise<void>;
     },
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
-    signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<T> {
-    const { kind, key, create, authorize } = operation;
-    const attempt = JSON.stringify([plan.operationId, kind, key]);
-    if (state.pendingCreates?.includes(attempt)) {
-      throw new Error(
-        `Knowledge create outcome is unknown for ${kind} ${key}; model decision required`,
-      );
-    }
+    const { kind, key, occurrence, create } = operation;
+    const attempt = JSON.stringify([plan.operationId, kind, key, occurrence]);
     state.pendingCreates = [...(state.pendingCreates ?? []), attempt];
     await save();
     try {
       await beforeWrite?.();
-      await this.currentMemory(plan, signal);
-      await authorize?.();
       this.assertCanWrite?.();
     } catch (error) {
       // No API call was made: this attempt is safe to retry after authorization changes.
@@ -380,15 +299,27 @@ export class KnowledgeWriter {
       }
       throw error;
     }
-    // Leave the attempt pending on failure. Preserve the original error without repair.
-    const created = await create();
+    let created: T;
+    try {
+      created = await create();
+    } catch (error) {
+      if (rejectedCreate(error)) {
+        // The service rejected this payload. Keep prior receipts and allow field correction.
+        state.pendingCreates = state.pendingCreates.filter((item) => item !== attempt);
+        try { await save(); } catch {
+          // Preserve the service error; an older durable pending marker still blocks replay.
+        }
+      }
+      // All other failures may have accepted the create and must remain pending.
+      throw error;
+    }
     if (!positiveId(created.id)) throw new Error(`Invalid knowledge ID for ${key}`);
     state.pendingCreates = state.pendingCreates.filter((item) => item !== attempt);
     return created;
   }
 
   private async writeEntity(
-    resource: KnowledgeEntityPlan,
+    resource: ResourceSlot<KnowledgeEntityPlan>,
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
@@ -396,16 +327,14 @@ export class KnowledgeWriter {
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<Entity> {
     if (resource.existingId !== undefined) {
-      if (!positiveId(resource.existingId)) throw new Error("Invalid existing knowledge ID");
       await beforeWrite?.();
-      await this.currentMemory(plan, signal);
-      const selected = await this.entityInProject(resource.existingId, plan.projectId, signal);
+      const selected = await this.client.getEntity(resource.existingId, signal);
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce({ kind: "entity", key: resource.key,
+    return this.createOnce({ kind: "entity", key: resource.key, occurrence: resource.occurrence,
       create: () => this.client.createEntity(resource.input, signal),
-    }, plan, state, save, signal, beforeWrite);
+    }, plan, state, save, beforeWrite);
   }
 
   private async writeEntities(
@@ -415,16 +344,16 @@ export class KnowledgeWriter {
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<void> {
-    for (const resource of plan.entities ?? []) {
-      if (positiveId(stateId(state.entities, resource.key))) continue;
+    for (const resource of resourceSlots(plan.entities)) {
+      if (positiveId(stateId(state.entities, resource.key, resource.occurrence))) continue;
       const entity = await this.writeEntity(resource, plan, state, save, signal, beforeWrite);
-      stateWithNumber(state.entities, resource.key, entity.id);
+      stateWithNumber(state.entities, resource.key, entity.id, resource.occurrence);
       await save();
     }
   }
 
   private async writeDocument(
-    resource: KnowledgeDocumentPlan,
+    resource: ResourceSlot<KnowledgeDocumentPlan>,
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
@@ -432,16 +361,14 @@ export class KnowledgeWriter {
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<Document> {
     if (resource.existingId !== undefined) {
-      if (!positiveId(resource.existingId)) throw new Error("Invalid existing knowledge ID");
       await beforeWrite?.();
-      await this.currentMemory(plan, signal);
-      const selected = await this.documentInProject(resource.existingId, plan.projectId, signal);
+      const selected = await this.client.getDocument(resource.existingId, signal);
       this.assertCanWrite?.();
       return selected;
     }
-    return this.createOnce({ kind: "document", key: resource.key,
+    return this.createOnce({ kind: "document", key: resource.key, occurrence: resource.occurrence,
       create: () => this.client.createDocument(resource.input, signal),
-    }, plan, state, save, signal, beforeWrite);
+    }, plan, state, save, beforeWrite);
   }
 
   private async writeDocuments(
@@ -451,16 +378,16 @@ export class KnowledgeWriter {
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<void> {
-    for (const resource of plan.documents ?? []) {
-      if (positiveId(stateId(state.documents, resource.key))) continue;
+    for (const resource of resourceSlots(plan.documents)) {
+      if (positiveId(stateId(state.documents, resource.key, resource.occurrence))) continue;
       const document = await this.writeDocument(resource, plan, state, save, signal, beforeWrite);
-      stateWithNumber(state.documents, resource.key, document.id);
+      stateWithNumber(state.documents, resource.key, document.id, resource.occurrence);
       await save();
     }
   }
 
   private async writeCodeArtifact(
-    resource: KnowledgeCodeArtifactPlan,
+    resource: ResourceSlot<KnowledgeCodeArtifactPlan>,
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
@@ -468,18 +395,15 @@ export class KnowledgeWriter {
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<CodeArtifact> {
     if (resource.existingId !== undefined) {
-      if (!positiveId(resource.existingId)) throw new Error("Invalid existing knowledge ID");
       await beforeWrite?.();
-      await this.currentMemory(plan, signal);
-      const selected = await this.codeArtifactInProject(
-        resource.existingId, plan.projectId, signal,
-      );
+      const selected = await this.client.getCodeArtifact(resource.existingId, signal);
       this.assertCanWrite?.();
       return selected;
     }
     return this.createOnce({ kind: "code artifact", key: resource.key,
+      occurrence: resource.occurrence,
       create: () => this.client.createCodeArtifact(resource.input, signal),
-    }, plan, state, save, signal, beforeWrite);
+    }, plan, state, save, beforeWrite);
   }
 
   private async writeCodeArtifacts(
@@ -489,8 +413,8 @@ export class KnowledgeWriter {
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<void> {
-    for (const resource of plan.codeArtifacts ?? []) {
-      if (positiveId(stateId(state.codeArtifacts, resource.key))) continue;
+    for (const resource of resourceSlots(plan.codeArtifacts)) {
+      if (positiveId(stateId(state.codeArtifacts, resource.key, resource.occurrence))) continue;
       const artifact = await this.writeCodeArtifact(
         resource,
         plan,
@@ -499,7 +423,7 @@ export class KnowledgeWriter {
         signal,
         beforeWrite,
       );
-      stateWithNumber(state.codeArtifacts, resource.key, artifact.id);
+      stateWithNumber(state.codeArtifacts, resource.key, artifact.id, resource.occurrence);
       await save();
     }
   }
@@ -509,17 +433,13 @@ export class KnowledgeWriter {
     state: KnowledgeWriteState,
   ): KnowledgeAttachmentIds {
     return {
-      documentIds: uniqueIds(
-        [...(plan.existingDocumentIds ?? []), ...selectedIds(state.documents, plan.documents)],
-        "document",
-      ),
-      codeArtifactIds: uniqueIds(
-        [
-          ...(plan.existingCodeArtifactIds ?? []),
-          ...selectedIds(state.codeArtifacts, plan.codeArtifacts),
-        ],
-        "code artifact",
-      ),
+      documentIds: uniqueIds([
+        ...(plan.existingDocumentIds ?? []), ...selectedIds(state.documents, plan.documents),
+      ]),
+      codeArtifactIds: uniqueIds([
+        ...(plan.existingCodeArtifactIds ?? []),
+        ...selectedIds(state.codeArtifacts, plan.codeArtifacts),
+      ]),
     };
   }
 
@@ -528,14 +448,10 @@ export class KnowledgeWriter {
     requested: KnowledgeAttachmentIds,
   ): KnowledgeAttachmentIds {
     return {
-      documentIds: uniqueIds(
-        [...(memory.document_ids ?? []), ...requested.documentIds],
-        "document",
-      ),
-      codeArtifactIds: uniqueIds(
-        [...(memory.code_artifact_ids ?? []), ...requested.codeArtifactIds],
-        "code artifact",
-      ),
+      documentIds: uniqueIds([...(memory.document_ids ?? []), ...requested.documentIds]),
+      codeArtifactIds: uniqueIds([
+        ...(memory.code_artifact_ids ?? []), ...requested.codeArtifactIds,
+      ]),
     };
   }
 
@@ -547,12 +463,6 @@ export class KnowledgeWriter {
       !sameIds(memory.document_ids, ids.documentIds) ||
       !sameIds(memory.code_artifact_ids, ids.codeArtifactIds)
     );
-  }
-
-  private ensureMemoryCanReceiveAttachments(memory: Memory): void {
-    if (memory.project_ids.length > 1) {
-      throw new Error("Shared memories cannot receive rich attachments");
-    }
   }
 
   private attachmentPatch(ids: KnowledgeAttachmentIds): {
@@ -576,14 +486,10 @@ export class KnowledgeWriter {
   ): Promise<void> {
     if (state.attachmentsApplied) return;
     await beforeWrite?.();
-    const memory = await this.currentMemory(plan, signal);
+    const memory = await this.attachmentMemory(plan, signal);
     const requested = this.requestedAttachmentIds(plan, state);
-    await this.validateAttachments(
-      requested.documentIds, requested.codeArtifactIds, plan.projectId, signal,
-    );
     const ids = this.attachmentIds(memory, requested);
     if (this.attachmentsDiffer(memory, ids)) {
-      this.ensureMemoryCanReceiveAttachments(memory);
       this.assertCanWrite?.();
       await this.client.updateMemory(plan.memoryId, this.attachmentPatch(ids), signal);
     }
@@ -592,41 +498,25 @@ export class KnowledgeWriter {
   }
 
   private async writeRelationship(
-    resource: KnowledgeRelationshipPlan,
+    resource: ResourceSlot<KnowledgeRelationshipPlan>,
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
     save: KnowledgeWriteSave,
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<EntityRelationship> {
-    const sourceId = stateId(state.entities, resource.sourceEntityKey);
-    const targetId = stateId(state.entities, resource.targetEntityKey);
-    if (!positiveId(sourceId) || !positiveId(targetId)) {
-      throw new Error(`Relationship references an unknown entity: ${resource.key}`);
-    }
-    const authorize = async () => {
-      await this.entityInProject(sourceId, plan.projectId, signal);
-      await this.entityInProject(targetId, plan.projectId, signal);
-    };
-    if (resource.existingId !== undefined) {
-      if (!positiveId(resource.existingId)) throw new Error("Invalid existing knowledge ID");
-      await beforeWrite?.();
-      await this.currentMemory(plan, signal);
-      await authorize();
-      const relationships = await this.client.getRelationships(sourceId, signal);
-      const selected = relationships.find((item) => item.id === resource.existingId);
-      if (selected?.source_entity_id !== sourceId ||
-          selected.target_entity_id !== targetId) {
-        throw new Error("Selected relationship does not connect the requested entities");
-      }
-      this.assertCanWrite?.();
-      return selected;
-    }
-    return this.createOnce({ kind: "relationship", key: resource.key, authorize,
+    // Model-key references keep their original first binding, even when that key is duplicated.
+    // To address another occurrence, use explicit endpoint IDs without a matching model key.
+    const sourceId = stateId(state.entities, resource.sourceEntityKey) ??
+      resource.input.source_entity_id;
+    const targetId = stateId(state.entities, resource.targetEntityKey) ??
+      resource.input.target_entity_id;
+    return this.createOnce({ kind: "relationship", key: resource.key,
+      occurrence: resource.occurrence,
       create: () => this.client.createRelationship({
         ...resource.input, source_entity_id: sourceId, target_entity_id: targetId,
       }, signal),
-    }, plan, state, save, signal, beforeWrite);
+    }, plan, state, save, beforeWrite);
   }
 
   private async writeRelationships(
@@ -636,8 +526,15 @@ export class KnowledgeWriter {
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<void> {
-    for (const resource of plan.relationships ?? []) {
-      if (positiveId(stateId(state.relationships, resource.key))) continue;
+    for (const resource of resourceSlots(plan.relationships)) {
+      if (positiveId(stateId(state.relationships, resource.key, resource.occurrence))) continue;
+      if (resource.existingId !== undefined) {
+        // Reusing a relationship records the model's selection; it performs no server mutation.
+        state.relationships.push({ key: resource.key, id: resource.existingId,
+          ...(resource.occurrence ? { occurrence: resource.occurrence } : {}) });
+        await save();
+        continue;
+      }
       const relationship = await this.writeRelationship(
         resource,
         plan,
@@ -646,7 +543,7 @@ export class KnowledgeWriter {
         signal,
         beforeWrite,
       );
-      stateWithNumber(state.relationships, resource.key, relationship.id);
+      stateWithNumber(state.relationships, resource.key, relationship.id, resource.occurrence);
       await save();
     }
   }
@@ -661,17 +558,11 @@ export class KnowledgeWriter {
   ): Promise<void> {
     const key = `${resource.entityKey}:${plan.memoryId}`;
     if (hasValue(state.entityMemoryLinks, key)) return;
+    // As with relationship endpoints, a model key names its first resource occurrence.
     const entityId = stateId(state.entities, resource.entityKey);
-    if (!positiveId(entityId)) {
-      throw new Error(
-        `Memory link references an unknown entity: ${resource.entityKey}`,
-      );
-    }
     await beforeWrite?.();
-    await this.entityInProject(entityId, plan.projectId, signal);
-    await this.currentMemory(plan, signal);
     this.assertCanWrite?.();
-    await this.client.linkEntityMemory(entityId, plan.memoryId, signal);
+    await this.client.linkEntityMemory(entityId as number, plan.memoryId, signal);
     if (!hasValue(state.entityMemoryLinks, key)) {
       state.entityMemoryLinks.push(key);
     }
@@ -705,19 +596,9 @@ export class KnowledgeWriter {
     signal: AbortSignal | undefined,
     beforeWrite: KnowledgeWriteGuard | undefined,
   ): Promise<void> {
-    if (!positiveId(linkedMemoryId)) {
-      throw new Error("Invalid linked memory ID");
-    }
     const key = `${plan.memoryId}:${linkedMemoryId}`;
     if (hasValue(state.linkedMemories, key)) return;
-    if (!this.readMemory) {
-      throw new Error("Linked memories require a memory validation reader");
-    }
     await beforeWrite?.();
-    await this.currentMemory(plan, signal);
-    const target = await this.readMemory(linkedMemoryId, signal);
-    if (target.is_obsolete || !target.project_ids.includes(plan.projectId))
-      throw new Error("Linked memory changed or is outside the destination project");
     this.assertCanWrite?.();
     await this.client.linkMemories(plan.memoryId, [linkedMemoryId], signal);
     if (!hasValue(state.linkedMemories, key)) {
@@ -752,23 +633,11 @@ export class KnowledgeWriter {
     signal?: AbortSignal,
     beforeWrite?: KnowledgeWriteGuard,
   ): Promise<KnowledgeWriteState> {
-    this.validatePlan(plan);
     const state = normalizedState(previous);
-    if (state.instructionId === undefined &&
-        (state.entities.length || state.documents.length || state.codeArtifacts.length ||
-          state.relationships.length || state.entityMemoryLinks.length ||
-          state.linkedMemories.length || state.attachmentsApplied ||
-          state.pendingCreates?.length)) {
-      throw new Error(
-        "Legacy knowledge receipts have no instruction identity; explicit review required",
-      );
+    if (state.pendingCreates?.length) {
+      throw new Error("Knowledge create outcome is unknown; automatic retry blocked");
     }
-    const identity = instructionId(plan);
-    if (state.instructionId !== undefined && state.instructionId !== identity) {
-      throw new Error("Knowledge receipt instruction mismatch; use fresh state for a new plan");
-    }
-    state.instructionId = identity;
-    await this.currentMemory(plan, signal);
+    state.instructionId = instructionId(plan);
     const save = async (): Promise<void> => {
       if (checkpoint) await checkpoint(copyState(state));
     };

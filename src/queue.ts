@@ -66,6 +66,8 @@ export interface QueueJob {
   status: QueueJobStatus;
   attempts: number;
   callCount: number;
+  /** Resume a yielded/cancelled attempt without granting another model allowance. */
+  resumeAttempt?: boolean;
   extractedCandidates?: unknown[];
   candidateOutcomes: Record<string, unknown>;
   submissionRejections?: string[];
@@ -260,14 +262,6 @@ function scrubDiagnostic(value: string): string {
   return sanitizeText(value).slice(0, 1_000);
 }
 
-function sanitizeOutcomeMap(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value).map(([key, outcome]) => [key, sanitizeValue(outcome)]),
-  );
-}
-
 function outcomeRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {};
@@ -277,11 +271,13 @@ function interruptedWrite(job: QueueJob): boolean {
   if (job.supersession?.status === "started") return true;
   return Object.values(job.candidateOutcomes).some((value) => {
     const outcome = outcomeRecord(value);
-    if (outcome.uncertainWrite || outcomeRecord(outcome.creation).status === "started") return true;
+    if (outcome.uncertainWrite ||
+        ["started", "unknown"].includes(String(outcomeRecord(outcome.creation).status)))
+      return true;
     // A stopped candidate keeps historical failed receipts, not instructions to try again.
     if (outcome.stage === "execution-stopped") return false;
     const pending = outcomeRecord(outcome.knowledgeState).pendingCreates;
-    if (Array.isArray(pending) && pending.length && !outcome.executionFailure) return true;
+    if (Array.isArray(pending) && pending.length) return true;
     const results = outcomeRecord(outcome.linkReview).executionResults;
     return Array.isArray(results) &&
       results.some((item) => outcomeRecord(item).status === "started");
@@ -1308,6 +1304,8 @@ export class DurableQueueStore {
 
   private claimJob(job: QueueJob): void {
     job.status = "running";
+    if (!job.resumeAttempt) job.callCount = 0;
+    job.resumeAttempt = false;
     job.attempts += 1;
     job.startedAt = nowIso(this.now);
     job.ownerPid = process.pid;
@@ -1321,6 +1319,7 @@ export class DurableQueueStore {
       if (job?.status !== "running") return { value: undefined, changed: false };
       job.status = "pending";
       job.attempts = Math.max(0, job.attempts - 1);
+      job.resumeAttempt = true;
       job.ownerPid = undefined;
       job.updatedAt = nowIso(this.now);
       return { value: undefined };
@@ -1336,6 +1335,7 @@ export class DurableQueueStore {
       if (job?.status !== "running") return { value: undefined, changed: false };
       job.status = "paused";
       job.attempts = Math.max(0, job.attempts - 1);
+      job.resumeAttempt = true;
       if (interruptedModelCall) job.callCount = Math.max(0, job.callCount - 1);
       if (uncertainWrite !== undefined) {
         job.uncertainWrite = scrubDiagnostic(uncertainWrite);
@@ -1437,14 +1437,12 @@ export class DurableQueueStore {
     if (patch.callCount !== undefined) job.callCount = patch.callCount;
     if (patch.supersession !== undefined) job.supersession = patch.supersession;
     if (patch.extractedCandidates !== undefined) {
-      job.extractedCandidates = sanitizeValue(
-        jsonSnapshot(patch.extractedCandidates),
-      ) as unknown[];
+      job.extractedCandidates = jsonSnapshot(patch.extractedCandidates);
     }
     if (patch.candidateOutcomes) {
       job.candidateOutcomes = {
         ...job.candidateOutcomes,
-        ...sanitizeOutcomeMap(jsonSnapshot(patch.candidateOutcomes)),
+        ...jsonSnapshot(patch.candidateOutcomes),
       };
     }
     if (patch.submissionRejections !== undefined) {
@@ -1549,7 +1547,7 @@ export class DurableQueueStore {
     return this.mutate((state) => {
       const conflict = state.conflicts.find((item) => item.id === conflictId);
       if (!conflict) throw new Error(`Unknown pending conflict: ${conflictId}`);
-      Object.assign(conflict, sanitizeValue(jsonSnapshot(patch)), {
+      Object.assign(conflict, jsonSnapshot(patch), {
         updatedAt: nowIso(this.now),
       });
       if (conflict.status !== "pending") {

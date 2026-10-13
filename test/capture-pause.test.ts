@@ -70,31 +70,41 @@ for (const reason of ["disabled during inspection", "writes revoked"] as const) 
   });
 }
 
-test("exhausted model-call budget fails rather than leaving an unresumable pause", async (t) => {
-  // Arrange: extraction consumes the only allowed model call; overlap still needs one.
+test("a retry gets a fresh model allowance without repeating extracted work", async (t) => {
+  // Arrange: extraction spends the first attempt's single call; overlap needs another.
   const directory = await mkdtemp(join(tmpdir(), "capture-budget-failure-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "pause-test" });
-  let calls = 0;
-  const model = { async complete() { calls++; return { candidates: [candidate] }; } };
-  const client = { async search() { return []; } } as unknown as ForgetfulClient;
+  const purposes: string[] = [];
+  const model = { async complete(request: ModelRequest) {
+    purposes.push(request.purpose);
+    return request.purpose === "capture" ? { candidates: [candidate] }
+      : { action: "create", reason: "No existing memory." };
+  } };
+  let writes = 0;
+  const client = { async search() { return []; }, async create() {
+    writes++;
+    return { id: 99 };
+  } } as unknown as ForgetfulClient;
   const capture = new CaptureService({ queue, client, model, instanceId: "pause-test",
     maxModelCalls: 1 });
   const queued = await capture.enqueue(snapshot(directory));
 
-  // Act and assert: genuine failures exhaust three attempts with a visible final discard.
-  for (const attempt of [1, 2, 3]) {
-    const result = await capture.checkpoint();
-    assert.equal(result.paused, false);
-    assert.ok(result.errors.some((message) => /model call budget/.test(message)));
-    if (attempt < 3) assert.equal((await queue.getJob(queued.jobId))?.status, "pending");
-    else {
-      assert.equal(await queue.getJob(queued.jobId), undefined);
-      assert.deepEqual(result.discardedJobs?.map((item) => item.jobId), [queued.jobId]);
-    }
-  }
-  assert.equal(calls, 1, "retry must never overrun the saved model-call budget");
-  assert.deepEqual(await readdir(directory), ["queue.json"]);
+  // Act: the first attempt exhausts its budget, then the next uses its fresh allowance.
+  const failed = await capture.checkpoint();
+  assert.equal(failed.paused, false);
+  assert.match(failed.errors.join(" "), /model call budget/);
+  assert.equal((await queue.getJob(queued.jobId))?.status, "pending");
+  const resumed = await capture.checkpoint();
+
+  // Assert: extraction and the accepted write each happen once across both attempts.
+  assert.deepEqual(resumed.errors, []);
+  assert.deepEqual(purposes, ["capture", "overlap"]);
+  assert.equal(writes, 1);
+  const completed = await queue.getJob(queued.jobId);
+  assert.equal(completed?.status, "complete");
+  assert.equal(completed?.attempts, 2);
+  assert.equal(completed?.callCount, 1);
 });
 
 test("a completed checkpoint is not reported as paused merely because the worker returns void",

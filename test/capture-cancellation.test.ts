@@ -80,7 +80,7 @@ async function fixture(t: TestContext, options: Partial<CaptureServiceOptions> =
     action: "create" as "create" | "supersede" | "escalate",
     rest: undefined as undefined | ((path: string, init?: RequestInit) =>
       Promise<Response> | undefined),
-    creates: 0, supersessions: 0, models: [] as string[],
+    creates: 0, supersessions: 0, models: [] as string[], tasks: [] as JsonObject[],
   };
   const stored = new Map<number, Record<string, unknown>>();
   const client = new ApiForgetfulClient({ baseUrl: "https://fixture.invalid/api/v1",
@@ -125,6 +125,7 @@ async function fixture(t: TestContext, options: Partial<CaptureServiceOptions> =
       const name = providerTools(context)[0]!.name;
       state.models.push(name);
       const input = decodeProviderContext(context).input;
+      state.tasks.push(input);
       const source = input.eligibleEvidence?.find(
         (entry: { role: string }) => entry.role === "user");
       const arguments_: JsonObject = name === "submit_capture_candidates" ? {
@@ -138,7 +139,7 @@ async function fixture(t: TestContext, options: Partial<CaptureServiceOptions> =
         ? { action: "create" } : { action: state.action, conflictingMemoryId: 42,
           oldClaim: "Use Postgres.", newClaim: "Use SQLite.", reason: "Explicit correction.",
           sourceEntryIds: input.candidate.sourceEntryIds }
-        : name === "submit_capture_retry" ? { action: "retry", reason: "Retry requested." }
+        : name === "submit_capture_correction" ? { candidate: input.candidate }
           : name === "submit_memory_revision" ? {
             title: "Storage", content: "Use SQLite for this repo.", context: "Confirmed change.",
             keywords: ["storage"], tags: [], importance: 7, sourceEntryIds: input.evidenceEntryIds,
@@ -706,8 +707,9 @@ test("a worker finishing does not hide concurrent foreground resolution activity
   f.state.holdModel = false;
   releaseResolution();
   await bounded(resolving);
-  assert.ok(phases.includes("checking"));
   assert.ok(phases.includes("saving"));
+  assert.equal(f.state.creates, 1);
+  assert.equal(f.state.supersessions, 1);
   assert.equal(phases.at(-1), undefined);
 });
 
@@ -753,9 +755,9 @@ test("foreground safety checkpoint failure reports abort and storage diagnostics
   assert.equal(accepted, 1);
 });
 
-test("ordinary memory reads report reviewing; saved replacement validation reports checking",
+test("foreground activity follows held memory reads and writes until receipt completion",
   async (t) => {
-    // Arrange: hold an existing-memory read before the foreground model has proposed any save.
+    // Arrange: hold the existing-memory read, then the replacement POST at real REST boundaries.
     const phases: Array<"reviewing" | "saving" | "checking" | undefined> = [];
     const f = await fixture(t, { onActivity: (phase) => phases.push(phase) });
     f.stored.set(42, oldMemory);
@@ -763,30 +765,41 @@ test("ordinary memory reads report reviewing; saved replacement validation repor
     await f.run();
     const [conflict] = await f.service.pendingConflicts();
     const reading = gate<ReturnType<typeof heldResponse>>();
-    const checking = gate<ReturnType<typeof heldResponse>>();
+    const saving = gate<ReturnType<typeof heldResponse>>();
     let firstRead = true;
     f.state.rest = (path, init) => {
-      if (init?.method !== "GET") return;
-      if (!(firstRead && path.endsWith("/memories/42")) &&
-          !path.endsWith("/memories/99")) return;
-      const held = heldResponse(init.signal);
-      f.releases.push(() => held.resolve(Response.json(f.stored.get(99) ?? oldMemory)));
-      if (firstRead) { firstRead = false; reading.resolve(held); }
-      else checking.resolve(held);
-      return held.promise;
+      if (firstRead && init?.method === "GET" && path.endsWith("/memories/42")) {
+        firstRead = false;
+        const held = heldResponse(init.signal);
+        f.releases.push(() => held.resolve(Response.json(oldMemory)));
+        reading.resolve(held);
+        return held.promise;
+      }
+      if (init?.method === "POST" && path.endsWith("/memories")) {
+        f.state.creates++;
+        f.stored.set(99, { ...JSON.parse(String(init.body)), id: 99, is_obsolete: false,
+          linked_memory_ids: [] });
+        const held = heldResponse(init.signal);
+        f.releases.push(() => held.resolve(Response.json({ id: 99 })));
+        saving.resolve(held);
+        return held.promise;
+      }
     };
     const resolving = f.service.resolveConflict(conflict!.id,
       { action: "supersede", reason: "Confirmed correction." });
     f.track(resolving);
-    // Act and assert at the actual REST reads, not timing-dependent UI snapshots.
+
+    // Act and assert: activity stays visible until each held request settles.
     const old = await bounded(reading.promise);
     assert.equal(phases.at(-1), "reviewing");
     old.resolve(Response.json(oldMemory));
-    const saved = await bounded(checking.promise);
-    assert.equal(phases.at(-1), "checking");
+    const saved = await bounded(saving.promise);
+    assert.equal(phases.at(-1), "saving");
     f.state.rest = undefined;
-    saved.resolve(Response.json(f.stored.get(99)));
+    saved.resolve(Response.json({ id: 99 }));
     assert.equal((await bounded(resolving)).status, "resolved");
+    assert.equal(f.state.creates, 1);
+    assert.equal(phases.at(-1), undefined);
   });
 
 test("branch failure retains supersession uncertainty after a receipt checkpoint fails",
@@ -875,31 +888,60 @@ test("foreground write uncertainty cannot contaminate a concurrent worker's read
   });
 
 for (const operation of ["create", "supersede"] as const) {
-  test(`explicit ${operation} service failure still permits model-reviewed retry`, async (t) => {
-    // Arrange: one actual HTTP failure, followed by the model's existing retry instruction.
-    const f = await fixture(t);
-    if (operation === "supersede") {
-      f.stored.set(42, oldMemory);
-      f.state.action = "supersede";
-    }
-    let requests = 0;
-    f.state.rest = (path, init) => {
-      if (!(operation === "create" ? path.endsWith("/memories") && init?.method === "POST"
-        : init?.method === "DELETE")) return;
-      requests++;
-      if (requests === 1)
-        return Promise.resolve(new Response("Service maintenance detail", { status: 503 }));
-    };
-    // Act: complete a failed checkpoint, then let a new worker follow the model's decision.
-    await f.run();
-    const failed = await f.queue.getJob(f.jobId);
-    assert.match(failed?.lastError ?? "", /Service maintenance detail/);
-    const resumed = f.open();
-    await resumed.run();
-    // Assert: the safety change applies to unacknowledged operations, preserving explicit retries.
-    const saved = await resumed.queue.getJob(f.jobId);
-    assert.equal(saved?.status, "complete", saved?.lastError);
-    assert.equal(requests, 2);
-    assert.equal(saved?.uncertainWrite, undefined);
-  });
+  for (const response of ["rejected", "accepted-500"] as const) {
+    test(`${operation} ${response} preserves the error and mutation replay safety`, async (t) => {
+      // Arrange: a definite rejection is correctable; a lost acceptance cannot be replayed.
+      const f = await fixture(t);
+      if (operation === "supersede") {
+        f.stored.set(42, oldMemory);
+        f.state.action = "supersede";
+      }
+      let requests = 0;
+      const body = response === "rejected" ? '{"detail":"Rejected write field"}'
+        : '{"detail":"Receipt failed after acceptance"}';
+      f.state.rest = (path, init) => {
+        if (!(operation === "create" ? path.endsWith("/memories") && init?.method === "POST"
+          : init?.method === "DELETE")) return;
+        requests++;
+        if (requests !== 1) return;
+        if (response === "accepted-500") {
+          if (operation === "create") {
+            f.state.creates++;
+            f.stored.set(99, { ...JSON.parse(String(init!.body)), id: 99, is_obsolete: false,
+              linked_memory_ids: [] });
+          } else {
+            f.state.supersessions++;
+            f.stored.set(42, { ...oldMemory, is_obsolete: true, superseded_by: 99 });
+          }
+        }
+        return Promise.resolve(new Response(body, { status: response === "rejected" ? 422 : 500 }));
+      };
+
+      // Act: persist the actual error, then restart through the durable queue.
+      await f.run();
+      const failed = await f.queue.getJob(f.jobId);
+      assert.ok(failed?.lastError?.includes(body));
+      const resumed = f.open();
+      await resumed.run();
+
+      // Assert: accepted side effects happen once; only a definite rejection can be corrected.
+      const saved = await resumed.queue.getJob(f.jobId);
+      assert.equal(f.state.creates, 1);
+      if (response === "rejected") {
+        assert.equal(saved?.status, "complete", saved?.lastError);
+        assert.equal(requests, 2);
+        assert.equal(saved?.uncertainWrite, undefined);
+        if (operation === "create")
+          assert.ok(f.state.models.includes("submit_capture_correction"));
+        else assert.equal(f.state.models.filter(name => name === "submit_capture_links").length, 2);
+        assert.ok(JSON.stringify(f.state.tasks).includes("Rejected write field"));
+      } else {
+        assert.equal(requests, 1, "accepted mutation must never be replayed");
+        assert.ok(saved?.uncertainWrite, "500 after acceptance must retain an uncertain receipt");
+        assert.equal(saved?.status, "paused");
+        assert.ok(saved?.lastError?.includes(body));
+        assert.ok(!f.state.models.includes("submit_capture_correction"));
+      }
+    });
+  }
 }

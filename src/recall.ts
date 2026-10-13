@@ -1,5 +1,7 @@
 import { Type } from "typebox";
-import { DEFAULT_RECALL_CONCURRENCY, isRecallConcurrency } from "./config.ts";
+import {
+  DEFAULT_RECALL_CONCURRENCY, DEFAULT_RECALL_DEADLINE_MS, isRecallConcurrency,
+} from "./config.ts";
 import { mapConcurrent } from "./concurrency.ts";
 import {
   executeKnowledgeRead, KNOWLEDGE_READ_PARAMETERS, type KnowledgeReadRequest,
@@ -24,7 +26,6 @@ import type {
 } from "./contracts.ts";
 import { ModelSubmissionError } from "./contracts.ts";
 
-const DEFAULT_DEADLINE_MS = 10_000;
 const MAX_ENTITIES = 10;
 const MAX_PROJECT_CHOICES = 100;
 const MAX_SESSION_ENTRIES = 20;
@@ -682,7 +683,7 @@ export class RecallService {
     private readonly model: MemoryModelClient,
     options: RecallServiceOptions = {},
   ) {
-    this.defaultDeadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    this.defaultDeadlineMs = options.deadlineMs ?? DEFAULT_RECALL_DEADLINE_MS;
     this.concurrency = options.concurrency ?? DEFAULT_RECALL_CONCURRENCY;
     if (!isRecallConcurrency(this.concurrency)) {
       throw new TypeError("Recall concurrency must be an integer from 1 to 8");

@@ -9,10 +9,11 @@ export function storedMemoryContext(context: string): string {
 }
 
 export function replacementMemoryContext(context: string): string {
-  return storedMemoryContext(context).replace(LEGACY_CONTEXT_PROVENANCE, "").trim();
+  return context.replace(LEGACY_CONTEXT_PROVENANCE, "");
 }
 
 export function replacementMemoryInput(input: MemoryInput): MemoryInput {
+  if (typeof input.context !== "string") return input;
   const context = replacementMemoryContext(input.context);
   return context === input.context ? input : { ...input, context };
 }

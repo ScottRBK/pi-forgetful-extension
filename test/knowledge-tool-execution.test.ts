@@ -279,10 +279,18 @@ test("foreground supersession does not invent an omitted replacement title or co
       content: "An explicit replacement claim", reason: "Correction",
       source_files: ["src/api.ts"] };
 
-    // Act / Assert: normal create validation explains the missing original arguments.
-    await assert.rejects(executeKnowledgeWrite(client, request, context), /title is required/);
+    // Act / Assert: Forgetful itself reports the missing fields; the predecessor stays active.
+    const missingField = (field: string) => (error: unknown) => {
+      assert.ok(error instanceof ForgetfulHttpError);
+      assert.equal(error.status, 400);
+      const details = JSON.parse(error.responseBody!).error;
+      assert.ok(details.some((item: { type: string; loc: string[] }) =>
+        item.type === "missing" && item.loc.includes(field)));
+      return true;
+    };
+    await assert.rejects(executeKnowledgeWrite(client, request, context), missingField("title"));
     await assert.rejects(executeKnowledgeWrite(client, { ...request, title: "Replacement" },
-      context), /context is required/);
+      context), missingField("context"));
     assert.equal((await client.get(old.id)).is_obsolete, false);
   });
 

@@ -199,7 +199,7 @@ test("three candidates share one overlap task and reuse an earlier sibling", rea
 for (const malformedId of [false, true]) {
 test(`invalid batch preserves valid sibling; malformed ID=${malformedId}`, realOptions,
   async (t) => {
-    // Arrange: candidate-local IDs must survive batching without leaking sibling evidence.
+    // Arrange: private IDs remain checked; unsupplied targets now reach the real service.
     const baseUrl = await startForgetful(t);
     const client = new ApiForgetfulClient({ baseUrl });
     const project = await client.createProject({ name: "Isolation",
@@ -211,8 +211,8 @@ test(`invalid batch preserves valid sibling; malformed ID=${malformedId}`, realO
     let corrections = 0;
     const service = new CaptureService({ queue, client, instanceId: "links",
       model: model((name, input) => {
-        if (name === "submit_capture_candidates") return { candidates: [candidate("bad"),
-          candidate("good")] };
+        if (name === "submit_capture_candidates") return { candidates: [candidate("good"),
+          candidate("bad")] };
         if (name === "submit_capture_decisions") {
           corrections++;
           return { decisions: [{ candidateId: malformedId ? "unknown" : "bad", action: "supersede",
@@ -228,12 +228,19 @@ test(`invalid batch preserves valid sibling; malformed ID=${malformedId}`, realO
     await service.checkpoint();
     // Assert.
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal(job.status, "complete", job.lastError);
-    assert.equal(corrections, 3);
-    // The surviving singleton has an empty neighborhood, so no link task is needed.
+    assert.equal(job.status, malformedId ? "complete" : "pending", job.lastError);
+    assert.equal(corrections, malformedId ? 3 : 1);
+    // No link task runs before the rejected target read; the valid sibling's write survives.
     assert.equal(job.callCount, 2);
-    assert.equal((job.candidateOutcomes.bad as any).stage, "skipped");
-    assert.equal((job.candidateOutcomes.good as any).stage, "created");
+    if (malformedId) assert.equal((job.candidateOutcomes.bad as any).stage, "skipped");
+    else {
+      assert.match(job.lastError ?? "", /HTTP 404: \{"error":"Memory not found"\}/);
+      assert.equal((job.candidateOutcomes.bad as any).stage, "decided");
+      assert.deepEqual(job.submissionRejections, []);
+    }
+    const good = job.candidateOutcomes.good as any;
+    assert.equal(good.stage, malformedId ? "created" : "links-pending");
+    assert.equal((await client.get(good.memoryId)).content, candidate("good").content);
   });
 }
 
@@ -286,7 +293,7 @@ test("lost unlink response reaches the model before it explicitly leaves the abs
     // Assert.
     const after = (await queue.getJob(queued.jobId))!;
     assert.equal(after.status, "complete", after.lastError);
-    assert.equal(after.callCount, 4);
+    assert.equal(after.callCount, 1);
     assert.equal(reviews, 2);
     assert.equal(deletes, 1);
     assert.equal(creates, 2, "One setup memory and one capture creation");
@@ -301,10 +308,11 @@ test(`supersession retains selected references; race=${preservationRace}`, realO
     // Arrange: one still-applicable document and memory connection, plus a stale document.
     const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: "0" });
     let lose = preservationRace === "lost-reply";
-    let oldId = 0;
+    let oldId = 0, supersessionCalls = 0;
     let arrived = false, lateId = 0;
     const concurrent = new ApiForgetfulClient({ baseUrl });
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (init?.method === "DELETE" && !String(url).includes("/links/")) supersessionCalls++;
       const response = await fetch(url, init);
       if (preservationRace === "late-link" && !arrived && oldId && init?.method === "PUT" &&
           String(url).includes("/memories/")) {
@@ -365,11 +373,24 @@ test(`supersession retains selected references; race=${preservationRace}`, realO
     // Act.
     const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
-    if (preservationRace === "lost-reply") await service.checkpoint();
+    const beforeRetry = (await queue.getJob(queued.jobId))!;
+    if (preservationRace === "lost-reply") {
+      assert.equal(beforeRetry.status, "paused");
+      assert.match(beforeRetry.lastError ?? "", /HTTP 503: Lost supersession response/);
+      assert.ok((beforeRetry.candidateOutcomes.decision as any).uncertainWrite);
+      const restarted = new CaptureService({
+        queue: new DurableQueueStore({ directory, instanceId: "links" }), client,
+        instanceId: "links", model: model(() => {
+          assert.fail("An uncertain supersession must not request a new model decision");
+        }),
+      });
+      await restarted.checkpoint();
+    }
     // Assert: actual new references preserve the model's choices; old references remain historical.
     const job = (await queue.getJob(queued.jobId))!;
     assert.equal(reviewed, true);
-    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(job.status, preservationRace === "lost-reply" ? "paused" : "complete",
+      job.lastError);
     const outcome = job.candidateOutcomes.decision as any;
     const replacement = await client.get(outcome.replacementId);
     const historical = await client.get(old.id);
@@ -377,12 +398,17 @@ test(`supersession retains selected references; race=${preservationRace}`, realO
     assert.ok(replacement.linked_memory_ids!.includes(related.id));
     assert.deepEqual(historical.document_ids, [retained.id, stale.id]);
     assert.equal(historical.superseded_by, replacement.id);
+    if (preservationRace === "lost-reply") {
+      assert.equal(supersessionCalls, 1, "An accepted write with a lost reply cannot be replayed");
+      assert.equal(reviews, 1);
+      assert.deepEqual(outcome, beforeRetry.candidateOutcomes.decision);
+    }
     if (preservationRace === "late-link") {
       assert.equal(arrived, true);
       assert.ok(!replacement.linked_memory_ids!.includes(lateId));
       assert.ok(historical.linked_memory_ids!.includes(lateId));
     }
-    assert.equal(job.callCount, preservationRace === "lost-reply" ? 4 : 3);
+    assert.equal(job.callCount, 3, "A paused uncertain job is not claimed as a new attempt");
   });
 }
 
@@ -435,9 +461,9 @@ for (const scenario of [
       const memoryId = (afterCreation!.candidateOutcomes.decision as any).memoryId;
       const stored = await client.get(memoryId);
       assert.ok(stored.linked_memory_ids!.includes(endpoint.id));
-      assert.equal(attempts, 2, "the saved model-call budget must not be exceeded");
+      assert.equal(attempts, 3, "each of the three attempts gets a fresh model-call budget");
       assert.deepEqual(finalResult.discardedJobs?.map((item) => item.jobId), [queued.jobId]);
-      assert.ok(finalResult.errors.some((message) => /model call budget/.test(message)));
+      assert.deepEqual(finalResult.errors, ["Memory model request failed"]);
       return;
     }
     // Scope and uncertainty block writes; changed claims do not veto model operations.
@@ -446,7 +472,7 @@ for (const scenario of [
     const stored = await client.get(outcome.memoryId);
     if (scenario === "retry" || scenario === "stale") {
       assert.equal(job.status, "complete", job.lastError);
-      assert.equal(job.callCount, scenario === "retry" ? 4 : 3);
+      assert.equal(job.callCount, scenario === "retry" ? 1 : 3);
       assert.ok(!stored.linked_memory_ids!.includes(endpoint.id));
     } else {
       assert.ok(stored.linked_memory_ids!.includes(endpoint.id));
@@ -509,7 +535,7 @@ test("overlap considers existing entity edges and rejects an unsupported reverse
     assert.equal((await client.knowledge.searchEntities("Gateway", 100)).length, 1);
   });
 
-test("unfinished legacy queues retain spent allowance and never recurate completed candidates",
+test("unfinished legacy queues reset retry allowance and never recurate completed candidates",
   realOptions, async (t) => {
     // Arrange: a pre-review worker already saved one candidate using all four model tasks.
     const baseUrl = await startForgetful(t);
@@ -522,16 +548,22 @@ test("unfinished legacy queues retain spent allowance and never recurate complet
     const directory = await mkdtemp(join(tmpdir(), "capture-legacy-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const queue = new DurableQueueStore({ directory, instanceId: "links" });
+    let reviews = 0;
     const service = new CaptureService({ queue, client, instanceId: "links",
-      model: { complete: async () => { throw new Error("Spent allowance must remain spent"); } } });
+      model: { complete: async (request) => {
+        assert.equal(request.submission?.name, "submit_capture_links");
+        reviews++;
+        throw new Error("Transient link review failure");
+      } } });
     const queued = await service.enqueue(snapshot(project));
     await queue.checkpoint(queued.jobId, { callCount: 4, extractedCandidates: [candidate()],
       candidateOutcomes: { decision: { stage: "memory-created", action: "create",
         memoryId: saved.id, destinationProjectId: project.id } } });
-    // Act: new worker resumes the saved memory but cannot make an unfunded judgment.
+    // Act: a retry has fresh allowance for the saved memory's outstanding link review.
     await service.checkpoint();
     const pending = (await queue.getJob(queued.jobId))!;
-    assert.equal(pending.callCount, 4);
+    assert.equal(pending.callCount, 1);
+    assert.equal(reviews, 1);
     assert.notEqual(pending.status, "complete");
     assert.equal((pending.candidateOutcomes.decision as any).memoryId, saved.id);
     assert.notEqual((pending.candidateOutcomes.decision as any).linkReview.status, "complete");
@@ -540,7 +572,8 @@ test("unfinished legacy queues retain spent allowance and never recurate complet
       candidateOutcomes: { decision: { stage: "created", memoryId: saved.id } } });
     await service.checkpoint();
     const complete = (await queue.getJob(queued.jobId))!;
-    assert.equal(complete.callCount, 4);
+    assert.equal(complete.callCount, 1);
+    assert.equal(reviews, 1, "Completed candidates are never reviewed again");
     assert.equal((complete.candidateOutcomes.decision as any).linkReview, undefined);
   });
 
@@ -832,14 +865,14 @@ test("retry does not repeat a verified unlink after another writer restores the 
     // Act: an external writer restores the already-reviewed edge before the worker resumes.
     await setup.knowledge.linkMemories(receipt.memoryId, [first.id]);
     await service.checkpoint();
-    // Assert: the new model instruction retains the restored edge and retries the failed removal.
+    // Assert: completed removal is not repaired and an uncertain second removal is not replayed.
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(job.status, "pending", job.lastError);
     assert.ok((await setup.get(receipt.memoryId)).linked_memory_ids!.includes(first.id));
-    assert.equal(job.callCount, 4);
+    assert.equal(job.callCount, 1);
     assert.equal(reviews, 2);
     assert.equal(firstDeletes, 1);
-    assert.ok(!(await setup.get(receipt.memoryId)).linked_memory_ids!.includes(second.id));
+    assert.ok((await setup.get(receipt.memoryId)).linked_memory_ids!.includes(second.id));
   });
 
 test("earlier-sibling reuse follows the explicit selection despite changed claims",
@@ -983,7 +1016,7 @@ for (const [drift, firstAction] of [["edge", "reject"], ["endpoint", "reject"],
     });
 }
 
-for (const race of ["document-permission", "entity-permission", "late-entity",
+for (const race of ["document-scope", "entity-scope", "late-entity",
   "removed-association", "removed-edge", "removed-entity", "late-replacement-link",
   "gate-off", "stop"] as const) {
   test(`supersession checks permissions without enforcing completed associations: ${race}`,
@@ -1012,9 +1045,7 @@ for (const race of ["document-permission", "entity-permission", "late-entity",
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
       const path = new URL(String(url)).pathname;
       const mutation = ["PUT", "POST", "DELETE"].includes(init?.method ?? "");
-      if (changed && mutation && ((race === "document-permission" && init?.method === "PUT") ||
-          (race === "entity-permission" && path.endsWith(`/entities/${entity.id}/memories`)) ||
-          race === "gate-off" || race === "stop")) unauthorized++;
+      if (changed && mutation && (race === "gate-off" || race === "stop")) unauthorized++;
       const response = await fetch(url, init);
       if (init?.method === "POST" && path.endsWith("/memories") &&
           !path.includes("/entities/"))
@@ -1033,10 +1064,10 @@ for (const race of ["document-permission", "entity-permission", "late-entity",
         if ((race === "gate-off" || race === "stop") && attached) {
           changed = true;
           if (race === "stop") service.stop();
-        } else if (race === "document-permission") {
+        } else if (race === "document-scope") {
           changed = true;
           await setup.knowledge.updateDocument(document.id, { project_id: foreign.id });
-        } else if (race === "entity-permission") {
+        } else if (race === "entity-scope") {
           changed = true;
           await setup.knowledge.updateEntity(entity.id, { project_ids: [foreign.id] });
         } else if (race === "late-entity") {
@@ -1082,9 +1113,9 @@ for (const race of ["document-permission", "entity-permission", "late-entity",
       await service.checkpoint();
       assert.deepEqual(await setup.getMemoryEntityIds(replacement), []);
     }
-    assert.equal(unauthorized, 0, "No writes using revoked resource or worker permission");
+    assert.equal(unauthorized, 0, "No writes using revoked worker permission");
     const job = (await queue.getJob(queued.jobId))!;
-    const blocked = ["document-permission", "entity-permission", "gate-off", "stop"].includes(race);
+    const blocked = ["gate-off", "stop"].includes(race);
     if (blocked) assert.notEqual(job.status, "complete");
     else assert.equal(job.status, "complete", job.lastError);
     assert.equal((await setup.get(old.id)).is_obsolete, !blocked);
@@ -1152,7 +1183,7 @@ for (const [status, phase] of [[404, "inspection"], [503, "inspection"],
         assert.ok(job.lastError?.includes(serviceText), job.lastError);
         await service.checkpoint();
         assert.equal(reviews, 2);
-        assert.equal((await queue.getJob(queued.jobId))!.callCount, 4);
+        assert.equal((await queue.getJob(queued.jobId))!.callCount, 1);
         return;
       }
       if (status === 503) {
@@ -1212,7 +1243,7 @@ test(`synchronous ${revoke} during final authorization prevents mutation`, realO
 }
 
 for (const race of ["scope", "gate", "stop"] as const) {
-test(`capture rich attachments revalidate scope and guard ${race}`, realOptions,
+test(`capture rich attachments allow scope changes and guard ${race}`, realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: "0" });
     const setup = new ApiForgetfulClient({ baseUrl });
@@ -1220,16 +1251,14 @@ test(`capture rich attachments revalidate scope and guard ${race}`, realOptions,
       repo_name: "test/writer" });
     const foreign = await setup.createProject({ name: "Foreign", description: "Other attachments",
       repo_name: "test/writer-other" });
-    let documentId = 0, documentReads = 0, moved = false, unauthorized = 0;
+    let documentId = 0, moved = false, attachmentWrites = 0;
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
-      if (moved && init?.method === "PUT" && String(url).includes("/memories/")) unauthorized++;
+      if (moved && init?.method === "PUT" && String(url).includes("/memories/")) attachmentWrites++;
       const response = await fetch(url, init);
-      if (init?.method === "POST" && String(url).endsWith("/documents"))
+      if (init?.method === "POST" && String(url).endsWith("/documents")) {
         documentId = (await response.clone().json() as { id: number }).id;
-      if (documentId && init?.method === "GET" &&
-          String(url).endsWith(`/documents/${documentId}`)) {
-        documentReads++;
-        if (documentReads === 1 && race !== "scope") {
+        // Revoke after the accepted create, before the public worker authorizes attachment writes.
+        if (race !== "scope") {
           moved = true;
           if (race === "stop") service.stop();
         }
@@ -1258,8 +1287,18 @@ test(`capture rich attachments revalidate scope and guard ${race}`, realOptions,
     const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
     assert.equal(moved, true);
-    assert.equal(unauthorized, 0);
-    assert.notEqual((await queue.getJob(queued.jobId))!.status, "complete");
+    const job = (await queue.getJob(queued.jobId))!;
+    const stored = await setup.get((job.candidateOutcomes.decision as any).memoryId);
+    if (race === "scope") {
+      assert.equal(attachmentWrites, 1);
+      assert.equal(job.status, "complete", job.lastError);
+      assert.equal((await setup.knowledge.getDocument(documentId)).project_id, foreign.id);
+      assert.deepEqual(stored.document_ids, [documentId]);
+    } else {
+      assert.equal(attachmentWrites, 0, "Revoked permission must prevent attachment mutation");
+      assert.deepEqual(stored.document_ids, []);
+      assert.notEqual(job.status, "complete");
+    }
   });
 
 }
@@ -1331,8 +1370,10 @@ test("batch overlap has an explicit array contract and preserves the trusted ove
         else {
           assert.equal(name, "submit_capture_decisions");
           assert.ok(context.systemPrompt?.includes(overlay), context.systemPrompt);
-          assert.match(context.systemPrompt ?? "", /decisions array/);
-          assert.match(context.systemPrompt ?? "", /candidateId/);
+          assert.match(context.systemPrompt ?? "", /one decision per supplied candidate ID/);
+          const schema = context.tools![0]!.parameters as any;
+          assert.equal(schema.properties.decisions.type, "array");
+          assert.ok(schema.properties.decisions.items.required.includes("candidateId"));
           assert.deepEqual(input.candidates.map((item: any) => item.candidate.id),
             ["first", "second"]);
           assert.deepEqual(input.siblings.map((item: any) => item.id), ["first", "second"]);
@@ -1491,7 +1532,7 @@ for (const drift of ["none", "restored-edge", "endpoint", "arrived-edge"] as con
       });
       await restarted.checkpoint();
       const job = (await queue.getJob(queued.jobId))!;
-      assert.equal(job.callCount, 3);
+      assert.equal(job.callCount, 0);
       assert.equal(mutations, 0);
       assert.equal(job.status, "complete", job.lastError);
       assert.equal((job.candidateOutcomes.decision as any).linkReview.status, "complete");
@@ -1501,7 +1542,7 @@ for (const drift of ["none", "restored-edge", "endpoint", "arrived-edge"] as con
 }
 
 for (const drift of ["replacement-scope", "memory-scope", "entity-scope"] as const) {
-  test(`partial migration reauthorizes after permission changes ${drift}`,
+  test(`partial migration follows explicit selections after scope changes ${drift}`,
     realOptions, async (t) => {
     const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: "0" });
     const setup = new ApiForgetfulClient({ baseUrl });
@@ -1561,14 +1602,20 @@ for (const drift of ["replacement-scope", "memory-scope", "entity-scope"] as con
     const conflict = (await service.pendingConflicts())[0]!;
     assert.ok(conflict);
 
-    await assert.rejects(service.resolveConflict(conflict.id, { action: "supersede",
-      evidenceEntryIds: ["user"], reason: "Change retries, retain timeout." }),
-    /changed|scope|destination/i);
+    const result = await service.resolveConflict(conflict.id, { action: "supersede",
+      evidenceEntryIds: ["user"], reason: "Change retries, retain timeout." });
 
     assert.equal(changed, true);
-    assert.equal(migrationWrites, 0);
-    assert.equal((await setup.get(old.id)).is_obsolete, false);
-    assert.equal((await queue.getConflict(conflict.id))!.status, "pending");
+    assert.equal(migrationWrites, 1, "The explicitly selected connection is preserved");
+    assert.equal(result.status, "resolved");
+    assert.equal((await setup.get(old.id)).is_obsolete, true);
+    assert.equal((await queue.getConflict(conflict.id))!.status, "resolved");
+    if (drift === "entity-scope") {
+      const memories = await setup.knowledge.getEntityMemories(entity.id);
+      assert.ok(memories.some((memory) => memory.id === replacementId));
+    } else {
+      assert.ok((await setup.get(replacementId!)).linked_memory_ids!.includes(related.id));
+    }
   });
 }
 

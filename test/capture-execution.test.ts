@@ -137,17 +137,17 @@ test("failed link operations return to the model before any retry decision", rea
     assert.equal(judgments, 2);
     assert.match(JSON.stringify(received), /maintenance detail: edge store unavailable/);
     assert.equal(deletes, 1);
-    assert.equal(job.callCount, 4);
+    assert.equal(job.callCount, 1, "The new attempt has its own model-task allowance");
     assert.equal(job.status, "complete", job.lastError);
     const outcome = job.candidateOutcomes.fact as any;
     assert.ok((await api.get(outcome.memoryId)).linked_memory_ids?.includes(old.id));
   });
 
-test("a failed create is reported to the model, not automatically repeated", realOptions,
+test("an unknown create retains its diagnostic and cannot enter field correction", realOptions,
   async (t) => {
     // Arrange: service returns its own plain-text failure; capture cannot infer a new plan.
     const { baseUrl, project, queue } = await fixture(t);
-    let creates = 0, seen: any;
+    let creates = 0, correctionCalls = 0;
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
       if (init?.method === "POST" && String(url).endsWith("/memories")) {
         creates++;
@@ -159,21 +159,24 @@ test("a failed create is reported to the model, not automatically repeated", rea
       async complete(request) {
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") return { action: "create" };
-        assert.equal(request.submission?.name, "submit_capture_retry");
-        seen = request.input;
-        return { action: "stop", reason: "Do not repeat a write with an unknown outcome." };
+        correctionCalls++;
+        assert.fail("Unknown writes must be reconciled before another model correction");
       },
     } });
     // Act.
     const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
     await service.checkpoint();
-    // Assert: stopped is explicitly distinct from saved or a semantic duplicate skip.
+    // Assert: uncertainty stays durable; no model correction can authorize a duplicate.
     assert.equal(creates, 1);
-    assert.match(JSON.stringify(seen), /storage unavailable: write outcome unknown/);
+    assert.equal(correctionCalls, 0);
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal((job.candidateOutcomes.fact as any).stage, "execution-stopped");
-    assert.equal(job.callCount, 3);
+    assert.equal(job.status, "paused");
+    assert.match(job.uncertainWrite!, /storage unavailable: write outcome unknown/);
+    assert.match((job.candidateOutcomes.fact as any).executionFailure,
+      /storage unavailable: write outcome unknown/);
+    assert.equal((job.candidateOutcomes.fact as any).creation.status, "unknown");
+    assert.equal(job.callCount, 2);
   });
 
 test("overlap model selects exact existing rich records without executor identity matching",
@@ -223,12 +226,11 @@ test("restart reports an interrupted create instead of guessing that it failed",
     // Arrange: a stored memory and an attempt receipt, with no returned ID checkpoint.
     const { client, project, queue } = await fixture(t);
     await client.create({ ...candidate, project_ids: [project.id] });
-    let seen: any;
+    let calls = 0;
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
-        assert.equal(request.submission?.name, "submit_capture_retry");
-        seen = request.input;
-        return { action: "stop", reason: "Reconcile the unknown creation before another write." };
+        calls++;
+        assert.fail("A durable interrupted create must block model corrections");
       },
     } });
     const queued = await service.enqueue(snapshot(project));
@@ -238,14 +240,18 @@ test("restart reports an interrupted create instead of guessing that it failed",
     // Act: a fresh worker only has the durable record of what was attempted.
     await service.checkpoint();
     await service.checkpoint();
-    // Assert: no duplicate exists, and the model is told that the outcome is unknown.
-    assert.match(JSON.stringify(seen), /creation outcome is unknown/i);
+    // Assert: no duplicate exists and the original interrupted receipt stays durable.
+    assert.equal(calls, 0);
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "paused");
+    assert.match(job.uncertainWrite!, /save outcome unknown/i);
+    assert.equal((job.candidateOutcomes.fact as any).creation.status, "started");
     const stored = await client.search({ query: "storage", query_context: "Inspect capture",
       project_ids: [project.id], strict_project_filter: true });
     assert.equal(stored.length, 1);
   });
 
-test("a new model instruction may deliberately repeat an earlier completed link operation",
+test("a new link review cannot replay an earlier completed operation after external removal",
   realOptions, async (t) => {
     // Arrange: the first addition succeeds, a later removal fails, then another writer unlinks it.
     const { baseUrl, client: api, project, queue } = await fixture(t);
@@ -276,15 +282,15 @@ test("a new model instruction may deliberately repeat an earlier completed link 
         ] }] };
       },
     } });
-    // Act: the second model judgment explicitly requests the addition again.
+    // Act: the second model review requests the same addition after external removal.
     await service.enqueue(snapshot(project));
     await service.checkpoint();
     await api.knowledge.unlinkMemories(source.id, target.id);
     await service.checkpoint();
-    // Assert: receipts prevent automatic replay, not a fresh instruction from the model.
+    // Assert: C20/L7 retain completed receipts across the new review.
     assert.equal(decisions, 2);
-    assert.equal(links, 2);
-    assert.ok((await api.get(source.id)).linked_memory_ids?.includes(target.id));
+    assert.equal(links, 1);
+    assert.ok(!(await api.get(source.id)).linked_memory_ids?.includes(target.id));
   });
 
 test("skip does not silently become enrichment or entity linking", realOptions, async (t) => {
@@ -330,26 +336,37 @@ test("creating a proposed entity does not implicitly link it to the memory", rea
     assert.deepEqual(await client.getMemoryEntityIds(savedId), []);
   });
 
-test("an explicit retry instruction reaches an unfinished rich create", realOptions, async (t) => {
-  // Arrange: the first document request fails, while the primary memory was saved successfully.
+test("a server-rejected document is corrected without replaying the saved memory", realOptions,
+  async (t) => {
+  // Arrange: an invalid title reaches real REST after the primary memory is saved.
   const { baseUrl, client: api, project, queue } = await fixture(t);
-  let failures = 1, attempts = 0;
+  let attempts = 0, memoryCreates = 0, corrections = 0, actualBody = "";
   const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
     if (init?.method === "POST" && String(url).endsWith("/documents")) {
       attempts++;
-      if (failures-- > 0) return new Response("Document write unavailable", { status: 503 });
     }
-    return fetch(url, init);
+    if (init?.method === "POST" && String(url).endsWith("/memories")) memoryCreates++;
+    const response = await fetch(url, init);
+    if (init?.method === "POST" && String(url).endsWith("/documents") && !response.ok) {
+      assert.ok([400, 422].includes(response.status));
+      actualBody = await response.clone().text();
+    }
+    return response;
   } });
   const rich = { ...candidate, documents: [{ key: "reason", sourceEntryIds: ["correction"],
     input: { title: "Storage reason", description: "Why", content: "An embedded store is used.",
       document_type: "text", tags: [] } }] };
+  const invalid = structuredClone(rich);
+  invalid.documents[0]!.input.title = "x".repeat(501);
   const service = new CaptureService({ client, queue, instanceId: "execution", model: {
     async complete(request) {
-      if (request.purpose === "capture") return { candidates: [rich] };
-      if (request.submission?.name === "submit_capture_retry") {
-        assert.match(JSON.stringify(request.input), /Document write unavailable/);
-        return { action: "retry", reason: "Retry the uncompleted document operation." };
+      if (request.purpose === "capture") return { candidates: [invalid] };
+      if (request.submission?.name === "submit_capture_correction") {
+        corrections++;
+        assert.ok(actualBody);
+        assert.ok(inputOf(request).outcome.executionFailure.includes(actualBody));
+        assert.equal(inputOf(request).candidate.documents[0].input.title.length, 501);
+        return { candidate: rich };
       }
       return { action: "create" };
     },
@@ -358,11 +375,14 @@ test("an explicit retry instruction reaches an unfinished rich create", realOpti
   const queued = await service.enqueue(snapshot(project));
   await service.checkpoint();
   await service.checkpoint();
-  // Assert: the instruction was executed, rather than rejected by a code-owned retry policy.
+  // Assert: the corrected payload executes once; the completed memory is never recreated.
   const job = (await queue.getJob(queued.jobId))!;
   assert.equal(job.status, "complete", job.lastError);
   assert.equal(attempts, 2);
+  assert.equal(corrections, 1);
+  assert.equal(memoryCreates, 1);
   assert.equal((await api.knowledge.listDocuments(project.id)).length, 1);
+  assert.equal((await api.knowledge.listDocuments(project.id))[0]!.title, "Storage reason");
 });
 
 test("explicit enrichment does not restore predecessor attachments removed before execution",
@@ -395,11 +415,11 @@ test("explicit enrichment does not restore predecessor attachments removed befor
     assert.ok(!stored.document_ids?.includes(oldDocument.id));
   });
 
-for (const correction of ["invalid-target", "wrong-tool", "missing", "oversized"] as const) {
+for (const correction of ["invalid-action", "wrong-tool", "missing", "unknown-id"] as const) {
 test(`rejected batch corrections never resurrect earlier decisions: ${correction}`,
   realOptions,
   async (t) => {
-    // Arrange: correction replaces first=create with an invalid supersession; second stays valid.
+    // Arrange: correction replaces first=create with an invalid action; second stays valid.
     const { client, project, queue } = await fixture(t);
     let batches = 0;
     const model = new PiMemoryModel({
@@ -418,13 +438,11 @@ test(`rejected batch corrections never resurrect earlier decisions: ${correction
             { candidateId: "first", action: "create" },
             { candidateId: "second", action: "invalid" },
           ] : [
-            { candidateId: "first", action: "supersede", conflictingMemoryId: 999 },
+            { candidateId: "first", action: "invalid" },
             { candidateId: "second", action: "create" },
           ] };
           if (batches === 3 && correction === "missing") args = {};
-          if (batches === 3 && correction === "oversized") args = { decisions: [
-            { candidateId: "first", action: "create" },
-            { candidateId: "second", action: "create" },
+          if (batches === 3 && correction === "unknown-id") args = { decisions: [
             { candidateId: "unknown-1", action: "create" },
             { candidateId: "unknown-2", action: "create" },
           ] };
@@ -452,17 +470,17 @@ test(`rejected batch corrections never resurrect earlier decisions: ${correction
     const stored = await client.search({ query: "storage",
       query_context: "Inspect completed writes",
       project_ids: [project.id], strict_project_filter: true });
-    assert.equal(stored.length, correction === "invalid-target" ? 1 : 0);
+    assert.equal(stored.length, correction === "invalid-action" ? 1 : 0);
   });
 }
 
-test("failed supersession returns its actual diagnostic before model reconsideration", realOptions,
+test("uncertain supersession retains its diagnostic without model reconsideration", realOptions,
   async (t) => {
     // Arrange: creation and chosen references succeed; the final supersede request fails.
     const { baseUrl, client: api, project, queue } = await fixture(t);
     const old = await api.create({ ...candidate, content: "Postgres is used.",
       project_ids: [project.id] });
-    let deletions = 0, reviews = 0, received: unknown;
+    let deletions = 0, reviews = 0;
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
       if (init?.method === "DELETE" && String(url).endsWith(`/memories/${old.id}`)) {
         deletions++;
@@ -478,7 +496,6 @@ test("failed supersession returns its actual diagnostic before model reconsidera
           newClaim: "SQLite", sourceEntryIds: ["correction"], reason: "Correct the mistaken fact.",
         };
         reviews++;
-        if (reviews === 2) received = request.input;
         return { reviews: [{ candidateId: "fact", decisions: [], preservation: {
           status: reviews === 1 ? "complete" : "unresolved", documentIds: [], codeArtifactIds: [],
           entityIds: [], reason: reviews === 1
@@ -487,12 +504,15 @@ test("failed supersession returns its actual diagnostic before model reconsidera
       },
     } });
     // Act.
-    await service.enqueue(snapshot(project));
+    const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
     await service.checkpoint();
-    // Assert: code does not mask the error or retry supersession after the model defers it.
-    assert.equal(reviews, 2);
-    assert.match(JSON.stringify(received), /Supersession rejected: storage under maintenance/);
+    // Assert: an ambiguous server failure pauses with its original receipt and raw diagnostic.
+    assert.equal(reviews, 1);
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "paused");
+    assert.equal(job.supersession?.status, "started");
+    assert.match(job.uncertainWrite!, /Supersession rejected: storage under maintenance/);
     assert.equal(deletions, 1);
     assert.equal((await api.get(old.id)).is_obsolete, false);
   });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CaptureService } from "../src/capture.ts";
-import { ApiForgetfulClient } from "../src/http.ts";
+import { ApiForgetfulClient, ForgetfulHttpError, ForgetfulSchemaError } from "../src/http.ts";
 import { PiMemoryModel } from "../src/model.ts";
 import { DurableQueueStore } from "../src/queue.ts";
 import { realOptions, startForgetful } from "./real-forgetful.ts";
@@ -60,7 +60,7 @@ async function fixture(
     documentIds: [documents[1]!.id], codeArtifactIds: [artifacts[1]!.id],
     entityIds: [entities[1]!.id], memoryIds: [memories[1]!.id], fileIds: [], sourceFiles: [] };
   const state = { calls: 0, inputs: [] as any[], writes: [] as string[],
-    reply: output as Record<string, unknown>,
+    reply: structuredClone(output) as Record<string, unknown>,
     onRequest: undefined as undefined |
       ((url: string, init?: RequestInit) => Promise<Response | undefined>) };
   const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
@@ -124,7 +124,7 @@ for (const partial of [false, true]) {
   }
 }
 
-test("restart executes receipts without unioning arrivals or repairing completed associations",
+test("restart preserves receipts and external edits while uncertain supersession blocks replay",
   realOptions, async (t) => {
     const f = await fixture(t, true);
     f.state.onRequest = async (url, init) => {
@@ -132,7 +132,11 @@ test("restart executes receipts without unioning arrivals or repairing completed
         return new Response("Supersession service unavailable: raw diagnostic", { status: 503 });
       return undefined;
     };
-    await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input), /raw diagnostic/);
+    let originalError: unknown;
+    await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input), (error) => {
+      originalError = error;
+      return true;
+    });
     const pending = (await f.queue.getConflict(f.conflict.id))!;
     const replacementId = pending.replacementId!;
     assert.deepEqual(pending.replacement!.completedMemoryIds, f.output.memoryIds);
@@ -152,17 +156,28 @@ test("restart executes receipts without unioning arrivals or repairing completed
       queue: new DurableQueueStore({ directory: f.directory, instanceId: "resolution" }),
       client: f.client, model: f.model, instanceId: "resolution" });
 
-    const result = await restarted.resolveConflict(f.conflict.id, f.input);
+    await assert.rejects(restarted.resolveConflict(f.conflict.id, f.input), /raw diagnostic/);
 
-    assert.equal(result.status, "resolved");
+    const retained = (await f.queue.getConflict(f.conflict.id))!;
+    assert.equal(retained.status, "pending");
+    assert.equal(retained.supersession?.status, "started");
+    assert.match(retained.uncertainWrite!, /raw diagnostic/);
+    assert.deepEqual(retained.replacement!.completedMemoryIds, f.output.memoryIds);
+    assert.deepEqual(retained.replacement!.completedEntityIds, f.output.entityIds);
     assert.equal(f.state.calls, 1);
-    assert.equal(f.state.writes.length, 1);
-    assert.match(f.state.writes[0]!, /^DELETE .*\/memories\//);
+    assert.deepEqual(f.state.writes, []);
+    assert.equal((await f.setup.get(f.old.id)).is_obsolete, false);
     const saved = await f.setup.get(replacementId);
     assert.equal(saved.content, "A subsequent writer edited the replacement.");
     assert.deepEqual(saved.document_ids, []);
     assert.deepEqual(saved.linked_memory_ids, []);
     assert.deepEqual(await f.setup.getMemoryEntityIds(replacementId), []);
+    // Check the raw error last so masking cannot hide a receipt/replay regression.
+    assert.ok(originalError instanceof ForgetfulHttpError);
+    assert.equal(originalError.status, 503);
+    assert.equal(originalError.responseBody,
+      "Supersession service unavailable: raw diagnostic");
+    assert.ok(originalError.message.includes(originalError.responseBody));
   });
 
 test("unknown create response retains its actual failure and never repeats creation", realOptions,
@@ -196,7 +211,8 @@ test("unknown create response retains its actual failure and never repeats creat
 
 for (const blocked of ["foreign-argument", "document-moved", "off", "stop", "sync-gate",
   "both-endpoints-moved"] as const) {
-  test(`explicit resolution rejects unauthorized execution: ${blocked}`, realOptions, async (t) => {
+  test(`explicit resolution respects permission and model-selected scope: ${blocked}`,
+    realOptions, async (t) => {
     const f = await fixture(t);
     let writable = true, changed = false;
     if (blocked === "foreign-argument") {
@@ -211,6 +227,8 @@ for (const blocked of ["foreign-argument", "document-moved", "off", "stop", "syn
       instanceId: "resolution", canWriteNow: () => writable,
       getMode: async () => {
         if (f.state.calls && blocked === "off") return "off" as const;
+        if (f.state.calls && blocked === "stop") service.stop();
+        if (f.state.calls && blocked === "sync-gate") writable = false;
         if (f.state.calls && blocked === "document-moved" && !changed) {
           changed = true;
           await f.setup.knowledge.updateDocument(f.documents[1]!.id,
@@ -220,8 +238,6 @@ for (const blocked of ["foreign-argument", "document-moved", "off", "stop", "syn
       } });
     f.state.onRequest = async (url, init) => {
       if (f.state.calls && init?.method === "GET" && url.endsWith(`/memories/${f.old.id}`)) {
-        if (blocked === "stop") service.stop();
-        if (blocked === "sync-gate") writable = false;
         if (blocked === "both-endpoints-moved" && !changed) {
           const saved = await f.queue.getConflict(f.conflict.id);
           if (saved!.replacementId) {
@@ -235,12 +251,27 @@ for (const blocked of ["foreign-argument", "document-moved", "off", "stop", "syn
       return undefined;
     };
 
-    await assert.rejects(service.resolveConflict(f.conflict.id, f.input));
-
-    assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
-    assert.equal((await f.setup.get(f.old.id)).is_obsolete, false);
-    assert.equal(f.state.writes.length, blocked === "both-endpoints-moved" ? 1 : 0);
-    if (blocked === "both-endpoints-moved") assert.equal(changed, true);
+    if (["off", "stop", "sync-gate"].includes(blocked)) {
+      await assert.rejects(service.resolveConflict(f.conflict.id, f.input));
+      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+      assert.equal((await f.setup.get(f.old.id)).is_obsolete, false);
+      assert.deepEqual(f.state.writes, []);
+    } else {
+      const result = await service.resolveConflict(f.conflict.id, f.input);
+      assert.equal(result.status, "resolved");
+      const replacement = await f.setup.get(result.conflict.replacementId!);
+      assert.deepEqual(replacement.document_ids, f.state.reply.documentIds);
+      assert.equal((await f.setup.get(f.old.id)).superseded_by, replacement.id);
+      if (blocked === "foreign-argument" || blocked === "document-moved") {
+        const id = (f.state.reply.documentIds as number[])[0]!;
+        assert.equal((await f.setup.knowledge.getDocument(id)).project_id, f.foreign.id);
+      }
+      if (blocked === "both-endpoints-moved") {
+        assert.equal(changed, true);
+        assert.deepEqual(replacement.project_ids, [f.foreign.id]);
+        assert.deepEqual((await f.setup.get(f.old.id)).project_ids, [f.foreign.id]);
+      }
+    }
   });
 }
 
@@ -261,7 +292,7 @@ test("legacy implicit receipt is reported without writes or private automatic re
 
 for (const malformed of ["missing-selection", "coerced-id", "extra-field",
   "blank-title"] as const) {
-  test(`revision validates original arguments without repairing: ${malformed}`,
+  test(`revision preserves submitted fields for their owning validator: ${malformed}`,
     realOptions, async (t) => {
       const f = await fixture(t);
       if (malformed === "missing-selection") delete f.state.reply.documentIds;
@@ -269,11 +300,26 @@ for (const malformed of ["missing-selection", "coerced-id", "extra-field",
       if (malformed === "extra-field") f.state.reply.preserveEverything = true;
       if (malformed === "blank-title") f.state.reply.title = " ";
 
-      await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input));
-
-      assert.equal(f.state.calls, 3);
-      assert.deepEqual(f.state.writes, []);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.replacement, undefined);
+      if (malformed === "extra-field") {
+        // Unknown private-envelope fields are still rejected locally.
+        await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input));
+        assert.equal(f.state.calls, 3);
+        assert.deepEqual(f.state.writes, []);
+        assert.equal((await f.queue.getConflict(f.conflict.id))!.replacement, undefined);
+      } else {
+        // REST defaults omitted lists, accepts numeric-string IDs and whitespace titles.
+        const result = await f.service.resolveConflict(f.conflict.id, f.input);
+        assert.equal(result.status, "resolved");
+        assert.equal(f.state.calls, 1);
+        const saved = await f.setup.get(result.conflict.replacementId!);
+        assert.deepEqual(saved.document_ids,
+          malformed === "missing-selection" ? [] : f.output.documentIds);
+        assert.equal(saved.title, malformed === "blank-title" ? " " : f.output.title);
+        const submitted = result.conflict.replacement!.input;
+        if (malformed === "coerced-id")
+          assert.deepEqual(submitted.document_ids, [String(f.documents[1]!.id)]);
+        if (malformed === "missing-selection") assert.equal(submitted.document_ids, undefined);
+      }
     });
 }
 
@@ -379,7 +425,7 @@ for (const choice of ["update", "create"] as const) {
     const f = await fixture(t);
     f.state.onRequest = async (url, init) => init?.method === "DELETE" &&
       url.endsWith(`/memories/${f.old.id}`)
-      ? new Response("Obsoletion failed: original service detail", { status: 503 }) : undefined;
+      ? new Response("Obsoletion rejected: original service detail", { status: 400 }) : undefined;
     await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input),
       /original service detail/);
     const prior = (await f.queue.getConflict(f.conflict.id))!;
@@ -425,7 +471,7 @@ for (const choice of ["update", "create"] as const) {
   });
 }
 
-test("obsolete predecessor without a supersession ID is rejected before planning", realOptions,
+test("model may replace an obsolete predecessor without a returned supersession ID", realOptions,
   async (t) => {
     const f = await fixture(t);
     await f.setup.supersede(f.old.id, f.memories[0]!.id, "Existing obsoletion");
@@ -441,16 +487,20 @@ test("obsolete predecessor without a supersession ID is rejected before planning
       return undefined;
     };
 
-    await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input), /already obsolete/);
-
-    assert.equal(f.state.calls, 0);
-    assert.deepEqual(f.state.writes, []);
+    const result = await f.service.resolveConflict(f.conflict.id, f.input);
+    assert.equal(result.status, "resolved");
+    assert.equal(f.state.calls, 1);
+    assert.equal((await f.setup.get(result.conflict.replacementId!)).content, f.output.content);
+    const response = await fetch(`${f.baseUrl}/memories/${f.old.id}`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json() as { superseded_by: number }).superseded_by,
+      result.conflict.replacementId);
   });
 
 async function pendingReplacement(f: Awaited<ReturnType<typeof fixture>>) {
   f.state.onRequest = async (url, init) => init?.method === "DELETE" &&
     url.endsWith(`/memories/${f.old.id}`)
-    ? new Response("Pending obsoletion: service failure", { status: 503 }) : undefined;
+    ? new Response("Pending obsoletion: service failure", { status: 400 }) : undefined;
   await assert.rejects(f.service.resolveConflict(f.conflict.id, f.input), /service failure/);
   return (await f.queue.getConflict(f.conflict.id))!;
 }
@@ -533,7 +583,7 @@ test("unchanged revised request skips a completed update and links after externa
   });
 
 for (const denial of ["target-scope", "attachment-scope", "off", "stop", "sync-gate"] as const) {
-  test(`revised replacement update authorizes after permission work: ${denial}`,
+  test(`revised replacement respects permission and model-selected scope: ${denial}`,
     realOptions, async (t) => {
       const f = await fixture(t);
       const prior = await pendingReplacement(f);
@@ -543,6 +593,8 @@ for (const denial of ["target-scope", "attachment-scope", "off", "stop", "sync-g
       let changed = false, writable = true;
       const service = new CaptureService({ queue: f.queue, client: f.client, model: f.model,
         instanceId: "resolution", canWriteNow: () => writable, getMode: async () => {
+          if (f.state.calls === 2 && denial === "stop") service.stop();
+          if (f.state.calls === 2 && denial === "sync-gate") writable = false;
           if (f.state.calls === 2 && !changed) {
             changed = true;
             if (denial === "target-scope")
@@ -554,43 +606,70 @@ for (const denial of ["target-scope", "attachment-scope", "off", "stop", "sync-g
           }
           return denial === "off" && f.state.calls === 2 ? "off" as const : "auto" as const;
         } });
-      f.state.onRequest = async (url, init) => {
-        if (f.state.calls === 2 && init?.method === "GET" &&
-            url.endsWith(`/memories/${prior.replacementId}`)) {
-          if (denial === "stop") service.stop();
-          if (denial === "sync-gate") writable = false;
-        }
-        return undefined;
-      };
-
-      await assert.rejects(service.resolveConflict(f.conflict.id,
-        { ...f.input, reason: "Use the revised request." }));
-
+      f.state.onRequest = undefined;
+      const result = service.resolveConflict(f.conflict.id,
+        { ...f.input, reason: "Use the revised request." });
+      if (["off", "stop", "sync-gate"].includes(denial)) {
+        await assert.rejects(result);
+        assert.deepEqual(f.state.writes, []);
+        assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+        assert.equal((await f.setup.get(prior.replacementId!)).content, f.output.content);
+      } else {
+        assert.equal((await result).status, "resolved");
+        const saved = await f.setup.get(prior.replacementId!);
+        assert.equal(saved.content, "A newly instructed replacement.");
+        assert.deepEqual(saved.document_ids, [f.documents[0]!.id]);
+        if (denial === "target-scope")
+          assert.deepEqual(saved.project_ids, [f.project.id]);
+        if (denial === "attachment-scope")
+          assert.equal((await f.setup.knowledge.getDocument(f.documents[0]!.id)).project_id,
+            f.foreign.id);
+      }
       assert.equal(f.state.calls, 2);
-      assert.deepEqual(f.state.writes, []);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
-      assert.equal((await f.setup.get(prior.replacementId!)).content, f.output.content);
     });
 }
 
 for (const invalid of ["other-id", "self-link"] as const) {
-  test(`model update selection rejects ${invalid} without executing the old plan`,
+  test(`model-selected update checks the actual server outcome: ${invalid}`,
     realOptions, async (t) => {
       const f = await fixture(t);
       const prior = await pendingReplacement(f);
       f.state.reply = { ...f.output,
         replacementMemoryId: invalid === "other-id" ? f.memories[0]!.id : prior.replacementId,
         ...(invalid === "self-link" ? { memoryIds: [prior.replacementId] } : {}) };
-      f.state.onRequest = undefined;
+      let linkResponse: { status: number; body: unknown } | undefined;
+      f.state.onRequest = async (url, init) => {
+        if (init?.method === "POST" && url.endsWith(`/memories/${prior.replacementId}/links`)) {
+          const response = await fetch(url, init);
+          linkResponse = { status: response.status, body: await response.clone().json() };
+          return response;
+        }
+        return undefined;
+      };
       f.state.writes.length = 0;
 
-      await assert.rejects(f.service.resolveConflict(f.conflict.id,
-        { ...f.input, reason: "A new explicit instruction." }));
-
-      assert.equal(f.state.calls, 4);
-      assert.deepEqual(f.state.writes, []);
-      assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
-      assert.equal((await f.setup.get(prior.replacementId!)).content, f.output.content);
+      const result = f.service.resolveConflict(f.conflict.id,
+        { ...f.input, reason: "A new explicit instruction." });
+      if (invalid === "other-id") {
+        const resolved = await result;
+        assert.equal(resolved.status, "resolved");
+        assert.equal(resolved.conflict.replacementId, f.memories[0]!.id);
+        assert.equal((await f.setup.get(f.memories[0]!.id)).content, f.output.content);
+        assert.equal((await f.setup.get(prior.replacementId!)).content, f.output.content);
+        assert.match(f.state.writes[0]!, new RegExp(`^PUT .*/memories/${f.memories[0]!.id}$`));
+      } else {
+        await assert.rejects(result, (error) => {
+          // The server removes self-links; retained response checks require confirmation.
+          assert.ok(error instanceof ForgetfulSchemaError);
+          assert.match(error.message, /did not confirm all requested memory links/);
+          return true;
+        });
+        assert.deepEqual(linkResponse, { status: 200, body: { linked_ids: [] } });
+        assert.equal((await f.queue.getConflict(f.conflict.id))!.status, "pending");
+        assert.match(f.state.writes[0]!, new RegExp(`^PUT .*/memories/${prior.replacementId}$`));
+        assert.equal((await f.setup.get(f.old.id)).is_obsolete, false);
+      }
+      assert.equal(f.state.calls, 2);
     });
 }
 

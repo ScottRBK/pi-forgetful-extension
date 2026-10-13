@@ -431,7 +431,7 @@ test(
 );
 
 test(
-  "knowledge writer refuses a moved destination memory before rich writes",
+  "knowledge writer attaches a model-selected resource to a moved destination memory",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -458,27 +458,28 @@ test(
       (id, signal) => client.get(id, signal),
     );
 
-    await assert.rejects(
-      writer.execute({
-        operationId: "moved-destination",
-        projectId,
-        memoryId: memory.id,
-        documents: [
-          {
-            key: "scope-document",
-            input: {
-              title: "Scope document",
-              description: "A document that must not be written.",
-              content: "The destination is outside the project.",
-              tags: [],
-              project_id: projectId,
-            },
+    const state = await writer.execute({
+      operationId: "moved-destination",
+      projectId,
+      memoryId: memory.id,
+      attachResources: true,
+      documents: [
+        {
+          key: "scope-document",
+          input: {
+            title: "Scope document",
+            description: "A model-selected document.",
+            content: "The destination is outside the project.",
+            tags: [],
+            project_id: projectId,
           },
-        ],
-      }),
-      /Destination memory is outside the project/,
-    );
-    assert.equal((await client.knowledge.listDocuments(projectId)).length, 0);
+        },
+      ],
+    });
+    assert.equal((await client.knowledge.listDocuments(projectId)).length, 1);
+    const moved = await client.get(memory.id);
+    assert.deepEqual(moved.project_ids, [foreign.id]);
+    assert.deepEqual(moved.document_ids, [state.documents[0]!.id]);
   },
 );
 
@@ -554,13 +555,11 @@ test(
     const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-retry-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const richModel = new RichModel("token-service", "token-service");
-    const failures: string[] = [];
+    let correctionCalls = 0;
     const model: MemoryModelClient = { complete: async (request) => {
-      if (request.submission?.name === "submit_capture_retry") {
-        const input = request.input as { outcome: { executionFailure: string } };
-        failures.push(input.outcome.executionFailure);
-        return { action: "stop",
-          reason: "Reconcile the lost create response before trying again." };
+      if (request.submission?.name === "submit_capture_correction") {
+        correctionCalls++;
+        assert.fail("An uncertain accepted create must not enter field correction");
       }
       return richModel.complete(request);
     } };
@@ -586,24 +585,24 @@ test(
     await service.checkpoint();
     assert.equal(droppedDocumentResponse, true);
     const interrupted = (await queue.listJobs())[0]!;
-    assert.equal(interrupted.status, "pending");
-    assert.equal(failures.length, 0, "Failure review waits for the next checkpoint");
+    assert.equal(interrupted.status, "paused");
+    assert.equal(correctionCalls, 0);
 
     await service.checkpoint();
 
     const job = (await queue.listJobs())[0]!;
-    assert.equal(job.status, "complete");
+    assert.equal(job.status, "paused");
     const outcome = job.candidateOutcomes["token-service"] as {
       stage: string; knowledgeState: unknown;
     };
     const previous = interrupted.candidateOutcomes["token-service"] as {
       knowledgeState: unknown;
     };
-    assert.equal(outcome.stage, "execution-stopped");
+    assert.equal(outcome.stage, "knowledge-partial");
     assert.ok(previous.knowledgeState, "pending work must preserve uncertain-write receipts");
-    assert.equal(outcome.knowledgeState, undefined,
-      "completed work must release bulky receipts rather than retain cleanup data");
-    assert.equal(job.callCount, 3, "Extraction, overlap and one explicit retry review");
+    assert.deepEqual(outcome.knowledgeState, previous.knowledgeState,
+      "uncertain work must retain every completed receipt and pending create");
+    assert.equal(job.callCount, 2, "Extraction and overlap; no correction for uncertainty");
 
     const entities = await client.knowledge.searchEntities("Gateway", 10);
     const documents = await client.knowledge.listDocuments(projectId);
@@ -615,7 +614,8 @@ test(
     assert.equal(artifacts.length, 0);
     assert.equal(relationships.length, 0);
     // Check raw failure last so a diagnostic regression cannot hide duplicate-write regressions.
-    assert.deepEqual(failures, ["simulated lost document response"]);
+    assert.equal(correctionCalls, 0);
+    assert.match(job.uncertainWrite!, /simulated lost document response/);
     assert.match(interrupted.lastError!, /simulated lost document response/);
   },
 );
@@ -689,7 +689,7 @@ test(
 );
 
 test(
-  "capture resumes receipted writes after explicit retry and fresh attachment scope checks",
+  "capture resumes receipted writes with moved resources and concurrent attachments",
   realOptions,
   async (t) => {
     const baseUrl = await startForgetful(t);
@@ -726,12 +726,11 @@ test(
       maxAttempts: 8,
     });
     const richModel = new RichModel();
-    const failures: string[] = [];
+    let correctionCalls = 0;
     const model: MemoryModelClient = { complete: async (request) => {
-      if (request.submission?.name === "submit_capture_retry") {
-        const input = request.input as { outcome: { executionFailure: string } };
-        failures.push(input.outcome.executionFailure);
-        return { action: "retry", reason: "The resource was returned to the authorized project." };
+      if (request.submission?.name === "submit_capture_correction") {
+        correctionCalls++;
+        assert.fail("Permission pause and moved resources do not require field correction");
       }
       return richModel.complete(request);
     } };
@@ -781,27 +780,18 @@ test(
     });
     mode = "auto";
     await service.checkpoint();
-    const blocked = (await queue.getJob(enqueued.jobId))!;
-    assert.equal(blocked.status, "pending");
-    assert.match(blocked.lastError!, /Knowledge document is outside the destination project/);
-    assert.equal(failures.length, 0);
-    assert.deepEqual((await client.get(memoryId)).document_ids, [extra.id]);
-
-    await client.knowledge.updateDocument(architecture.id, {
-      project_id: projectId,
-    });
-    await service.checkpoint();
-
     const completed = await queue.getJob(enqueued.jobId);
     assert.equal(completed?.status, "complete", completed?.lastError);
-    assert.deepEqual(failures, ["Knowledge document is outside the destination project"]);
-    assert.equal(completed.callCount, 3, "Extraction, overlap and one explicit retry review");
+    assert.equal(correctionCalls, 0);
     const finalMemory = await client.get(memoryId);
     assert.deepEqual(
       [...(finalMemory.document_ids ?? [])].sort((a, b) => a - b),
       [architecture.id, extra.id].sort((a, b) => a - b),
     );
-    assert.equal((await client.knowledge.listDocuments(projectId)).length, 2);
+    assert.equal((await client.knowledge.getDocument(architecture.id)).project_id, foreign.id);
+    assert.equal((await client.knowledge.listDocuments(projectId)).length, 1);
+    assert.equal((await client.knowledge.listDocuments(foreign.id)).length, 1);
+    assert.equal((await client.knowledge.searchEntities("Gateway", 10)).length, 1);
     assert.equal((await client.knowledge.listCodeArtifacts(projectId)).length, 1);
   },
 );
