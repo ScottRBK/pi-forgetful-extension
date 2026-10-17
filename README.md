@@ -444,7 +444,17 @@ Before preparing a queued task that has not extracted candidates, the worker ref
 from a compatible completed summary on the same session and branch. Reuse advances beyond the
 task's own summary without passing its pinned history, and preserves unfinished evidence, original
 records and the unchanged suffix. Tasks queued before the first summary therefore benefit too.
-Summary source-ID cursors only move forward, so older work cannot replace newer progress.
+Summary source-ID cursors move forward on compatible paths, so older work cannot replace newer
+progress. Up to four completed caches per session/branch preserve separately useful paths; each job
+uses the furthest summary boundary on its own pinned path. Source ordering stays in the summary
+sidecar, including inherited ordering, so long histories still reject late older retries.
+A cache past a fork cannot block a sibling's shared-prefix summary. A newer summary replaces an
+older cache only when it also extends that cache's producing path, preserving useful sibling caches.
+Existing single-cache queues recover automatically as queued work completes. Cache eviction can
+require fresh preparation; it never removes pending evidence or enqueue deduplication receipts.
+Reload all Pi sessions sharing the queue after an upgrade or rollback. Older loaded extensions can
+delete additional cache sidecars and trigger fresh preparation. Evidence and write receipts
+stay intact.
 Inactive summary caches expire after seven days; active work and pending conflicts remain protected.
 Missing or corrupt reusable summaries fall back to the pinned session history and are reported in
 existing logs.

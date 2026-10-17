@@ -409,9 +409,18 @@ The extension-owned capture queue must be durable before automatic mode is enabl
    returning a final outcome for UI reporting. Exhausted model-call budgets fail rather than pause.
    Abandon unfinished knowledge rather than retaining a manual cleanup backlog. Separate
    deduplication markers prevent replay. Successful jobs may retain evidence for pending conflicts.
-7. Publish reusable summaries with a forward-only source-ID cursor per session and branch,
-   separately from enqueue deduplication and completed capture progress. An older retry cannot
-   replace a newer summary. Expire inactive summary caches after the retention period, protecting
+7. Publish reusable summaries with forward-only source-ID cursors on compatible paths within each
+   session and branch, separately from enqueue deduplication and completed capture progress.
+   Keep at most four completed caches, evicting the oldest publication when necessary. Select
+   the furthest boundary present on the receiving job's pinned path, never order separate paths
+   by timestamps. Preserve full and inherited source-ID ordering in summary sidecars, with only
+   bounded cursor metadata in the index, so older retries cannot replace newer compatible history.
+   Ordering alone does not establish usability across forks: reject older/equal publication only
+   when a cache boundary is on the completion's path or the completion is a proven prefix retry.
+   Supersede an older cache only when the completion also extends its producing path; otherwise
+   retain shared-prefix history that another fork may still need.
+   Existing single-cache records remain readable; queued completions can add a compatible cache
+   without removing their evidence or resetting receipts. Expire inactive caches, protecting
    active jobs and pending conflicts. Missing or corrupt reusable summaries fall back to pinned
    session history with the actual error in existing logs; original source damage remains an error.
 

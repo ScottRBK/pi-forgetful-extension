@@ -39,6 +39,12 @@ export interface QueueIdentity {
   accountId?: string;
 }
 
+interface HistoryCache {
+  digest: string;
+  throughEntryId: string;
+  entryIds?: string[];
+}
+
 export interface QueueWatermark {
   sessionId: string;
   branchId: string;
@@ -51,10 +57,12 @@ export interface QueueWatermark {
   dedupeKeys: string[];
   /** Successful historical summary in an immutable sidecar, never raw failed-job evidence. */
   historyDigest?: string;
-  /** Summary cursor, separate from enqueue dedupe and capture watermarks. */
+  /** Most recently published cache cursor; incomparable paths live in historyAlternatives. */
   historyThroughEntryId?: string;
   /** Original branch entry IDs used only to compare summary cursor order. */
   historyEntryIds?: string[];
+  /** Incomparable source paths, oldest publication first; all caches are disposable. */
+  historyAlternatives?: HistoryCache[];
   updatedAt: string;
 }
 
@@ -202,7 +210,10 @@ interface StoredQueueJob extends QueueJob {
 }
 
 type SnapshotPayload = Pick<CaptureSnapshot,
-  "entries" | "conversation" | "sourceConversation" | "historySummary">;
+  "entries" | "conversation" | "sourceConversation" | "historySummary"> & {
+    /** Full source ordering for completed caches; kept outside the bounded queue index. */
+    historyEntryIds?: string[];
+  };
 
 interface QueueState {
   version: 1 | 2;
@@ -229,6 +240,7 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const MAX_QUEUE_BYTES = 50 * 1024 * 1024;
 const MAX_PENDING_CONFLICTS = 100;
+const MAX_HISTORY_CACHES = 4;
 const processMutationTails = new Map<string, Promise<void>>();
 
 function jsonSnapshot<T>(value: T): T {
@@ -467,6 +479,28 @@ function clearHistoryCache(watermark: QueueWatermark): void {
   delete watermark.historyDigest;
   delete watermark.historyThroughEntryId;
   delete watermark.historyEntryIds;
+  delete watermark.historyAlternatives;
+}
+
+function historyCaches(watermark: QueueWatermark): HistoryCache[] {
+  // Existing v2 queues already encode one cache in these fields; no eager migration is needed.
+  return [...(watermark.historyAlternatives ?? []),
+    ...(watermark.historyDigest && watermark.historyThroughEntryId ? [{
+      digest: watermark.historyDigest, throughEntryId: watermark.historyThroughEntryId,
+      entryIds: watermark.historyEntryIds,
+    }] : [])];
+}
+
+function setHistoryCaches(watermark: QueueWatermark, caches: HistoryCache[]): void {
+  const retained = caches.slice(-MAX_HISTORY_CACHES).map((cache) => ({ ...cache,
+    entryIds: cache.entryIds?.slice(-2_000) }));
+  const latest = retained.pop();
+  clearHistoryCache(watermark);
+  if (!latest) return;
+  watermark.historyDigest = latest.digest;
+  watermark.historyThroughEntryId = latest.throughEntryId;
+  watermark.historyEntryIds = latest.entryIds;
+  if (retained.length) watermark.historyAlternatives = retained;
 }
 
 /**
@@ -554,6 +588,8 @@ export class DurableQueueStore {
           (payload.conversation !== undefined && !Array.isArray(payload.conversation)) ||
           (payload.sourceConversation !== undefined &&
             !Array.isArray(payload.sourceConversation)) ||
+          (payload.historyEntryIds !== undefined && (!Array.isArray(payload.historyEntryIds) ||
+            payload.historyEntryIds.some((id) => typeof id !== "string"))) ||
           (payload.historySummary !== undefined &&
             (typeof payload.historySummary?.throughEntryId !== "string" ||
               typeof payload.historySummary?.text !== "string")))
@@ -635,7 +671,8 @@ export class DurableQueueStore {
 
   private async collectSnapshots(state: QueueState): Promise<void> {
     const digests = [...state.jobs.flatMap((job) => [job.snapshotDigest, job.inspectionDigest]),
-      ...Object.values(state.watermarks).map((watermark) => watermark.historyDigest)];
+      ...Object.values(state.watermarks).flatMap((watermark) =>
+        historyCaches(watermark).map((cache) => cache.digest))];
     const retained = new Set(digests.filter((value): value is string => Boolean(value))
       .map((digest) => this.snapshotPath(digest)));
     for (const name of await readdir(this.directory)) {
@@ -898,8 +935,7 @@ export class DurableQueueStore {
       watermark.consideredEntryIds = watermark.consideredEntryIds.slice(-2_000);
       watermark.snapshotIds = watermark.snapshotIds.slice(-200);
       watermark.dedupeKeys = watermark.dedupeKeys.slice(-2_000);
-      if (watermark.historyEntryIds)
-        watermark.historyEntryIds = watermark.historyEntryIds.slice(-2_000);
+      setHistoryCaches(watermark, historyCaches(watermark));
       if (watermark.historyDigest &&
           !liveBranches.has(contextKey(watermark.sessionId, watermark.branchId)) &&
           !shouldRetain(watermark.updatedAt, cutoff, this.retentionMs)) {
@@ -997,16 +1033,7 @@ export class DurableQueueStore {
           changed: false,
         };
       }
-      let historyError: string | undefined;
-      let history = undefined as SnapshotPayload["historySummary"] | undefined;
-      if (watermark?.historyDigest) {
-        try {
-          history = (await this.readSnapshot(watermark.historyDigest)).historySummary;
-        } catch (error) {
-          historyError = `Reusable summary cache unavailable: ${diagnosticError(error)}`;
-          clearHistoryCache(watermark);
-        }
-      }
+      const { history, historyError } = await this.reusableHistory(safeSnapshot, watermark);
       const persistedSnapshot = reuseCaptureHistory(safeSnapshot, history);
       const timestamp = nowIso(this.now);
       const job: QueueJob = {
@@ -1184,38 +1211,57 @@ export class DurableQueueStore {
         return unchanged;
       const { sessionId, branchId } = job.snapshot.context;
       const watermark = state.watermarks[contextKey(sessionId, branchId)];
-      if (!watermark?.historyDigest) return unchanged;
-      let history: NonNullable<CaptureSnapshot["historySummary"]>;
-      try {
-        const cached = (await this.readSnapshot(watermark.historyDigest)).historySummary;
-        if (!cached?.text.trim() || cached.throughEntryId !== watermark.historyThroughEntryId)
-          throw new Error("Invalid reusable summary boundary or text");
-        history = cached;
-      } catch (error) {
-        clearHistoryCache(watermark);
-        return { value: { job,
-          historyError: `Reusable summary cache unavailable: ${diagnosticError(error)}` } };
-      }
+      const { history, historyError } = await this.reusableHistory(job.snapshot, watermark);
+      const unused = { value: { job, historyError }, changed: Boolean(historyError) };
+      if (!history) return unused;
       const ids = orderedSourceEntryIds(job.snapshot) ?? [];
       const boundary = ids.indexOf(history.throughEntryId);
       const end = ids.indexOf(job.snapshot.finalEntryId);
       // Never import later history or replace the pinned final record with a derived summary.
-      if (boundary < 0 || end < 0 || boundary >= end) return unchanged;
+      if (boundary < 0 || end < 0 || boundary >= end) return unused;
       if (job.snapshot.historySummary) {
         const comparison = cursorComparison(
           { throughEntryId: history.throughEntryId, entryIds: ids },
           { throughEntryId: job.snapshot.historySummary.throughEntryId, entryIds: ids });
-        if (comparison === undefined || comparison <= 0) return unchanged;
+        if (comparison === undefined || comparison <= 0) return unused;
       }
       const conversation = captureConversation(job.snapshot);
       const cut = conversation.findIndex((record) => recordId(record) === history.throughEntryId);
-      if (cut < 0) return unchanged;
+      if (cut < 0) return unused;
       // Unlike enqueue-time reuse, compaction preserves every unfinished source and its originals.
       await this.compactJobSnapshot(stored, { summary: history.text,
         summarizedThroughEntryId: history.throughEntryId,
         retainedConversation: conversation.slice(cut + 1) });
-      return { value: { job: await this.hydrateJob(stored) } };
+      return { value: { job: await this.hydrateJob(stored), historyError } };
     });
+  }
+
+  private async reusableHistory(snapshot: CaptureSnapshot, watermark?: QueueWatermark): Promise<{
+    history?: NonNullable<SnapshotPayload["historySummary"]>;
+    historyError?: string;
+  }> {
+    if (!watermark) return {};
+    const ids = orderedSourceEntryIds(snapshot) ?? [];
+    const end = ids.indexOf(snapshot.finalEntryId);
+    // Ordering belongs to the receiver's pinned path, never publication time or another path.
+    const candidates = historyCaches(watermark)
+      .map((cache) => ({ cache, position: ids.indexOf(cache.throughEntryId) }))
+      .sort((a, b) => b.position - a.position);
+    let historyError: string | undefined;
+    for (const { cache, position } of candidates) {
+      try {
+        const history = (await this.readSnapshot(cache.digest)).historySummary;
+        if (!history?.text.trim() || history.throughEntryId !== cache.throughEntryId)
+          throw new Error("Invalid reusable summary boundary or text");
+        // Preserve cache diagnostics even when the receiver cannot prove a reusable boundary.
+        if (position >= 0 && position < end) return { history, historyError };
+      } catch (error) {
+        historyError = `Reusable summary cache unavailable: ${diagnosticError(error)}`;
+        setHistoryCaches(watermark, historyCaches(watermark)
+          .filter((item) => item.digest !== cache.digest));
+      }
+    }
+    return { historyError };
   }
 
   /** Check eligibility from the index without loading source sidecars or claiming an attempt. */
@@ -1419,22 +1465,36 @@ export class DurableQueueStore {
     }
     const history = completedSnapshot.historySummary;
     const cursor = summaryCursor(completedSnapshot);
-    if (!history || !cursor) return;
-    const comparison = watermark ? cursorComparison(cursor, {
-      throughEntryId: watermark.historyThroughEntryId,
-      entryIds: watermark.historyEntryIds,
-    }) : undefined;
-    const shouldPublish = watermark && (!watermark.historyDigest ||
-      (comparison !== undefined && comparison > 0));
-    if (shouldPublish) {
-      watermark.historyDigest = await this.storeSnapshot({
-        entries: [],
-        historySummary: history,
-      });
-      watermark.historyThroughEntryId = cursor.throughEntryId;
-      watermark.historyEntryIds = cursor.entryIds.slice(-2_000);
-      watermark.updatedAt = nowIso(this.now);
+    if (!watermark || !history || !cursor) return;
+    const caches = await Promise.all(historyCaches(watermark).map(async (cache) => {
+      // Old queues have only the bounded index cursor. Cache damage remains recoverable through
+      // reuse; it must not turn successful capture into a failed job or hide source read errors.
+      const payload = await this.readSnapshot(cache.digest).catch(() => undefined);
+      return { ...cache, entryIds: payload?.historyEntryIds ?? cache.entryIds };
+    }));
+    // Enqueue reuse starts at a derived summary record. Preserve its known ancestry so later
+    // retries from before that summary remain comparable, without retaining any source text.
+    for (const cache of caches) {
+      const start = cache.entryIds?.indexOf(cursor.entryIds[0]) ?? -1;
+      if (start > 0) cursor.entryIds = [...cache.entryIds!.slice(0, start), ...cursor.entryIds];
     }
+    const comparisons = caches.map((cache) => cursorComparison(cursor, cache));
+    const sourceEnd = cursor.entryIds.at(-1)!;
+    // An ordered shared-prefix boundary can still belong to a fork needing its own cache.
+    // Reject older/equal work only when the cache covers this path or this is a late prefix retry.
+    if (caches.some((cache, index) => comparisons[index] !== undefined &&
+        comparisons[index]! <= 0 && (cursor.entryIds.includes(cache.throughEntryId) ||
+          cache.entryIds?.includes(sourceEnd)))) return;
+    const digest = await this.storeSnapshot({ entries: [], historySummary: history,
+      historyEntryIds: cursor.entryIds });
+    // A newer boundary alone cannot supersede a sibling's still-useful shared-prefix cache.
+    // The producing path's end must also be on this completion's path.
+    setHistoryCaches(watermark, [
+      ...caches.filter((cache, index) => comparisons[index] === undefined ||
+        comparisons[index]! <= 0 || !cursor.entryIds.includes(cache.entryIds?.at(-1) ?? "")),
+      { digest, throughEntryId: cursor.throughEntryId, entryIds: cursor.entryIds },
+    ]);
+    watermark.updatedAt = nowIso(this.now);
   }
 
   private applyCheckpointPatch(job: StoredQueueJob, patch: QueueCheckpoint): void {
