@@ -146,6 +146,8 @@ export interface Memory extends MemoryInput {
   id: number;
   is_obsolete: boolean;
   superseded_by?: number | null;
+  obsolete_reason?: string | null;
+  obsoleted_at?: string | null;
   linked_memory_ids?: number[];
   access_count?: number;
   last_accessed_at?: string | null;
@@ -199,6 +201,9 @@ export interface ForgetfulClient {
   ): Promise<Project>;
   create(input: MemoryInput, signal?: AbortSignal): Promise<MemoryCreateResult>;
   get(id: number, signal?: AbortSignal): Promise<Memory>;
+  obsolete?(
+    id: number, reason: string, replacementId?: number, signal?: AbortSignal,
+  ): Promise<void>;
   supersede(
     id: number,
     replacementId: number,

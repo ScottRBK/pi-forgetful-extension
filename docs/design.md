@@ -60,8 +60,8 @@ failure-open coordination. Recall uses a separately configured Pi model to plan 
 asynchronously,
 then reports lifecycle state and reviewed context at model-call boundaries. Capture snapshots a
 settled session branch into a durable queue, then uses the same transport-neutral Forgetful client
-to create, supersede, or escalate candidate memories. The HTTP adapter is the MVP; a future CLI
-adapter can be added without changing the application services or policy contracts.
+to create, merge, supersede, retire, or escalate candidate memories. The HTTP adapter is the MVP; a
+future CLI adapter can be added without changing the application services or policy contracts.
 
 The presentation source for this diagram is [architecture.svg](assets/architecture.svg). The
 expanded layer-by-layer version remains available in
@@ -82,7 +82,9 @@ The following choices describe the approved extension boundary:
 - Capture checks both duplication and contradiction against existing memories. A contradiction
   is a distinct outcome with evidence, not an ordinary duplicate to discard. Clear, evidenced
   changes automatically supersede the old memory while preserving its history. Uncertain
-  conflicts are escalated to the main model through the bounded handoff described below.
+  conflicts are escalated to the main model through the bounded handoff described below. Additive
+  refinements merge into a complete replacement with inherited connections; standalone retirement
+  handles obsolete knowledge without requiring a new fact. Recall remains read-only.
 - Query-before-create is the only duplicate boundary. Race and retry risk are accepted for this
   slice; no stronger Forgetful write contract is proposed without explicit approval.
 - The planner uses a separately configurable authenticated Pi model, distinct from the active
@@ -329,7 +331,8 @@ request and response shapes:
   current content, project associations and obsolescence state;
 - supersede: first create the replacement, then `DELETE /memories/{id}` with `reason` and
   `superseded_by` set to the confirmed replacement ID. This route marks the old memory obsolete
-  and preserves its history; the operation is not a hard delete;
+  and preserves its history; the operation is not a hard delete. Standalone retirement uses the
+  same route without `superseded_by`. Both store the reason in the old record's `obsolete_reason`;
 - validate HTTP status codes and response schemas before returning data to recall or capture;
 - use configured authentication, never log credentials, and require TLS for non-local endpoints;
 - apply bounded per-request timeouts and abort signals to every network call.
@@ -443,12 +446,13 @@ is then processed by the durable worker described above.
    context. Capture exclusions remain attached to original entry IDs across branches. Evidence
    eligibility is separate from visibility; failed tools establish failures, not successful changes.
 2. Ask the configured Pi memory model for atomic, evidenced candidates, without a fixed candidate
-   count cap. Resolve each to an existing target project; if none matches, skip it and warn the user
-   to create a project. Do not create projects automatically. It may inspect trusted repository text
-   and source URLs through a read-only tool before submitting candidates. Actual observations carry
-   durable evidence IDs and provenance; source editing, shell execution and uploads are unavailable.
-   It may also use
-   `read_capture_evidence` to selectively read this task's pinned originals by entry ID, without
+   count cap. Maintenance-only items carry a search description and evidence IDs instead of a
+   proposed stored memory. Resolve each to an existing target project; if none matches, skip it and
+   warn the user to create a project. Do not create projects automatically. It may inspect trusted
+   repository text and source URLs through a read-only tool before submitting candidates. Actual
+   observations carry durable evidence IDs and provenance; source editing, shell execution and
+   uploads are unavailable. It may also use `read_capture_evidence` to selectively read this task's
+   pinned originals by entry ID, without
    changing evidence identity or eligibility. Reads are optional, not a required read-before-cite
    check or a guarantee that every fact omitted from a summary will be discovered. Text pages
    default to 4,000 characters (maximum 16,000), with explicit continuation offsets and original
@@ -467,15 +471,16 @@ is then processed by the durable worker described above.
 4. Query Forgetful for semantic overlap in each accepted candidate's destination project.
 5. Give candidates, their evidence and full destination-scoped records to the memory model.
    Accept a private `submit_capture_decision` or batched `submit_capture_decisions` call with
-   `create`, `skip`, `supersede` or `escalate`. Resource reuse requires explicit existing IDs;
-   entity-memory links require selected keys. `skip` writes nothing unless `enrich: true`
-   explicitly requests resource additions and connection review for the selected memory.
+   `create`, `skip`, `merge`, `supersede`, `retire` or `escalate`. Resource reuse requires explicit
+   existing IDs; entity-memory links require selected keys. `skip` writes nothing unless
+   `enrich: true` explicitly requests resource additions and connection review for the selected
+   memory.
 6. Validate action names and one decision per candidate, including known, unique candidate IDs.
    Existing-memory targets need not come from the overlap query. The model judges contradiction,
    replacement completeness and resource suitability; code does not require explanatory claims,
    restrict sibling reuse to earlier same-project candidates, or revalidate selected resource keys
    against the neighborhood. Each private submission retains three attempts under its deadline.
-7. Execute `create` or automatic `supersede` through the existing Forgetful API using the automatic
+7. Execute `create`, `merge`, `supersede` or `retire` through the existing Forgetful API using the
    write path below. Record `skip` and `escalate` distinctly; an unresolved conflict is
    neither an ordinary duplicate nor permission to create a competing fact.
 8. If a decision is malformed, reject the write and record the reason. Retain a valid uncertain
@@ -522,6 +527,53 @@ Supersession retires the predecessor in every project. The replacement uses the 
 destination; it does not inherit project memberships the model did not select.
 Other clients can still race between validation and mutation because the existing API has no
 conditional write contract. This limitation remains explicit; no service change is assumed.
+
+### Merge and standalone retirement
+
+The model chooses the action. Forgetful validates stored data and API operations. The extension
+validates submission structure and existing trust/scope boundaries, then executes reliably; it does
+not add contradiction detectors, confidence thresholds, or a second content-completeness judgment.
+Targets need not have appeared in the initial overlap results.
+
+A merge reads the full selected memories and asks the capture model to compose a complete
+replacement through a private validated submission. This is composition, not a second approval gate.
+It uses the existing model-call allowance. When that allowance is exhausted, checkpoint and defer
+remaining work as progress, without consuming a failed attempt or asking the model to reconsider its
+saved action. Checkpoint the submitted content before creating a replacement so recovery does not
+regenerate it after writes begin. A definitely rejected merged payload can be corrected using the
+original Forgetful response; the writing task must not recompose blindly without that error.
+
+Before creating a replacement, read and check all inherited endpoints and references. Carry forward
+the union of active predecessor memory links, entity links, document references, code-artifact
+references and file references, plus newly requested connections. Obsolete memory links remain on
+the historical originals and are omitted from required carry-forward. Missing or out-of-scope
+required endpoints block creation. These are mechanical checks, not new semantic judgments.
+
+Reuse existing resources, deduplicate IDs, and omit self-links and links between predecessors.
+Ordinary review caps and model-selected preservation do not apply to inherited connections.
+Recheck active endpoints and pinned scope before mutation. A failure after creation leaves explicit
+unfinished work rather than silently dropping a required connection. Only after preservation
+completes may each predecessor be obsoleted with the confirmed replacement ID and model reason.
+These checks do not provide an atomic transaction against concurrent clients.
+
+Standalone retirement checks all selected targets before the first DELETE, then obsoletes them
+without a create or replacement ID. It retains their content and connections as history. Invalid
+selection receives the original service error for correction before any target is retired. Fresh
+checks still run before each mutation. Extraction can recognise removal-only evidence even when
+nothing new deserves storing. Each mutation has a durable attempt and result; completed writes are
+not replayed and ambiguous writes remain pending. Existing supersession receipts keep their original
+meaning. Shared-memory retirement affects every project using that record.
+
+Both actions send the reason through Forgetful's existing obsolescence API. It is stored as
+`obsolete_reason` on the predecessor, alongside `superseded_by` for merge, and included in the
+service's deletion-event snapshot. No invented provenance field or content suffix is needed.
+
+Capture instructions should prevent duplicate, fragmented and stale active knowledge: skip unchanged
+facts, merge useful refinements about the same subject and scope, supersede changed claims, retire
+knowledge no longer applicable when no replacement is needed, and create genuinely separate facts.
+Preserve qualifications and distinctions; similarity, age or current-request irrelevance alone does
+not justify retirement. These are model guidelines rather than extension-owned semantic gates.
+Recall remains read-only. There is no new maintenance sweep or main-agent tool.
 
 ### Escalation to the active session
 
@@ -788,11 +840,12 @@ to prove that a real model classifies, splits, or judges novelty correctly.
    eligible source evidence. Stored summaries survive restart and never cross session/branch scope.
    Candidate extraction accepts one private tool submission, returns bounded validation feedback
    for correction, and never treats text-only JSON as a valid submission.
-5. **Capture mechanism seam**: given a private create/skip/supersede/escalate submission, the
-   extension validates its original arguments, searches the destination project, applies validated
-   creates or ordered supersession, and retains uncertain conflicts. Invalid decisions receive
-   bounded correction feedback. Content differences do not substitute code-owned judgments;
-   changed project access or disabled writes still prevent unauthorized operations.
+5. **Capture mechanism seam**: given a private create/skip/merge/supersede/retire/escalate
+   submission, the extension validates its original arguments, searches the destination project,
+   applies validated creates, ordered merge/supersession or standalone retirement, and retains
+   uncertain conflicts. Invalid decisions receive bounded correction feedback. Content differences
+   do not substitute code-owned judgments; changed project access or disabled writes still prevent
+   unauthorized operations.
 6. **Scope seam**: a fresh project uses global scope without project filtering; persisted global
    and project choices are loaded per repository and cannot be replaced by the planner; project
    requests set `strict_project_filter: true` and use the resolved numeric project ID, while
@@ -828,10 +881,24 @@ intelligence. For example:
 - return a capture candidate and `create`, then assert the expected memory exists through the
   existing Forgetful API;
 - pre-seed an overlapping memory, return `skip`, and assert the memory count is unchanged;
+- submit maintenance-only evidence and `retire`, then assert no replacement was created, the old
+  record is obsolete with its reason, and its historical connections remain;
+- submit `merge` for one or several predecessors, then read back the complete replacement and
+  inherited memory/entity/document/artifact/file connections, including counts above review limits;
+  verify all required preservation precedes retirement and unrelated memories stay active;
+- merge twice with production auto-linking enabled and assert obsolete ancestor links stay
+  historical without stranding another active replacement;
+- select an invalid retirement target after a valid one and assert no DELETE precedes correction;
+- reject composed merge content through REST and verify the model sees the original error and
+  submits a corrected combined payload that is actually stored;
+- exhaust the model-call allowance mid-batch and assert saved decisions resume without a correction
+  call or failed attempt;
+- interrupt merge after creation, during preservation and between predecessor retirements; restart
+  the same queue and verify completed receipts are not replayed and ambiguous writes stay pending;
 - pre-seed an incompatible decision, return `supersede` with valid source identities, and assert
   the replacement is created before the old memory is marked obsolete and linked to it;
 - return `escalate` and assert the conflicting IDs and evidence persist without a write;
-- reject an automatic supersession referencing IDs outside the candidate's overlap results;
+- accept model-selected supersession targets outside the initial overlap results;
 - fail replacement creation and assert the old memory remains active; fail obsolescence after
   creation and assert retry uses the recorded replacement ID without creating another memory;
 - change the old memory before automatic supersession and check the current-state boundary;

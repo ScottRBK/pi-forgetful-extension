@@ -601,19 +601,21 @@ export class ApiForgetfulClient implements ForgetfulClient {
     reason: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const memoryId = requestSegment(id);
-    const replacement = replacementId;
+    return this.obsolete(id, reason, replacementId, signal);
+  }
+
+  async obsolete(
+    id: number, reason: string, replacementId?: number, signal?: AbortSignal,
+  ): Promise<void> {
     const payload = await this.request(
-      `/memories/${memoryId}`,
+      `/memories/${requestSegment(id)}`,
       "DELETE",
-      { reason, superseded_by: replacement },
+      { reason, ...(replacementId === undefined ? {} : { superseded_by: replacementId }) },
       signal,
       [200],
     );
     if (!isObject(payload) || payload.success !== true) {
-      throw new ForgetfulSchemaError(
-        "Forgetful supersede response.success must be true",
-      );
+      throw new ForgetfulSchemaError("Forgetful supersede response.success must be true");
     }
   }
 

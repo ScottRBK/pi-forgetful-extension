@@ -999,6 +999,8 @@ test("capture overlap submission retries through the durable checkpoint flow", a
     "skip",
     "supersede",
     "escalate",
+    "retire",
+    "merge",
   ]);
   for (const name of [
     "action",

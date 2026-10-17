@@ -784,7 +784,7 @@ test(
         );
         assert.ok(
           overlap && providerSystemPrompt(overlap).includes(
-            "action create, skip, supersede, or escalate",
+            "action create, skip, merge, supersede, retire, or escalate",
           ),
         );
         assert.ok(

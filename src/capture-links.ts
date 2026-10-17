@@ -138,9 +138,10 @@ async function readSelectedMemory(
 
 export async function prepareLinkReview(
   client: ForgetfulClient, memoryId: number, destination: number, scope: Scope,
-  overlaps: Memory[], automaticIds: number[] | undefined, beforeRead: () => Promise<void>,
-  includeAttachments = false,
+  overlaps: Memory[], options: { automaticIds?: number[]; beforeRead: () => Promise<void>;
+    includeAttachments?: boolean },
 ): Promise<CaptureLinkReview> {
+  const { automaticIds, beforeRead, includeAttachments = false } = options;
   if (!client.knowledge?.unlinkMemories) {
     return { status: "unsupported", reason: "Client cannot review and unlink memory connections" };
   }

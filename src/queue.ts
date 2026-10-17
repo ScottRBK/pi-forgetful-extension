@@ -83,7 +83,8 @@ export interface QueueJob {
 
 export interface SupersessionReceipt {
   oldMemoryId: number;
-  replacementId: number;
+  replacementId?: number;
+  operation?: "retire";
   status: "started" | "completed" | "failed";
 }
 
@@ -271,6 +272,9 @@ function interruptedWrite(job: QueueJob): boolean {
   if (job.supersession?.status === "started") return true;
   return Object.values(job.candidateOutcomes).some((value) => {
     const outcome = outcomeRecord(value);
+    const mergeReceipts = outcomeRecord(outcomeRecord(outcome.mergePlan).connections).receipts;
+    if (Object.values(outcomeRecord(mergeReceipts)).some(
+      (receipt) => outcomeRecord(receipt).status === "started")) return true;
     if (outcome.uncertainWrite ||
         ["started", "unknown"].includes(String(outcomeRecord(outcome.creation).status)))
       return true;
@@ -295,7 +299,7 @@ function releaseCompletedArtifacts(job: StoredQueueJob): void {
       const outcome = outcomeRecord(value);
       const summary: Record<string, unknown> = {};
       for (const key of ["stage", "action", "reason", "destinationProjectId", "memoryId",
-        "replacementId", "conflictId"]) {
+        "replacementId", "retiredCount", "conflictId"]) {
         const field = outcome[key];
         if (typeof field === "string") summary[key] = scrubDiagnostic(field);
         else if (typeof field === "number") summary[key] = field;
@@ -1312,12 +1316,13 @@ export class DurableQueueStore {
     job.updatedAt = job.startedAt;
   }
 
-  /** A durable preparation slice advances context without spending a failure attempt. */
-  async releaseProgress(jobId: string): Promise<void> {
+  /** Checkpointed work yields without spending a failure attempt. */
+  async releaseProgress(jobId: string, replenishModelCalls = false): Promise<void> {
     await this.mutate((state) => {
       const job = state.jobs.find((item) => item.id === jobId);
       if (job?.status !== "running") return { value: undefined, changed: false };
       job.status = "pending";
+      if (replenishModelCalls) job.callCount = 0;
       job.attempts = Math.max(0, job.attempts - 1);
       job.resumeAttempt = true;
       job.ownerPid = undefined;

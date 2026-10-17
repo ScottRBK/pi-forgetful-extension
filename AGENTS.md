@@ -46,13 +46,20 @@ The intended experience requires no memory commands during normal work:
   available on demand; these settings do not control independent CLI/MCP clients.
 
 Recall defaults to global search. Capture defaults to the current project, but may select another
-existing project when the evidence supports it. Clear complete changes supersede old memories while
-preserving history. Uncertain conflicts return to their originating conversation on its next user
-turn, without waking an idle agent. A conflict becomes locally `handed_off` only after the notice is
-saved in that conversation; this never means that the server conflict was resolved. The main agent
-agrees a resolution with the user and applies it through independent CLI/MCP access. Unavailable
-access or failed writes remain unresolved, with no fallback extension writer. Existing partial and
-uncertain write records remain untouched; handoff must not discard or replay their saved progress.
+existing project when the evidence supports it. Clear complete changes supersede old memories
+while preserving history. Additive refinements can merge into a complete replacement, preserving
+existing active links and attachment references before retiring predecessors; obsolete links stay
+on the historical originals. Check inherited connections before creating a merge replacement, and
+all retirement targets before the first DELETE. Model-call budget exhaustion defers work without a
+failed attempt. Standalone retirement needs no new memory; reasons use Forgetful obsolescence
+metadata. The model chooses these actions; the extension executes reliably without extra semantic
+rules. Recall remains read-only. Uncertain conflicts return to their originating conversation on
+its next user turn, without waking an idle agent. A conflict becomes locally `handed_off` only
+after its notice is saved in that conversation; this never means that the server conflict was
+resolved. The main agent agrees a resolution with the user and applies it through independent
+CLI/MCP access. Unavailable access or failed writes remain unresolved, with no fallback extension
+writer. Existing partial and uncertain write records remain untouched; handoff must not discard or
+replay their saved progress.
 
 Post-exit capture completion remains beyond the MVP; the durable queue remains in scope.
 See [the approved design](docs/design.md).

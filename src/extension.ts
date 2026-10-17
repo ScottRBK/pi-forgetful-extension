@@ -1047,7 +1047,7 @@ interface AutomaticCaptureJobOutcome {
   ready: boolean;
   terminal: boolean;
   noCandidates: boolean;
-  candidateStages: Array<{ key: string; stage: string; reason?: string }>;
+  candidateStages: Array<{ key: string; stage: string; reason?: string; count?: number }>;
   failure?: { detail: string; retryPending: boolean; key: string };
 }
 
@@ -1087,13 +1087,16 @@ function automaticCaptureJobOutcome(
     if (
       typeof id !== "string" ||
       typeof stage !== "string" ||
-      !["created", "superseded", "skipped", "observed"].includes(stage)
+      !["created", "superseded", "merged", "retired", "skipped", "observed"].includes(stage)
     )
       return [];
     const key = `${sanitizeText(id).slice(0, 100)}\u0000${stage}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ key, stage, ...(reason ? { reason } : {}) }];
+    const retiredCount = (item as { retiredCount?: unknown }).retiredCount;
+    const count = stage === "retired" && typeof retiredCount === "number" &&
+      Number.isSafeInteger(retiredCount) && retiredCount > 0 ? retiredCount : 1;
+    return [{ key, stage, count, ...(reason ? { reason } : {}) }];
   });
   if (status === "failed" || (status === "pending" && lastError)) {
     return {
@@ -1173,6 +1176,8 @@ function recordCaptureRetry({ state, outcome }: CaptureFeedbackItem): {
 
 function collectCaptureFeedback(items: CaptureFeedbackItem[]) {
   let saved = 0;
+  let merged = 0;
+  let retired = 0;
   let skipped = 0;
   const skippedReasons = new Map<string, number>();
   let observed = 0;
@@ -1191,6 +1196,9 @@ function collectCaptureFeedback(items: CaptureFeedbackItem[]) {
     saved += fresh.filter(
       ({ stage }) => stage === "created" || stage === "superseded",
     ).length;
+    merged += fresh.filter(({ stage }) => stage === "merged").length;
+    retired += fresh.filter(({ stage }) => stage === "retired")
+      .reduce((total, candidate) => total + (candidate.count ?? 1), 0);
     const freshSkipped = fresh.filter(({ stage }) => stage === "skipped");
     skipped += freshSkipped.length;
     for (const candidate of freshSkipped) {
@@ -1207,6 +1215,8 @@ function collectCaptureFeedback(items: CaptureFeedbackItem[]) {
   return {
     ready: ready.length,
     saved,
+    merged,
+    retired,
     skipped,
     skippedReasons,
     observed,
@@ -1233,19 +1243,33 @@ function skippedReasonBreakdown(reasons: Map<string, number>): string {
     : `${breakdown.slice(0, MAX_CAPTURE_FEEDBACK_BREAKDOWN_LENGTH - 1)}…`;
 }
 
+function captureFailurePart(
+  summary: ReturnType<typeof collectCaptureFeedback>, noOtherParts: boolean,
+): string | undefined {
+  const { failures } = summary;
+  if (!failures.length) return undefined;
+  const retry = failures.some((failure) => failure.retryPending) ? " (retry pending)" : "";
+  const count = summary.ready === 1 && noOtherParts
+    ? "" : `${captureCount(failures.length, "job", "jobs")} `;
+  return `${count}failed${retry}: ${failures[0].detail}`;
+}
+
 function captureFeedbackParts(summary: ReturnType<typeof collectCaptureFeedback>): string[] {
   const {
     saved,
+    merged,
+    retired,
     skipped,
     skippedReasons,
     observed,
     noCandidates,
     recovered,
-    failures,
   } = summary;
   const parts: string[] = [];
   if (saved > 0)
     parts.push(`saved ${captureCount(saved, "memory", "memories")}`);
+  if (merged > 0) parts.push(`merged ${captureCount(merged, "memory", "memories")}`);
+  if (retired > 0) parts.push(`retired ${captureCount(retired, "memory", "memories")}`);
   if (skipped > 0)
     parts.push(
       `skipped ${captureCount(skipped, "candidate", "candidates")} ` +
@@ -1256,12 +1280,8 @@ function captureFeedbackParts(summary: ReturnType<typeof collectCaptureFeedback>
   if (noCandidates > 0)
     parts.push(noCandidates === 1 ? "skipped: no candidates" :
       `skipped ${noCandidates} jobs with no candidates`);
-  if (failures.length > 0) {
-    const retry = failures.some((failure) => failure.retryPending) ? " (retry pending)" : "";
-    const count = summary.ready === 1 && parts.length === 0
-      ? "" : `${captureCount(failures.length, "job", "jobs")} `;
-    parts.push(`${count}failed${retry}: ${failures[0].detail}`);
-  }
+  const failure = captureFailurePart(summary, parts.length === 0);
+  if (failure) parts.push(failure);
   if (recovered > 0)
     parts.push(recovered === 1 ? "completed after retry" :
       `${recovered} jobs completed after retry`);

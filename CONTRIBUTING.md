@@ -125,6 +125,39 @@ The test verifies writes and supersession through the public capture and REST bo
 provider call counts, sanitized tool responses, and rejection feedback are written to the ignored
 `test-results/capture-submission-live.json`. It never writes production memories.
 
+### Capture maintenance checks
+
+The deterministic maintenance suites cover standalone retirement, merge connection preservation,
+restart recovery, and Pi lifecycle feedback. REST fixtures use an isolated database, including
+existing file references; capture itself never uploads files. Keep tests with production
+auto-linking as well as controlled graphs: disabling auto-linking everywhere can hide repeat-merge
+failures.
+Invalid target/reference tests must assert that no replacement or partial retirement was written.
+Rejection tests verify the corrected stored content, and budget tests verify progress across passes
+without spending failure attempts.
+
+```bash
+FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test test/capture-maintenance*.test.ts
+```
+
+Action-selection quality has a separate paid, opt-in evaluation using the configured memory model.
+It covers unchanged facts, additive detail (including the uv policy), changed and separate facts,
+retirement-only evidence, and uncertainty. It allows at most 48 provider calls and never writes
+production memories. Use the existing credential setup; environment-backed secrets go through
+`envault run`.
+
+```bash
+FORGETFUL_LIVE_MAINTENANCE=1 FORGETFUL_TEST_SOURCE=/path/to/forgetful \
+  node --import tsx --test test/live-capture-maintenance.test.ts
+```
+
+The report path is printed by the test and defaults to a temporary JSON file. Set
+`FORGETFUL_MAINTENANCE_REPORT` to choose another path outside the repository. Action choices are
+asserted automatically; review the composed replacement text against the report's rubrics.
+Fixed test embeddings do not evaluate search ranking. Scripted execution tests do not establish
+real-model judgment quality.
+
 If parallel REST tests stall on a constrained machine, run the same deterministic tests serially:
 
 ```bash

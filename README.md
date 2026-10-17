@@ -6,20 +6,22 @@ Automatic persistent memory for the [Pi coding agent](https://pi.dev/), using th
 A separately selected memory model plans relevant context while normal work starts immediately,
 then captures durable, evidenced knowledge after work settles. Recall lifecycle messages reach
 the main model only at model-call boundaries. Clear contradictions automatically supersede old
-memories while preserving their history. Uncertain conflicts return to the originating session
-for discussion with the user and resolution through independently configured MCP or CLI access.
+memories while preserving their history. Capture can also merge refinements into one complete
+replacement or retire outdated knowledge without a replacement. Recall stays read-only.
+Uncertain conflicts return to the originating session for discussion with the user and resolution
+through independently configured MCP or CLI access.
 
 ![Pi Forgetful architecture](docs/assets/architecture.png)
 
 ## Architecture
 
-Pi sends ordinary prompts and completed work to the extension. Recall starts a separate planner
-job, performs bounded requests against a warm Forgetful HTTP service, and reports pending,
-retrieval, and terminal states at model-call boundaries. Capture snapshots the settled session
-branch, persists it in a durable queue, and processes candidates through query-before-create,
-supersession, or conflict escalation. Supported clients also review the saved memory's immediate
-connections; incomplete coverage stays explicit. Memory failures are failure-open and must not block
-the user's task. See [the design](docs/design.md) for boundaries and
+Pi sends ordinary prompts and completed work to the extension. Recall starts a separate planner job,
+performs bounded requests against a warm Forgetful HTTP service, and reports pending, retrieval, and
+terminal states at model-call boundaries. Capture snapshots the settled session branch, persists it
+in a durable queue, and processes candidates through query-before-create, merge, supersession,
+standalone retirement, or conflict escalation. Supported clients also review the saved memory's
+immediate connections; incomplete coverage stays explicit. Memory failures are failure-open and must
+not block the user's task. See [the design](docs/design.md) for boundaries and
 [CONTRIBUTING.md](CONTRIBUTING.md) for repeatable checks.
 
 HTTP is the MVP transport. The application services depend on a transport-neutral Forgetful client
@@ -298,9 +300,9 @@ Review validation failures
 also include the redacted, bounded reviewer JSON when available, available source IDs, and a
 mismatch direction when reliably known in the same final debug notice as elapsed/no-context text,
 so Pi's consecutive-status coalescing does not hide the evidence.
-At debug level, automatic capture reports each newly queued live job as saved, skipped, no
-candidates, or failed. Retryable failures say that retry is pending. These notices are user-only
-and do not enter model context; `/forgetful status` remains the detailed view for recovered or
+At debug level, automatic capture reports each newly queued live job as saved, merged, retired,
+skipped, no candidates, or failed. Retryable failures say that retry is pending. These user-only
+notices do not enter model context; `/forgetful status` remains the detailed view for recovered or
 older queue jobs.
 Skipped candidates include a short grouped breakdown, for example:
 `Forgetful capture skipped 3 candidates (2: already known; 1: reason unavailable).`
@@ -400,11 +402,13 @@ Skipped work stays visible but cannot be cited as capture evidence. A live worke
 candidates through the private `submit_capture_candidates` tool, without a fixed candidate cap.
 It validates eligible evidence IDs and resolves an existing destination, then checks overlap there.
 If no project matches, it skips the candidate and warns that a project needs creating. The overlap
-model submits `create`, `skip`, `supersede`, or `escalate` through the private
-`submit_capture_decision` tool. The worker
-then creates novel knowledge, supersedes a clearly outdated memory, or preserves an uncertain
-conflict for the originating session. Queue records include per-candidate outcomes so partial
-writes are retained while the model corrects rejected fields using the actual Forgetful error.
+model submits `create`, `skip`, `merge`, `supersede`, `retire`, or `escalate` through the private
+`submit_capture_decision` tool. Extraction can also submit maintenance-only work with a search
+description and evidence IDs, without inventing a new memory to store. The worker creates separate
+knowledge, merges useful additions, supersedes changed claims, retires knowledge without a
+replacement, or preserves an uncertain conflict for the originating session. Queue records include
+per-candidate outcomes so partial writes are retained while the model corrects rejected fields
+using the actual Forgetful error.
 
 The extraction model can investigate a missing fact with the read-only `inspect_source` tool:
 repository text files and HTTP(S) URLs, without shell execution, editing or uploads. Actual reads
@@ -512,12 +516,36 @@ Entity-memory links require an explicit selection. A `skip` does no enrichment u
 requests it. Partial work is checkpointed; actual failures reach the model for correction.
 Link reviews keep their three-review/eight-decision bounds and must cover every selected memory.
 Additional explicit targets are allowed; link mutations recheck active destination membership,
-including shared memories. Replacement attachment selections are optional, and omission leaves
-attachments unchanged. Completed or uncertain link operations are not automatically replayed.
+including shared memories. For ordinary supersession, replacement attachment selections are
+optional, and omission leaves attachments unchanged. Completed or uncertain link operations are not
+automatically replayed.
 Capture does not upload files; `source_files` records provenance paths only. Clear contradictions
 are resolved automatically, while uncertain conflicts still return to the originating session.
 Superseding a shared or foreign-project memory retires it everywhere; its replacement uses the
 chosen capture project, without automatically copying the old memory's project memberships.
+
+Merge asks the model for a complete combined replacement after reading the selected memories.
+The worker checks inherited connections before creating anything, checkpoints the combined content,
+then creates it and carries forward active memory links, entity links, and document, code-artifact
+and file references before retiring any predecessor. Obsolete memory links stay on the historical
+originals; they do not block later merges. Self-links and links between merged predecessors are
+omitted. Resources are reused, without cloning attachments or uploading files. Carry-forward has no
+ordinary link-review caps or second model selection. Missing or out-of-scope required connections
+block creation. Fresh checks still run before writes; a later failure leaves explicit unfinished
+work, not a successful merge.
+
+Retirement checks all selected targets before retiring the first, and leaves the old records and
+connections as history without creating a replacement. Merge and retirement reasons go to
+Forgetful's `obsolete_reason` field on the old records; merged
+predecessors also point to the new memory through `superseded_by`. Retiring a shared memory affects
+all its projects. Completed operations are checkpointed; uncertain writes are not blindly replayed.
+A rejected merge payload is corrected using Forgetful's actual error. Exhausting the model-call
+allowance defers remaining work without consuming a failed attempt or changing the saved decision.
+
+Capture guidance favours useful knowledge over a running transcript: skip unchanged facts, merge
+refinements, supersede changes, retire no-longer-applicable knowledge, and create separate concepts.
+Similarity, age, or irrelevance to the current request alone is not a reason to retire. These are
+model instructions, not extra semantic validation rules in the extension.
 
 ## Configuration
 
@@ -610,8 +638,8 @@ exits, and the MVP does not guarantee post-exit completion.
 - Entity search examines a bounded set of matches; use specific names and aliases for large graphs.
   Document, code and file lists use existing server routes, whose full responses must fit the
   transport limit even when the tool returns a small page.
-- Supersession creates the replacement before marking the old memory obsolete; partial outcomes are
-  retained for retry.
+- Supersession and merge create the replacement before marking old memories obsolete. Merge also
+  preserves connections first. These are not atomic transactions; partial outcomes remain durable.
 - Capture runs in the live Pi process. Pending queue records can recover on a later normal start,
   but post-exit completion and an external worker are outside the MVP.
 

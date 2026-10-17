@@ -551,7 +551,7 @@ test("opposite link instructions across review chunks are rejected before connec
 
 test("multiple predecessor reviews resume after four tasks without replaying completed targets",
   realOptions, async (t) => {
-    // Arrange: three predecessor reviews exceed the first attempt's remaining task budget.
+    // Arrange: three predecessor reviews exceed the first pass's remaining task budget.
     const baseUrl = await startForgetful(t);
     const setup = new ApiForgetfulClient({ baseUrl });
     const project = await setup.createProject({ name: "Supersede", description: "Three targets",
@@ -599,9 +599,11 @@ test("multiple predecessor reviews resume after four tasks without replaying com
     let capture = new CaptureService({ ...identity, queue, client, model });
     // Act: restart after the four-task limit interrupted preparation for predecessor three.
     const queued = await capture.enqueue(snapshot(project));
-    await capture.checkpoint();
+    const progress = await capture.checkpoint();
     const pending = (await queue.getJob(queued.jobId))!;
-    assert.equal(pending.callCount, 4);
+    assert.deepEqual(progress.errors, []);
+    assert.equal(pending.attempts, 0);
+    assert.equal(pending.callCount, 0);
     assert.equal(pending.status, "pending");
     assert.equal((pending.candidateOutcomes.fact as any).supersededMemoryIds.length, 2);
     const restarted = new DurableQueueStore({ directory, ...identity });

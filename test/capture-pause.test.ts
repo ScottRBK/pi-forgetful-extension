@@ -70,7 +70,7 @@ for (const reason of ["disabled during inspection", "writes revoked"] as const) 
   });
 }
 
-test("a retry gets a fresh model allowance without repeating extracted work", async (t) => {
+test("a budget yield gets a fresh allowance without repeating extracted work", async (t) => {
   // Arrange: extraction spends the first attempt's single call; overlap needs another.
   const directory = await mkdtemp(join(tmpdir(), "capture-budget-failure-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -90,20 +90,22 @@ test("a retry gets a fresh model allowance without repeating extracted work", as
     maxModelCalls: 1 });
   const queued = await capture.enqueue(snapshot(directory));
 
-  // Act: the first attempt exhausts its budget, then the next uses its fresh allowance.
-  const failed = await capture.checkpoint();
-  assert.equal(failed.paused, false);
-  assert.match(failed.errors.join(" "), /model call budget/);
+  // Act: the first pass yields its budget, then the next uses its fresh allowance.
+  const progress = await capture.checkpoint();
+  assert.equal(progress.paused, false);
+  assert.deepEqual(progress.errors, []);
+  assert.equal(progress.continuation, "ready");
+  assert.equal((await queue.getJob(queued.jobId))?.attempts, 0);
   assert.equal((await queue.getJob(queued.jobId))?.status, "pending");
   const resumed = await capture.checkpoint();
 
-  // Assert: extraction and the accepted write each happen once across both attempts.
+  // Assert: extraction and the accepted write each happen once across both passes.
   assert.deepEqual(resumed.errors, []);
   assert.deepEqual(purposes, ["capture", "overlap"]);
   assert.equal(writes, 1);
   const completed = await queue.getJob(queued.jobId);
   assert.equal(completed?.status, "complete");
-  assert.equal(completed?.attempts, 2);
+  assert.equal(completed?.attempts, 1);
   assert.equal(completed?.callCount, 1);
 });
 
