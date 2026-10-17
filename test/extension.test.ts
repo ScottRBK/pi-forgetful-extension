@@ -428,6 +428,10 @@ test(`setup hands ${newInstance ? "new-instance" : "existing-instance"} ${route}
     assert.match(prompt, /supply.chain audit/i);
     assert.match(prompt, /installed Pi documentation/);
     assert.match(prompt, /skills\/README\.md/);
+    assert.match(prompt, /all installed Forgetful skills user-invoked only/i);
+    assert.match(prompt, /disable-model-invocation: true/);
+    assert.match(prompt, /ask before editing.*shared or project skill/i);
+    assert.match(prompt, /\/skill:<name>/);
     assert.doesNotMatch(prompt, /earendil-works\/pi\/blob\/main/);
     assert.match(prompt, /HTTP/);
     assert.match(prompt, /GET .*\/projects/);

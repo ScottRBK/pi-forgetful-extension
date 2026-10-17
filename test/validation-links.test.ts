@@ -137,7 +137,7 @@ const judgment = (memoryId: number, action = "ignore", reason = "Related constra
 
 test("capture accepts an additional unsupplied shared target and active shared saved memory",
   async (t) => {
-    // Arrange: selection remains exclusive; the provider explicitly adds another stored target.
+    // Arrange: overlap supplies a local record; the provider adds another stored target.
     const f = await fixture(t);
     f.state.review = input => {
       assert.deepEqual(input.candidates[0].eligibleMemoryIds, [1]);
@@ -542,12 +542,14 @@ for (const denied of ["obsolete", "foreign", "permission"]) {
     };
     const service = new CaptureService({ queue: f.queue, client: f.client, model: f.model,
       instanceId: "links", canWriteNow: () => writable });
-    const queued = await service.enqueue(snapshot());
+    const input = snapshot();
+    if (denied === "foreign") input.scope = "project";
+    const queued = await service.enqueue(input);
 
     // Act.
     await service.checkpoint();
 
-    // Assert: no POST is accepted after permission or current active project membership is lost.
+    // Assert: no POST after permission/activity loss, or destination loss in project scope.
     assert.notEqual((await f.queue.getJob(queued.jobId))!.status, "complete");
     assert.equal(f.requests.filter(r => r.path.endsWith("/links")).length, 0);
     assert.deepEqual((await f.client.get(100)).linked_memory_ids, []);
@@ -616,8 +618,10 @@ for (const operation of ["link", "unlink", "attachments", "entity"]) {
     f.state.review = input => {
       reviewed = true;
       return { reviews: [{ candidateId: "rule",
-        decisions: input.candidates[0].memories.map((m: Memory) => judgment(m.id)).concat(
-          preserving ? [] : [judgment(2, operation === "link" ? "add" : "reject")]),
+        decisions: input.candidates[0].memories
+          .filter((m: Memory) => preserving || m.id !== 2)
+          .map((m: Memory) => judgment(m.id)).concat(
+            preserving ? [] : [judgment(2, operation === "link" ? "add" : "reject")]),
         ...(preserving ? { preservation: { documentIds: [41], codeArtifactIds: [],
           entityIds: operation === "entity" ? [61] : [] } } : {}),
       }] };

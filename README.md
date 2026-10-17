@@ -70,8 +70,10 @@ The wizard first offers help creating a new Forgetful instance. If you already h
 instead offers help configuring access for the main agent. Choose **CLI + skills** or
 **MCP + skills** to start an agent conversation using Forgetful's corresponding setup skill.
 The agent is asked to reuse existing installations, install a missing CLI, install the appropriate
-skills, and add a native Pi MCP connection when you choose MCP. The extension itself does not
-install packages or change independent client settings.
+skills, and add a native Pi MCP connection when you choose MCP. The prompt asks it to make all
+installed Forgetful skills user-invoked only with `disable-model-invocation: true` in their local
+frontmatter. Use `/skill:<name>` to invoke one; routine recall/capture stays with the extension.
+The extension itself does not install packages or change independent client settings.
 
 The setup prompt also asks the agent to validate and save the background REST connection directly,
 preserving unrelated settings. You do not need to run `/forgetful setup` again. After the agent
@@ -166,6 +168,9 @@ after a successful `agent_settled` event. Recall searches globally by default. C
 new knowledge with the current project unless the agent selects another existing project supported
 by the completed work. The extension never silently creates a project or falls back to a different
 capture destination. Use `/forgetful project init` to create or link its project explicitly.
+Global scope also allows capture to review and add/remove cross-project memory links. Project
+scope keeps link changes within each candidate's destination project. Neither changes where the
+new memory is saved; duplicate/contradiction searches remain destination-scoped.
 
 | Command | Effect |
 | --- | --- |
@@ -178,8 +183,8 @@ capture destination. Use `/forgetful project init` to create or link its project
 | `/forgetful capture off` | Disable this extension’s extraction and capture writes. |
 | `/forgetful capture skip` | Skip the active run, or the next run when idle. |
 | `/forgetful retry-queue` | Retry remaining eligible capture work without reloading Pi. |
-| `/forgetful scope global` / `/forgetful scope project` | Persist the repository's recall scope. |
-| `/forgetful scope` | Show recall scope and where it was configured. |
+| `/forgetful scope global` / `/forgetful scope project` | Persist recall and capture-link scope. |
+| `/forgetful scope` | Show scope and where it was configured. |
 | `/forgetful model` | Select the separate memory model. |
 | `/forgetful logging off` | Stop file logging (default). |
 | `/forgetful logging info` | Save lifecycle events, outcomes, timings, and errors. |
@@ -517,8 +522,9 @@ chosen capture project, without automatically copying the old memory's project m
 ## Configuration
 
 Project scope is stored in `.pi/forgetful/settings.json` and requires Pi project trust. A missing
-scope setting means global recall. A malformed scope setting also uses global recall with a
-warning. Scope preference is independent of capture destination.
+scope setting means global recall and cross-project capture links. A malformed scope setting also
+uses global scope with a warning. Scope preference is independent of capture destination. Queued
+capture uses the scope saved in its snapshot, not later settings changes.
 
 `recall_model_timeout_ms` limits each classification and review request (default 5,000 ms).
 Without `timeout_ms`, overall recall and recall wait default to 30,000 ms; each Forgetful HTTP

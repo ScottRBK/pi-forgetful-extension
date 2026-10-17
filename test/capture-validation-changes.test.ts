@@ -653,3 +653,172 @@ test("uncertain acceptance on the third attempt retains evidence instead of expi
     assert.equal((job.candidateOutcomes.fact as any).creation.status, "unknown");
     assert.equal(inputs.length, 1);
   });
+
+test("global queued capture reviews cross-project links and resumes without duplicate writes",
+  async (t) => {
+    // Arrange: global review includes foreign/shared records but not obsolete ones.
+    const { directory, queue, client, inputs, saved } = await fixture(t);
+    for (const [id, projects] of [[1, [7]], [2, [9]], [3, [7, 9]], [4, [9]],
+      [5, [9]]] as const) {
+      saved.set(id, { ...fact, id, project_ids: [...projects], linked_memory_ids: [],
+        is_obsolete: id === 4 } as unknown as Memory);
+    }
+    const create = client.create.bind(client);
+    client.create = async (input) => {
+      const created = await create(input);
+      saved.get(created.id)!.linked_memory_ids = [1, 2, 3, 4];
+      return { ...created, autoLinkedMemoryIds: [1, 2, 3, 4] };
+    };
+    const get = client.get.bind(client);
+    let interrupt = true;
+    client.get = async (id) => {
+      if (id === 5 && interrupt) {
+        interrupt = false;
+        throw new ForgetfulHttpError("HTTP 503: temporary target read failure", 503, "read failed");
+      }
+      return get(id);
+    };
+    const operations: string[] = [];
+    client.knowledge = {
+      async linkMemories(id: number, ids: number[]) {
+        operations.push(`add:${ids.join(",")}`);
+        saved.get(id)!.linked_memory_ids!.push(...ids);
+      },
+      async unlinkMemories(id: number, target: number) {
+        operations.push(`reject:${target}`);
+        saved.get(id)!.linked_memory_ids = saved.get(id)!.linked_memory_ids!
+          .filter((linked) => linked !== target);
+      },
+    } as any;
+    const reviewed: any[] = [];
+    const model = { async complete(request: ModelRequest) {
+      if (request.purpose === "capture") return answer(request, { candidates: [fact] });
+      if (request.submission!.name === "submit_capture_decision")
+        return answer(request, { action: "create" });
+      const item = (request.input as any).candidates[0];
+      reviewed.push({ input: request.input, policy: request.policy });
+      return answer(request, { reviews: [{ candidateId: "fact", decisions: [
+        ...item.memories.filter((memory: Memory) => memory.id !== 2).map((memory: Memory) => ({
+          memoryId: memory.id, action: "keep", reason: "Useful stored supporting record" })),
+        { memoryId: 2, action: "reject", reason: "Unhelpful connection to a different decision" },
+        { memoryId: 5, action: "add", reason: "Known related constraint in another project" },
+      ] }] });
+    } };
+    const capture = new CaptureService({ ...identity, queue, client, model });
+
+    // Act: save and unlink succeed; a target read fails before the add, then restart and retry.
+    const queued = await capture.enqueue(snapshot());
+    await capture.checkpoint();
+    const pending = (await queue.getJob(queued.jobId))!;
+    const restarted = new DurableQueueStore({ directory, ...identity });
+    await new CaptureService({ ...identity, queue: restarted, client, model }).checkpoint();
+
+    // Assert through the model boundary, stored outcome and durable queue receipts.
+    assert.deepEqual(reviewed[0].input.candidates[0].memories.map((m: Memory) => m.id), [1, 2, 3]);
+    assert.equal(reviewed[0].input.scope, "global");
+    assert.match(reviewed[0].policy, /global.*cross-project/i);
+    assert.equal(pending.status, "pending");
+    assert.match(pending.lastError!, /temporary target read failure/);
+    const job = (await restarted.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(inputs.length, 1, "Retry must reuse the successful capture creation");
+    assert.deepEqual(inputs[0]!.project_ids, [7], "Link scope does not change capture destination");
+    assert.deepEqual(operations, ["reject:2", "add:5"], "Completed unlink must not be repeated");
+    const stored = await client.get((job.candidateOutcomes.fact as any).memoryId);
+    assert.deepEqual(stored.linked_memory_ids, [1, 3, 4, 5]);
+  });
+
+test("project queued capture excludes foreign/shared records and blocks explicit foreign links",
+  async (t) => {
+    // Arrange: existing links cover a local, foreign and shared memory.
+    const { queue, client, saved } = await fixture(t);
+    for (const [id, projects] of [[1, [7]], [2, [9]], [3, [7, 9]]] as const)
+      saved.set(id, { ...fact, id, project_ids: [...projects] } as unknown as Memory);
+    const create = client.create.bind(client);
+    client.create = async (input) => {
+      const created = await create(input);
+      saved.get(created.id)!.linked_memory_ids = [1, 2, 3];
+      return created;
+    };
+    let writes = 0;
+    client.knowledge = { async linkMemories() { writes++; }, async unlinkMemories() {} } as any;
+    let review: any;
+    const capture = new CaptureService({ ...identity, queue, client, model: {
+      async complete(request) {
+        if (request.purpose === "capture") return answer(request, { candidates: [fact] });
+        if (request.submission!.name === "submit_capture_decision")
+          return answer(request, { action: "create" });
+        review = request.input;
+        return answer(request, { reviews: [{ candidateId: "fact", decisions: [
+          { memoryId: 1, action: "keep", reason: "Related local fact" },
+          { memoryId: 2, action: "add", reason: "Explicit foreign selection" },
+        ] }] });
+      },
+    } });
+    const input = snapshot();
+    input.scope = "project";
+
+    // Act.
+    const queued = await capture.enqueue(input);
+    await capture.checkpoint();
+
+    // Assert: extra model-selected targets cannot bypass the persisted project boundary.
+    assert.deepEqual(review.candidates[0].memories.map((m: Memory) => m.id), [1]);
+    assert.equal(review.scope, "project");
+    assert.equal(review.candidates[0].destinationProjectId, 7);
+    assert.equal(writes, 0);
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "pending");
+    assert.match(job.lastError!, /outside the destination project/);
+  });
+
+for (const action of ["add", "reject"] as const) {
+  for (const obsolete of ["saved", "target"] as const) {
+    test(`global queued capture blocks ${action} after ${obsolete} memory becomes obsolete`,
+      async (t) => {
+        // Arrange: an active foreign endpoint is reviewed, then obsoleted before dispatch.
+        const { queue, client, saved } = await fixture(t);
+        saved.set(1, { ...fact, id: 1, project_ids: [9], is_obsolete: false,
+          linked_memory_ids: [] } as unknown as Memory);
+        const create = client.create.bind(client);
+        let root = 0, reviewed = false, writes = 0;
+        client.create = async (input) => {
+          const created = await create(input);
+          root = created.id;
+          saved.get(root)!.linked_memory_ids = [1];
+          return created;
+        };
+        client.knowledge = { async linkMemories() { writes++; },
+          async unlinkMemories() { writes++; } } as any;
+        const capture = new CaptureService({ ...identity, queue, client,
+          getMode: async () => {
+            if (reviewed) {
+              const id = obsolete === "saved" ? root : 1;
+              saved.set(id, { ...saved.get(id)!, is_obsolete: true });
+            }
+            return "auto" as const;
+          },
+          model: { async complete(request) {
+            if (request.purpose === "capture") return answer(request, { candidates: [fact] });
+            if (request.submission!.name === "submit_capture_decision")
+              return answer(request, { action: "create" });
+            reviewed = true;
+            return answer(request, { reviews: [{ candidateId: "fact", decisions: [
+              { memoryId: 1, action, reason: "Judgment of the full active foreign record" },
+            ] }] });
+          } },
+        });
+
+        // Act.
+        const queued = await capture.enqueue(snapshot());
+        await capture.checkpoint();
+
+        // Assert: global scope never permits mutation involving an obsolete memory.
+        assert.equal(reviewed, true);
+        assert.equal(writes, 0);
+        const job = (await queue.getJob(queued.jobId))!;
+        assert.equal(job.status, "pending");
+        assert.match(job.lastError!, /obsolete/);
+      });
+  }
+}

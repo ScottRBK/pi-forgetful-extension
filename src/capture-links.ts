@@ -1,6 +1,8 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { ForgetfulClient, Memory, Document, CodeArtifact, Entity } from "./contracts.ts";
+import type {
+  ForgetfulClient, Memory, Document, CodeArtifact, Entity, Scope,
+} from "./contracts.ts";
 import { hasSensitiveData } from "./privacy.ts";
 
 // The same per-candidate memory selection bound used by capture overlap searches.
@@ -92,7 +94,9 @@ export const CAPTURE_LINK_POLICY = [
   "constraints, dependencies and distinct related facts. Similar wording alone proves nothing.",
   "Use reject to remove a supplied scoped connection you judge unhelpful, whether automatic or",
   "manual. Use unresolved when unsure. Additional known stored targets may be selected;",
-  "execution requires both memories to be active and include the destination project.",
+  "Execution requires both memories to be active. In global scope, cross-project targets are",
+  "allowed. In project scope, both memories must include the candidate's destination project.",
+  "The saved memory must remain in its destination project regardless of link scope.",
   "keep and ignore request no mutation; add requests link, reject requests unlink. Execution",
   "results report completed operations and actual failures. Decide what to do next after failure;",
   "completed operations are not replayed or repaired. Do not assume a failed call changed nothing.",
@@ -133,7 +137,7 @@ async function readSelectedMemory(
 }
 
 export async function prepareLinkReview(
-  client: ForgetfulClient, memoryId: number, destination: number,
+  client: ForgetfulClient, memoryId: number, destination: number, scope: Scope,
   overlaps: Memory[], automaticIds: number[] | undefined, beforeRead: () => Promise<void>,
   includeAttachments = false,
 ): Promise<CaptureLinkReview> {
@@ -160,8 +164,10 @@ export async function prepareLinkReview(
     await beforeRead();
     const endpoint = await readSelectedMemory(client, id, unreviewed);
     if (!endpoint) continue;
-    if (!exclusiveMemory(endpoint, destination) || hasSensitiveData(JSON.stringify(endpoint))) {
-      unreviewed.push({ memoryId: id, reason: "Shared, obsolete, sensitive or outside scope" });
+    if (endpoint.is_obsolete || (scope === "project" && !exclusiveMemory(endpoint, destination)) ||
+        hasSensitiveData(JSON.stringify(endpoint))) {
+      unreviewed.push({ memoryId: id,
+        reason: "Obsolete, sensitive or outside automatic review scope" });
       continue;
     }
     memories.push(endpoint);
@@ -226,10 +232,10 @@ function operationError(error: unknown): string {
 }
 
 async function authorizedMemory(
-  client: ForgetfulClient, id: number, destination: number,
+  client: ForgetfulClient, id: number, destination: number, scope: Scope,
 ): Promise<Memory> {
   const memory = await client.get(id);
-  if (memory.is_obsolete || !memory.project_ids.includes(destination))
+  if (memory.is_obsolete || (scope === "project" && !memory.project_ids.includes(destination)))
     throw new Error("Memory is outside the destination project or obsolete");
   return memory;
 }
@@ -280,7 +286,7 @@ async function executeConnection(
 }
 
 export async function applyLinkReview(
-  client: ForgetfulClient, destination: number, initial: CaptureLinkReview,
+  client: ForgetfulClient, destination: number, scope: Scope, initial: CaptureLinkReview,
   save: (review: CaptureLinkReview) => Promise<void>, beforeWrite: () => Promise<void>,
   assertCanWrite: () => void,
 ): Promise<CaptureLinkReview> {
@@ -292,8 +298,8 @@ export async function applyLinkReview(
     const operation = decision.action === "add" ? "link" : "unlink";
     await executeConnection(review, operation, decision.memoryId, async (markDispatched) => {
       await beforeWrite();
-      const memory = await authorizedMemory(client, review.memory!.id, destination);
-      await authorizedMemory(client, decision.memoryId, destination);
+      const memory = await authorizedMemory(client, review.memory!.id, destination, "project");
+      await authorizedMemory(client, decision.memoryId, destination, scope);
       assertCanWrite();
       // Complete an explicit removal without DELETE when the fresh record proves it absent.
       // Do not swallow HTTP failures: another client can still remove the link after this read.

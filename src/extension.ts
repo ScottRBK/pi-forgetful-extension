@@ -2990,7 +2990,8 @@ export function createForgetfulExtension(
       if (!value) {
         notify(
           ctx,
-          `Forgetful recall scope: ${runtime.config.scope} (${runtime.config.scopeSource}).`,
+          `Forgetful scope: ${runtime.config.scope} (${runtime.config.scopeSource}); ` +
+            "applies to recall and capture links.",
         );
         return;
       }
@@ -3009,7 +3010,7 @@ export function createForgetfulExtension(
       await writeProjectScope(ctx.cwd, value);
       await resetRuntime(ctx, runtime);
       warmRuntime(ctx);
-      notify(ctx, `Forgetful recall scope set to ${value}.`);
+      notify(ctx, `Forgetful scope set to ${value} for recall and capture links.`);
     };
 
     const handleCaptureCommand = async (
@@ -3326,7 +3327,7 @@ export function createForgetfulExtension(
         notify(
           ctx,
           `Forgetful project ${sanitizeText(project.name)} (#${project.id}) ` +
-            `linked to ${context.repoName}. Recall scope: ${runtime.config.scope}.`,
+            `linked to ${context.repoName}. Recall/link scope: ${runtime.config.scope}.`,
         );
       } catch (error) {
         if (error instanceof ProjectInitError) {

@@ -39,7 +39,9 @@ The intended experience requires no memory commands during normal work:
   and cache damage falls back to pinned history without masking original-source failures;
 - capture can create and link memories, entities, relationships, documents, and code artifacts;
   file uploads are excluded;
-- configured recall scope is authoritative and independent of each capture destination;
+- configured scope is authoritative and independent of each capture destination; global scope
+  allows cross-project capture links, while project scope keeps links within the destination;
+  queued capture uses its pinned scope, and both link endpoints must remain active;
 - human setup, project, logging, verbosity, scope, capture, model, and enablement controls remain
   available on demand; these settings do not control independent CLI/MCP clients.
 

@@ -14,6 +14,7 @@ import {
   createAssistantMessageEventStream, type AssistantMessage,
 } from "@earendil-works/pi-ai";
 import { createForgetfulExtension } from "../src/extension.ts";
+import { providerSystemPrompt } from "./provider-context.ts";
 
 // This exercises the actual Pi write tool and reload, not the model's setup judgement.
 test("Pi hands setup to the agent and reloads its written connection and skills",
@@ -80,6 +81,8 @@ test("Pi hands setup to the agent and reloads its written connection and skills"
     });
     let modelCalls = 0;
     let handoff = "";
+    let lastUserMessage = "";
+    let lastSystemPrompt = "";
     let markAgentStarted!: () => void;
     const agentStarted = new Promise<void>((resolve) => { markAgentStarted = resolve; });
     runtime.registerProvider("setup-test", {
@@ -89,6 +92,10 @@ test("Pi hands setup to the agent and reloads its written connection and skills"
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
       streamSimple(model, context) {
         modelCalls += 1;
+        lastSystemPrompt = providerSystemPrompt(context);
+        lastUserMessage = JSON.stringify(
+          context.messages.findLast(message => message.role === "user"),
+        );
         if (modelCalls === 1) {
           handoff = JSON.stringify(context.messages);
           markAgentStarted();
@@ -101,7 +108,7 @@ test("Pi hands setup to the agent and reloads its written connection and skills"
               arguments: { path: settingsPath, content: JSON.stringify(updated) } },
             { type: "toolCall", id: "skill", name: "write", arguments: { path: skillPath,
               content: "---\nname: forgetful-setup-fixture\ndescription: Setup reload test.\n" +
-                "---\nUse the independent memory client.\n" } },
+                "disable-model-invocation: true\n---\nUse the independent memory client.\n" } },
           ] : [{ type: "text", text: "Settings saved. Run /reload, not /forgetful setup." }],
           stopReason: writing ? "toolUse" : "stop", timestamp: Date.now(),
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
@@ -179,8 +186,17 @@ test("Pi hands setup to the agent and reloads its written connection and skills"
     assert.ok(requests.length > 0);
     assert.ok(requests.every(({ path, auth }) => path.startsWith("/new/api/v1/projects") &&
       auth === "Bearer reload-test-secret"));
-    assert.ok(loader.getSkills().skills.some((skill) => skill.name === "forgetful-setup-fixture"));
+    const skill = loader.getSkills().skills.find(skill => skill.name === "forgetful-setup-fixture");
+    assert.ok(skill);
+    assert.equal(skill.disableModelInvocation, true);
     assert.deepEqual(loader.getExtensions().errors, []);
     assert.deepEqual(errors, []);
     assert.equal(modelCalls, 2);
+
+    // A user-invoked skill is hidden from automatic selection, not disabled as a command.
+    await session.prompt("/skill:forgetful-setup-fixture");
+    assert.equal(modelCalls, 3);
+    assert.ok(lastSystemPrompt.length > 0);
+    assert.doesNotMatch(lastSystemPrompt, /Setup reload test\./);
+    assert.match(lastUserMessage, /Use the independent memory client/);
   });

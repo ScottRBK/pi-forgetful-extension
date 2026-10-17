@@ -2867,7 +2867,8 @@ export class CaptureService {
         .concat((outcome.overlaps ?? []) as Memory[])
         .filter((memory) => memory.id !== previous?.memory.id);
       review = await prepareLinkReview(this.client, outcome.memoryId as number,
-        destination, leads, outcome.autoLinkedMemoryIds as number[] | undefined,
+        destination, current.snapshot.scope, leads,
+        outcome.autoLinkedMemoryIds as number[] | undefined,
         async () => this.ensureWriteAllowed(mode), Boolean(previous));
       if (!prior) {
         const receipts = ((outcome.completedLinkReviews ?? []) as CaptureLinkReview[])
@@ -2971,8 +2972,10 @@ export class CaptureService {
         diagnosticContext: this.correlation(current),
         policy: `${CAPTURE_LINK_POLICY}\nTrusted capture overlay: ${current.snapshot.policy}`,
         conversation: captureConversation(current.snapshot),
-        input: { ...captureWorkMetadata(current.snapshot),
+        input: { ...captureWorkMetadata(current.snapshot), scope: current.snapshot.scope,
           candidates: inputs.map(({ candidateId, review }) => ({ candidateId,
+          destinationProjectId:
+            record(current.candidateOutcomes[candidateId])?.destinationProjectId,
           memory: review.memory, memories: review.memories, resources: review.resources,
           executionResults: [...(review.previousResults ?? []),
             ...(review.executionResults ?? [])],
@@ -3027,7 +3030,7 @@ export class CaptureService {
     try {
       if (review.status === "planned") {
         review = await applyLinkReview(this.client, outcome.destinationProjectId as number,
-          review,
+          job.snapshot.scope, review,
           async (linkReview) => {
             current = await this.checkpointOutcome(current, candidate.id,
               { ...outcome, linkReview });

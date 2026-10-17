@@ -60,6 +60,11 @@ export function buildSetupPrompt(help: SetupHelp, agentDir: string, settingsPath
     `${source}/skills/README.md`,
     "Fetch each referenced SKILL.md as raw content from that repository, " +
       "or use a trusted checkout.",
+    "Make all installed Forgetful skills user-invoked only: set disable-model-invocation: true",
+    "in each local SKILL.md's YAML frontmatter, preserving its other content and customisations.",
+    "Ask before editing existing shared or project skill copies; other agents may use them.",
+    "They remain available through /skill:<name>, but must not be advertised for automatic",
+    "model selection. Verify this after /reload; do not edit the upstream repository.",
     `This session's Pi agent directory is ${JSON.stringify(agentDir)}; use its skills directory`,
     "for user-level Pi skills unless the user requests project-local installation. Respect custom",
     "agent directories for MCP configuration too. Do not assume ~/.pi/agent is active.",

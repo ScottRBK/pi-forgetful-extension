@@ -78,7 +78,8 @@ are outside this list.
 ## Capture: link reviews
 
 **L1. Automatic read bounds** (`src/capture-links.ts:134-170, 321-376`)
-`SELECT <= 8 other full memory records; exclude shared, obsolete, sensitive and wrong-project ones.`
+`SELECT <= 8 other full memory records; exclude obsolete and sensitive ones.`
+`GLOBAL scope allows cross-project/shared endpoints; PROJECT selects destination-exclusive records.`
 `RECORD missing (404), excluded and excess links as unreviewed; other read failures still fail.`
 `READ <= 4 documents, 4 code artifacts and 8 entities for predecessor context; flag gaps.`
 These read bounds do not limit the model's attachment selections.
@@ -99,8 +100,10 @@ These read bounds do not limit the model's attachment selections.
 These commands address the same bidirectional link.
 
 **L7. Link mutation safety** (`src/capture-links.ts:227-305`)
-`BEFORE add/remove: recheck both memories are active and include the destination project.`
-`ALLOW shared memories; skip completed operations and block uncertain receipts.`
+`BEFORE add/remove: recheck both memories are active; saved memory must include its destination.`
+`PROJECT also requires target membership in the destination; GLOBAL allows cross-project links.`
+`USE queued snapshot scope; allow shared explicit targets.`
+`SKIP completed operations and block uncertain receipts.`
 `SKIP DELETE if a fresh read proves the link is absent; do not hide server failures.`
 
 ## Recall

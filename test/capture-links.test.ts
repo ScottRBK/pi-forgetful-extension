@@ -449,8 +449,10 @@ for (const scenario of [
             action: scenario === "unresolved" ? "unresolved" : "reject",
             reason: "Model judged this connection against the full records." })) }] };
       }) });
-    // Act.
-    const queued = await service.enqueue(snapshot(project));
+    // Act: exclusion of foreign/shared records is a project-scope rule, not a global rule.
+    const input = snapshot(project);
+    if (scenario === "foreign" || scenario === "shared") input.scope = "project";
+    const queued = await service.enqueue(input);
     let finalResult = await service.checkpoint();
     const afterCreation = await queue.getJob(queued.jobId);
     if (scenario === "retry" || scenario === "exhausted") finalResult = await service.checkpoint();
@@ -923,8 +925,9 @@ test("earlier-sibling reuse follows the explicit selection despite changed claim
     assert.equal(job.callCount, 2);
   });
 
+for (const scope of ["global", "project"] as const) {
 for (const action of ["add", "reject"] as const) {
-  test(`permission callback cannot authorize an out-of-scope ${action} endpoint`, realOptions,
+  test(`${scope} scope rechecks a moved ${action} endpoint after permission`, realOptions,
     async (t) => {
     const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: action === "add" ? "0" : "1" });
     const setup = new ApiForgetfulClient({ baseUrl });
@@ -933,10 +936,10 @@ for (const action of ["add", "reject"] as const) {
     const foreign = await setup.createProject({ name: "Other", description: "Other scope",
       repo_name: `test/other-${action}` });
     const endpoint = await setup.create({ ...candidate(), project_ids: [project.id] });
-    let reviewed = false, moved = false, unauthorized = 0;
+    let reviewed = false, moved = false, mutationsAfterMove = 0;
     const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
       if (moved && ["POST", "DELETE"].includes(init?.method ?? "") &&
-          String(url).includes("/links")) unauthorized++;
+          String(url).includes("/links")) mutationsAfterMove++;
       const response = await fetch(url, init);
       return response;
     } });
@@ -958,12 +961,19 @@ for (const action of ["add", "reject"] as const) {
         return { reviews: [{ candidateId: "decision", decisions: [{ memoryId: endpoint.id,
           action, reason: "Supported judgment from the supplied full record." }] }] };
       }) });
-    const queued = await service.enqueue(snapshot(project));
+    const input = snapshot(project);
+    input.scope = scope;
+    const queued = await service.enqueue(input);
     await service.checkpoint();
     assert.equal(moved, true);
-    assert.equal(unauthorized, 0, "No link write may use the pre-permission membership");
-    assert.notEqual((await queue.getJob(queued.jobId))!.status, "complete");
+    assert.equal(mutationsAfterMove, scope === "global" ? 1 : 0);
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, scope === "global" ? "complete" : "pending", job.lastError);
+    const memory = await setup.get((job.candidateOutcomes.decision as any).memoryId);
+    assert.equal(memory.linked_memory_ids!.includes(endpoint.id),
+      scope === "global" ? action === "add" : action === "reject");
   });
+}
 }
 
 for (const [drift, firstAction] of [["edge", "reject"], ["endpoint", "reject"],
@@ -1676,3 +1686,70 @@ for (const association of ["none", "entity", "late-entity"] as const) {
     if (association === "late-entity") assert.equal(arrived, true);
   });
 }
+
+test("global capture supplies full cross-project records and applies reviewed links over REST",
+  realOptions, async (t) => {
+    // Arrange: simulate automatic cross-project links on a newly saved destination memory.
+    const baseUrl = await startForgetful(t, { MEMORY_NUM_AUTO_LINK: "0" });
+    const setup = new ApiForgetfulClient({ baseUrl });
+    const project = await setup.createProject({ name: "Destination", description: "Capture",
+      repo_name: "test/global-link-destination" });
+    const foreign = await setup.createProject({ name: "Other project", description: "Related facts",
+      repo_name: "test/global-link-foreign" });
+    const remove = await setup.create({ ...candidate(), title: "Unhelpful foreign connection",
+      project_ids: [foreign.id] });
+    const shared = await setup.create({ ...candidate(), title: "Useful shared explanation",
+      project_ids: [project.id, foreign.id] });
+    const add = await setup.create({ ...candidate(), title: "Known foreign constraint",
+      project_ids: [foreign.id] });
+    let creates = 0, additions = 0, removals = 0;
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (String(url).includes("/links")) {
+        if (init?.method === "POST") additions++;
+        if (init?.method === "DELETE") removals++;
+      }
+      const response = await fetch(url, init);
+      if (init?.method === "POST" && String(url).endsWith("/memories")) {
+        creates++;
+        const memory = await response.clone().json() as { id: number };
+        await setup.knowledge.linkMemories(memory.id, [remove.id, shared.id]);
+      }
+      return response;
+    } });
+    const directory = await mkdtemp(join(tmpdir(), "capture-global-links-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const queue = new DurableQueueStore({ directory, instanceId: "links" });
+    let reviewed: any;
+    const service = new CaptureService({ queue, client, instanceId: "links",
+      model: model((name, input) => {
+        if (name === "submit_capture_candidates") return { candidates: [candidate()] };
+        if (name === "submit_capture_decision") return { action: "create" };
+        reviewed = input;
+        return { reviews: [{ candidateId: "decision", decisions: [
+          { memoryId: remove.id, action: "reject", reason: "Unrelated historical decision" },
+          { memoryId: shared.id, action: "keep", reason: "Useful supporting explanation" },
+          { memoryId: add.id, action: "add", reason: "Related constraint in another project" },
+        ] }] };
+      }) });
+
+    // Act: process and then retry the public durable worker.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    await service.checkpoint();
+
+    // Assert through actual REST records and capture receipts; no duplicate creation/mutation.
+    assert.equal(reviewed.scope, "global");
+    assert.deepEqual(reviewed.candidates[0].memories.map((m: any) => m.id).sort((a: number,
+      b: number) => a - b), [remove.id, shared.id]);
+    assert.ok(reviewed.candidates[0].memories.every((m: any) => m.content && m.context));
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    const stored = await setup.get((job.candidateOutcomes.decision as any).memoryId);
+    assert.deepEqual(stored.project_ids, [project.id]);
+    assert.deepEqual(stored.linked_memory_ids!.sort((a, b) => a - b), [shared.id, add.id]);
+    assert.ok(!(await setup.get(remove.id)).linked_memory_ids!.includes(stored.id));
+    assert.ok((await setup.get(add.id)).linked_memory_ids!.includes(stored.id));
+    assert.equal(creates, 1);
+    assert.equal(additions, 1);
+    assert.equal(removals, 1);
+  });

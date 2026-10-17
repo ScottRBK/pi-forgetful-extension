@@ -31,8 +31,11 @@ remain available to automatic work.
   whether a new instance is needed; otherwise it offers help configuring existing access for Pi.
   Either help path offers CLI or native Pi MCP with upstream skills, then sends the main agent a
   setup prompt instead of continuing the form. The prompt asks it to reuse working installations,
-  install a missing CLI, install skills, and configure MCP when selected. It also asks the agent to
-  validate and merge background REST settings directly, preserving unrelated configuration and
+  install a missing CLI, install skills, and configure MCP when selected. All installed Forgetful
+  skills are user-invoked only: set `disable-model-invocation: true` in their local frontmatter,
+  preserving other content and customisations. They remain available through `/skill:<name>` without
+  being advertised for automatic model selection. The prompt also asks the agent to validate and
+  merge background REST settings directly, preserving unrelated configuration and
   keeping credentials out of chat and JSON. Pi's normal reload activates those settings and skills;
   changed environment variables may require a restart. No second setup run is needed.
 - Declining both help offers keeps the existing validated REST form. Cancelling any wizard prompt
@@ -227,7 +230,7 @@ requests require a schema-validated submission tool; only context summaries rema
 Independent clients retain their own result handling; this extension does not review their output.
 Lifecycle delivery never recursively starts recall or capture.
 
-## Recall scope and capture destination
+## Recall/link scope and capture destination
 
 Global recall is the default. If `.pi/forgetful/settings.json` contains an explicit scope
 override, load and validate it before planning the request. Resolve the canonical repository
@@ -266,6 +269,12 @@ existing project when supported by the completed work. For example, a fix to For
 working on this extension belongs to the Forgetful project. The capture model may use the main
 agent's project context as evidence and selects an existing target project per candidate.
 A separate override rationale is not required.
+
+The configured scope also governs capture link review and link mutations. Global scope permits
+active cross-project endpoints, including shared memories. Project scope retains destination-only
+link changes and excludes shared/foreign endpoints from automatic full-record selection. The saved
+memory must remain active and in its selected destination in either scope. Capture uses the scope
+pinned in the queued snapshot; later settings changes do not reinterpret queued work.
 
 Resolve and validate the destination before overlap checks. Query for duplicates and
 contradictions using that project's ID and `strict_project_filter: true`, then use the same
@@ -495,12 +504,15 @@ The capture service applies supersession in this order:
    HTTP 400/422 create rejections allow correction; uncertain creates remain blocked across
    restarts.
 
-Automatic link selection still limits full records to eight active, exclusive, safe endpoints.
+Automatic link selection limits full records to eight active, safe endpoints. Global scope allows
+cross-project and shared records; project scope selects only destination-exclusive records.
 Each link submission contains at most three reviews and eight decisions per review, covering every
 selected endpoint. Extra explicit targets are allowed within that decision limit. Targets remain
 unique, reasons nonblank and non-sensitive, and opposing add/remove commands on one edge fail.
-Before link mutation, both memories must remain active and include the destination project; shared
-membership is allowed. Completed/uncertain receipts and the fresh absent-link deletion check remain.
+Before link mutation, both memories must remain active, and the saved memory must include its
+selected destination. In project scope, the target must also include that destination; shared
+membership is allowed for explicit targets. In global scope, the target's project does not restrict
+link changes. Completed/uncertain receipts and the fresh absent-link deletion check remain.
 Automatic attachment reads stay bounded to four documents, four code artifacts and eight entities;
 coverage is reported separately. These read limits do not cap the model's attachment selections.
 
