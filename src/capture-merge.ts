@@ -1,3 +1,5 @@
+import { errorMessage } from "./privacy.ts";
+import { CaptureSelectionError } from "./capture-feedback.ts";
 import type { ForgetfulClient, Memory, Scope } from "./contracts.ts";
 
 export interface MergeConnections {
@@ -6,7 +8,9 @@ export interface MergeConnections {
   documentIds: number[];
   codeArtifactIds: number[];
   fileIds: number[];
-  receipts: Record<string, { status: "started" | "completed" | "rejected"; error?: string }>;
+  receipts: Record<string, {
+    status: "started" | "completed" | "rejected"; error?: string; input?: unknown;
+  }>;
 }
 
 export class MergeWriteUncertain extends Error {}
@@ -49,7 +53,8 @@ function requireResourceScope(
   id: number, projectId: number | null | undefined, kind: string, access: MergeAccess,
 ): void {
   if (access.scope === "project" && projectId !== access.destination)
-    throw new Error(`Cannot preserve merge ${kind} ${id}: outside configured scope`);
+    throw new CaptureSelectionError(
+      `Cannot preserve merge ${kind} ${id}: outside configured scope`);
 }
 
 async function checkMergeEntity(
@@ -58,7 +63,7 @@ async function checkMergeEntity(
   await access.beforeRead();
   const entity = await client.knowledge!.getEntity(id);
   if (access.scope === "project" && !entity.project_ids.includes(access.destination))
-    throw new Error(`Cannot preserve merge entity ${id}: outside configured scope`);
+    throw new CaptureSelectionError(`Cannot preserve merge entity ${id}: outside configured scope`);
 }
 
 async function checkMergeAttachments(
@@ -91,7 +96,8 @@ export async function preflightMergeConnections(
     const memory = await client.get(id);
     if (memory.is_obsolete) continue;
     if (access.scope === "project" && !memory.project_ids.includes(access.destination))
-      throw new Error(`Cannot preserve merge connection to memory ${id}: outside configured scope`);
+      throw new CaptureSelectionError(
+        `Cannot preserve merge connection to memory ${id}: outside configured scope`);
     activeIds.push(id);
   }
   for (const id of plan.entityIds) await checkMergeEntity(client, id, access);
@@ -111,11 +117,13 @@ export async function preserveMergeConnections(
     const memory = await client.get(id);
     if (memory.is_obsolete || ((saved || scope === "project") &&
         !memory.project_ids.includes(destination)))
-      throw new Error(`Cannot preserve merge connection to memory ${id}: ` +
+      throw new CaptureSelectionError(`Cannot preserve merge connection to memory ${id}: ` +
         "obsolete or outside scope");
     return memory;
   };
-  const execute = async (key: string, read: () => Promise<void>, write: () => Promise<unknown>) => {
+  const execute = async (
+    key: string, input: unknown, read: () => Promise<void>, write: () => Promise<unknown>,
+  ) => {
     const receipt = plan.receipts[key];
     if (receipt?.status === "started")
       throw new MergeWriteUncertain(receipt.error ?? `Merge connection ${key} outcome is unknown`);
@@ -124,7 +132,7 @@ export async function preserveMergeConnections(
     await read();
     if (receipt?.status === "completed") return;
     assertCanWrite();
-    plan.receipts[key] = { status: "started" };
+    plan.receipts[key] = { status: "started", input };
     await save();
     let dispatched = false;
     try {
@@ -132,7 +140,7 @@ export async function preserveMergeConnections(
       dispatched = true;
       await write();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       if (!dispatched) {
         delete plan.receipts[key];
         await save();
@@ -140,12 +148,12 @@ export async function preserveMergeConnections(
       }
       const rejected = error instanceof Error && "status" in error &&
         (error.status === 400 || error.status === 422);
-      plan.receipts[key] = { status: rejected ? "rejected" : "started", error: message };
+      plan.receipts[key] = { status: rejected ? "rejected" : "started", input, error: message };
       await save();
       if (!rejected) throw new MergeWriteUncertain(message, { cause: error });
       throw error;
     }
-    plan.receipts[key] = { status: "completed" };
+    plan.receipts[key] = { status: "completed", input };
     await save();
   };
   // New requested resources have already been written. Preserve their union with inherited IDs.
@@ -157,7 +165,7 @@ export async function preserveMergeConnections(
   };
   if (Object.values(attachments).some((ids) => ids.length)) {
     let needsUpdate = true;
-    await execute(`attachments:${JSON.stringify(attachments)}`, async () => {
+    await execute(`attachments:${JSON.stringify(attachments)}`, attachments, async () => {
       await checkMergeAttachments(client, { documentIds: attachments.document_ids,
         codeArtifactIds: attachments.code_artifact_ids, fileIds: attachments.file_ids }, options);
       const latest = await authorizeMemory(replacementId, true);
@@ -167,11 +175,12 @@ export async function preserveMergeConnections(
     }, () => needsUpdate ? knowledge.updateMemory(replacementId, attachments) : Promise.resolve());
   }
   for (const id of plan.memoryIds.filter((id) => id !== replacementId)) {
-    await execute(`memory:${id}`, async () => { await authorizeMemory(id); },
+    await execute(`memory:${id}`, { related_ids: [id] },
+      async () => { await authorizeMemory(id); },
       () => knowledge.linkMemories(replacementId, [id]));
   }
   for (const id of plan.entityIds) {
-    await execute(`entity:${id}`, async () => {
+    await execute(`entity:${id}`, { memory_id: replacementId }, async () => {
       await checkMergeEntity(client, id, options);
     }, () => knowledge.linkEntityMemory(id, replacementId));
   }

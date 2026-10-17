@@ -47,6 +47,9 @@ test("capture executes an explicit removal of a historical scoped link", realOpt
   await client.knowledge.linkMemories(old.id, [lead.id]);
   const service = new CaptureService({ client, queue, instanceId: "execution", model: {
     async complete(request) {
+      await request.readTools?.find(tool =>
+        tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       if (request.purpose === "capture") return { candidates: [candidate] };
       if (request.submission?.name === "submit_capture_decision")
         return { action: "skip", memoryId: old.id, enrich: true, reason: "Review existing links." };
@@ -75,6 +78,9 @@ test("a model supersession is not rewritten into an escalation by a partial flag
     let conversation: any[] = [];
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") {
           conversation = [...(request.conversation ?? [])];
@@ -101,9 +107,9 @@ test("a model supersession is not rewritten into an escalation by a partial flag
     assert.deepEqual(conversation.map((entry) => entry.id), ["earlier", "correction", "answer"]);
   });
 
-test("failed link operations return to the model before any retry decision", realOptions,
+test("uncertain link operations retain the server error without model correction", realOptions,
   async (t) => {
-    // Arrange: one raw REST failure; the model subsequently decides to leave the edge alone.
+    // Arrange: a dispatched link mutation returns an uncertain service failure.
     const { baseUrl, client: api, project, queue } = await fixture(t);
     const old = await api.create({ ...candidate, project_ids: [project.id] });
     let deletes = 0;
@@ -114,31 +120,33 @@ test("failed link operations return to the model before any retry decision", rea
       }
       return fetch(url, init);
     } });
-    let judgments = 0, received: unknown;
+    let judgments = 0;
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") return { action: "create" };
         judgments++;
         const item = inputOf(request).candidates[0];
-        if (judgments === 2) received = item.executionResults;
         return { reviews: [{ candidateId: "fact", decisions: item.memories.map((memory: any) => ({
           memoryId: memory.id, action: judgments === 1 ? "reject" : "keep",
           reason: judgments === 1 ? "Unhelpful edge." : "Leave stored state unchanged for now.",
         })) }] };
       },
     } });
-    // Act: a new worker checkpoint must consult the model, not replay the failed deletion.
+    // Act: another checkpoint must keep the unconfirmed deletion blocked.
     const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
     await service.checkpoint();
-    // Assert: exact service diagnostic reached the model; the revised decision was executed.
+    // Assert: retain the exact diagnostic and receipt without further model work or replay.
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal(judgments, 2);
-    assert.match(JSON.stringify(received), /maintenance detail: edge store unavailable/);
+    assert.equal(judgments, 1);
+    assert.match(job.uncertainWrite!, /maintenance detail: edge store unavailable/);
     assert.equal(deletes, 1);
-    assert.equal(job.callCount, 1, "The new attempt has its own model-task allowance");
-    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(job.callCount, 3);
+    assert.equal(job.status, "paused", job.lastError);
     const outcome = job.candidateOutcomes.fact as any;
     assert.ok((await api.get(outcome.memoryId)).linked_memory_ids?.includes(old.id));
   });
@@ -157,6 +165,9 @@ test("an unknown create retains its diagnostic and cannot enter field correction
     } });
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") return { action: "create" };
         correctionCalls++;
@@ -195,6 +206,9 @@ test("overlap model selects exact existing rich records without executor identit
         content: "Use an embedded database.", document_type: "text", tags: [] } }] };
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [rich] };
         if (request.submission?.name === "submit_capture_decision") {
           const neighborhood = inputOf(request).neighborhood;
@@ -229,6 +243,9 @@ test("restart reports an interrupted create instead of guessing that it failed",
     let calls = 0;
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         calls++;
         assert.fail("A durable interrupted create must block model corrections");
       },
@@ -251,7 +268,7 @@ test("restart reports an interrupted create instead of guessing that it failed",
     assert.equal(stored.length, 1);
   });
 
-test("a new link review cannot replay an earlier completed operation after external removal",
+test("an uncertain later link cannot replay a completed operation after external removal",
   realOptions, async (t) => {
     // Arrange: the first addition succeeds, a later removal fails, then another writer unlinks it.
     const { baseUrl, client: api, project, queue } = await fixture(t);
@@ -272,6 +289,9 @@ test("a new link review cannot replay an earlier completed operation after exter
     } });
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision")
           return { action: "skip", memoryId: source.id, enrich: true };
@@ -282,13 +302,13 @@ test("a new link review cannot replay an earlier completed operation after exter
         ] }] };
       },
     } });
-    // Act: the second model review requests the same addition after external removal.
+    // Act: retry the checkpoint after external removal.
     await service.enqueue(snapshot(project));
     await service.checkpoint();
     await api.knowledge.unlinkMemories(source.id, target.id);
     await service.checkpoint();
-    // Assert: C20/L7 retain completed receipts across the new review.
-    assert.equal(decisions, 2);
+    // Assert: both the completed and uncertain operations remain protected.
+    assert.equal(decisions, 1);
     assert.equal(links, 1);
     assert.ok(!(await api.get(source.id)).linked_memory_ids?.includes(target.id));
   });
@@ -301,6 +321,9 @@ test("skip does not silently become enrichment or entity linking", realOptions, 
     input: { name: "Store", entity_type: "System", tags: [], aka: [] } }] };
   const service = new CaptureService({ client, queue, instanceId: "execution", model: {
     async complete(request) {
+      await request.readTools?.find(tool =>
+        tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       if (request.purpose === "capture") return { candidates: [rich] };
       return { action: "skip", memoryId: old.id, reason: "No new knowledge to write." };
     },
@@ -321,6 +344,9 @@ test("creating a proposed entity does not implicitly link it to the memory", rea
       input: { name: "Store", entity_type: "System", tags: [], aka: [] } }] };
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [rich] };
         return { action: "create", entityMemoryKeys: [] };
       },
@@ -360,6 +386,9 @@ test("a server-rejected document is corrected without replaying the saved memory
   invalid.documents[0]!.input.title = "x".repeat(501);
   const service = new CaptureService({ client, queue, instanceId: "execution", model: {
     async complete(request) {
+      await request.readTools?.find(tool =>
+        tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       if (request.purpose === "capture") return { candidates: [invalid] };
       if (request.submission?.name === "submit_capture_correction") {
         corrections++;
@@ -399,6 +428,9 @@ test("explicit enrichment does not restore predecessor attachments removed befor
         document_type: "text", tags: [] } }] };
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [rich] };
         await client.knowledge.updateMemory(old.id, { document_ids: [] });
         return { action: "skip", memoryId: old.id, enrich: true };
@@ -490,6 +522,9 @@ test("uncertain supersession retains its diagnostic without model reconsideratio
     } });
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [candidate] };
         if (request.submission?.name === "submit_capture_decision") return {
           action: "supersede", conflictingMemoryId: old.id, oldClaim: "Postgres",
@@ -523,6 +558,9 @@ test("a no-op choice does not impose a conflicting graph-state requirement", rea
     const { client, project, queue } = await fixture(t);
     const service = new CaptureService({ client, queue, instanceId: "execution", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.purpose === "capture") return { candidates: [
           { ...candidate, id: "first" }, { ...candidate, id: "second" },
         ] };

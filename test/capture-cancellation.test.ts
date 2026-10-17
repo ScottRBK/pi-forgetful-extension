@@ -122,13 +122,18 @@ async function fixture(t: TestContext, options: Partial<CaptureServiceOptions> =
       reasoning: false, input: ["text"], contextWindow: 64_000, maxTokens: 1024,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
     streamSimple(_model, context, options) {
-      const name = providerTools(context)[0]!.name;
+      const reporting = providerTools(context).some(tool =>
+        tool.name === "report_capture_execution_failure") &&
+        !context.messages.some(message => message.role === "toolResult" &&
+          message.toolName === "report_capture_execution_failure");
+      const name = reporting ? "report_capture_execution_failure"
+        : providerTools(context)[0]!.name;
       state.models.push(name);
       const input = decodeProviderContext(context).input;
       state.tasks.push(input);
       const source = input.eligibleEvidence?.find(
         (entry: { role: string }) => entry.role === "user");
-      const arguments_: JsonObject = name === "submit_capture_candidates" ? {
+      const arguments_: JsonObject = reporting ? {} : name === "submit_capture_candidates" ? {
         candidates: state.emptyCandidates ? [] : [{
         id: "storage", title: "Storage", content: "Use SQLite for this repo.",
         context: "Explicit decision", keywords: ["storage"], tags: [],
@@ -174,7 +179,7 @@ async function fixture(t: TestContext, options: Partial<CaptureServiceOptions> =
     } });
   const model = new PiMemoryModel(new ModelRegistry(runtime),
     { provider: "cancellation", id: "memory" });
-  const open = (recovery: { staleJobMs?: number } = {}) => {
+  const open = (recovery: { staleJobMs?: number; now?: () => Date } = {}) => {
     const queue = new DurableQueueStore({ ...recovery, directory, instanceId: "test" });
     const service = new CaptureService({ ...options, queue, client, model, instanceId: "test" });
     services.push(service);
@@ -365,8 +370,17 @@ for (const operation of ["create", "supersede"] as const) {
     const receipt = operation === "supersede" ? beforeRecovery?.supersession
       : (beforeRecovery?.candidateOutcomes.storage as { creation?: { status: string } })?.creation;
     assert.equal(receipt?.status, "started", "The accepted write must have a durable receipt");
+    const startedAt = Date.parse(beforeRecovery!.startedAt!);
+    // A backwards wall-clock jump leaves a live same-process job too young to recover.
+    const beforeClaim = await f.open({ staleJobMs: 0,
+      now: () => new Date(startedAt - 1_500) }).run();
+    assert.equal(beforeClaim.processed, 0);
+    assert.equal((await f.open().queue.getJob(f.jobId))!.status, "running");
+    // Recovery eligibility must not depend on the host clock moving forward during this test.
+    const recoveryNow = () => new Date(startedAt + 1);
     const recoveries = [];
-    for (let i = 0; i < 4; i++) recoveries.push(await f.open({ staleJobMs: 0 }).run());
+    for (let i = 0; i < 4; i++)
+      recoveries.push(await f.open({ staleJobMs: 0, now: recoveryNow }).run());
     assert.equal(accepted, 1);
     const saved = await f.open().queue.getJob(f.jobId);
     assert.ok(saved?.uncertainWrite, JSON.stringify({ operation, accepted, saved,
@@ -920,7 +934,8 @@ for (const operation of ["create", "supersede"] as const) {
       // Act: persist the actual error, then restart through the durable queue.
       await f.run();
       const failed = await f.queue.getJob(f.jobId);
-      assert.ok(failed?.lastError?.includes(body));
+      if (response === "accepted-500") assert.ok(failed?.lastError?.includes(body));
+      else assert.ok(JSON.stringify(f.state.tasks).includes("Rejected write field"));
       const resumed = f.open();
       await resumed.run();
 

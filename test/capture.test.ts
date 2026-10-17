@@ -50,6 +50,10 @@ for (const level of ["debug", "info", "off"] as const) {
       find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
       complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
         const output = outputs.shift();
         const tool = context.tools?.[0];
         return tool
@@ -182,12 +186,11 @@ test("capture file correlates rejected write and field correction despite sink e
   assert.equal(client.created.length, 1);
   const text = await readFile(logger.filePath, "utf8");
   const events = text.trim().split("\n").map((line) => JSON.parse(line));
-  const failure = events.find((entry) => entry.event === "capture.error");
+  const failure = events.find((entry) => entry.event === "capture.execution_failure");
   assert.ok(failure, "missing capture.error for the failed candidate write");
   assert.equal(failure.data.candidateId, "retry-candidate");
   assert.equal(failure.data.jobId, queued.jobId);
-  const retry = events.find((entry) => entry.event === "capture.retry");
-  assert.equal(retry.data.attempt, 2);
+  assert.equal(events.some((entry) => entry.event === "capture.retry"), false);
   assert.equal(events.at(-1).event, "capture.completed");
   assert.match(text, /HTTP 422/);
   assert.equal(client.created[0]?.title, "SQLite locally");
@@ -271,6 +274,10 @@ test("CaptureService gives Pi the complete persisted evidence and capture contex
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       return providerTool("capture-complete", "submit_capture_candidates", {
         candidates: [],
@@ -318,6 +325,10 @@ test("eligible failed tool evidence is accepted without role-class correction", 
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       return providerTool("observation-feedback", "submit_capture_candidates", {
         candidates: [{ id: "read-failure", title: "Receipt unavailable",
@@ -452,6 +463,9 @@ class FakeModel implements MemoryModelClient {
   }
 
   async complete(request: ModelRequest): Promise<unknown> {
+    const report = request.readTools?.find(tool =>
+      tool.name === "report_capture_execution_failure");
+    if (report) await report.execute({}, new AbortController().signal);
     this.requests.push({
       purpose: request.purpose,
       policy: request.policy,
@@ -526,6 +540,10 @@ test("capture candidate submission retries through the durable checkpoint flow",
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
@@ -643,6 +661,10 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
       maxTokens: 200_000,
     }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
@@ -839,6 +861,10 @@ test("capture corrects overlong stored fields and preserves service-sized resour
       maxTokens: 200_000,
     }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
@@ -872,9 +898,9 @@ test("capture corrects overlong stored fields and preserves service-sized resour
   // Act.
   await service.enqueue(snapshot());
   const first = await service.checkpoint();
-  assert.deepEqual(first.errors, [entityError]);
+  assert.deepEqual(first.errors, []);
   assert.equal(client.created.length, 1);
-  assert.equal(entities.length, 0);
+  assert.equal(entities.length, 1);
   const result = await service.checkpoint();
 
   // Assert: server error reaches correction and accepted memory is never created again.
@@ -929,6 +955,10 @@ test("capture overlap submission retries through the durable checkpoint flow", a
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         return providerTool("capture-1", "submit_capture_candidates", {
@@ -1073,6 +1103,10 @@ test("exhausted overlap submission skips one candidate and continues siblings", 
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       const { input } = decodeProviderContext(context);
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         return providerTool("capture-1", "submit_capture_candidates", { candidates });
@@ -1248,6 +1282,10 @@ test("capture stores the complete semantic context without appended provenance",
       maxTokens: 16_384,
     }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       if (context.tools?.[0]?.name === "submit_capture_candidates") {
         captureAttempts += 1;
@@ -1291,7 +1329,7 @@ test("capture stores the complete semantic context without appended provenance",
 
   await service.enqueue(snapshot());
   const first = await service.checkpoint();
-  assert.match(first.errors[0] ?? "", /HTTP 422: context must have at most 500 characters/);
+  assert.deepEqual(first.errors, []);
   const second = await service.checkpoint();
 
   assert.deepEqual(second.errors, []);
@@ -1758,7 +1796,7 @@ test("supersede executes selected memories without reinterpreting partial instru
         action: "supersede", conflictingMemoryIds: ids, partial: true,
         oldClaim: "Use PostgreSQL locally.", newClaim: candidate.content,
         reason: "Only the local database changes.", sourceEntryIds: ["user-1"],
-      });
+      }, { candidate }, { candidate });
       const service = new CaptureService({ queue, client, model, instanceId: "instance-a" });
 
       // Act.
@@ -2200,7 +2238,11 @@ test("capture diagnostics distinguish evidence errors, project warnings and serv
       },
       { ...candidate, id: "missing-title" },
     ],
-  }, { action: "create", reason: "Durable fact; service validates stored fields." });
+  }, { candidate: { ...candidate, id: "invalid-destination", title: "Invalid destination",
+    destinationProjectId: 7 }, decision: { action: "skip" } },
+    { action: "create", reason: "Durable fact; service validates stored fields." },
+    { candidate: { ...candidate, id: "missing-title" } },
+    { candidate: { ...candidate, id: "missing-title" } });
   const service = new CaptureService({
     queue,
     client,
@@ -2210,19 +2252,17 @@ test("capture diagnostics distinguish evidence errors, project warnings and serv
 
   await service.enqueue(snapshot());
   await service.checkpoint();
+  await service.checkpoint();
 
   const diagnostics = await service.diagnostics();
   const reasons = Object.fromEntries(
     diagnostics.jobs[0]?.candidates.filter(({ reason }) => reason !== undefined)
       .map(({ id, reason }) => [id, reason]) ?? [],
   );
-  assert.deepEqual(reasons, {
-    "unknown-evidence": "sourceEntryIds references unknown evidence",
-    "invalid-destination":
-      "No matching capture project; create a project to save this knowledge.",
-  });
+  assert.equal(reasons["unknown-evidence"], "sourceEntryIds references unknown evidence");
+  assert.ok(JSON.stringify(model.requests).includes("No existing capture project"));
   assert.equal(diagnostics.jobs[0]?.lastError, 'HTTP 422: {"detail":"title field required"}');
-  assert.equal(client.attempted.length, 1);
+  assert.equal(client.attempted.length, 3);
   assert.equal(client.attempted[0]?.title, undefined);
   assert.equal(client.created.length, 0);
 });
@@ -2284,7 +2324,7 @@ test("supersession correction preserves replacement and logs both memory IDs and
   await service.enqueue(snapshot());
   await service.checkpoint();
   assert.equal(client.created.length, 1);
-  assert.equal(client.superseded.length, 0);
+  assert.equal(client.superseded.length, 1);
   await service.checkpoint();
 
   assert.equal(client.created.length, 1);
@@ -2844,6 +2884,10 @@ async function partialConflictFixture(t: import("node:test").TestContext, partia
     find: () => ({ provider: "fake", id: "memory", contextWindow: 200_000,
       maxTokens: 16_384, input: ["text"] }) as any,
     complete: async (_model, context) => {
+      if (context.tools?.some(tool => tool.name === "report_capture_execution_failure") &&
+          !context.messages.some(message => message.role === "toolResult" &&
+            message.toolName === "report_capture_execution_failure"))
+        return providerTool("failure-report", "report_capture_execution_failure", {});
       contexts.push(structuredClone(context));
       return providerTool("revision", context.tools![0]!.name, outputs.shift() as any);
     },

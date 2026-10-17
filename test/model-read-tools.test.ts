@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -505,3 +506,136 @@ for (const stop of ["caller", "deadline"] as const) {
     assert.equal(requests.length, 1);
   });
 }
+
+test("a mixed read and submission reports the unsupported batch without hiding the read", {
+  timeout: 10_000,
+}, async (t) => {
+  // Arrange: both tools exist, but reads and the final submission cannot share a turn.
+  const { model, requests } = await fixture(t, [[
+    { name: "read_memory", arguments: { id: 1 } },
+    { name: "submit_result", arguments: { answer: "Premature answer" } },
+  ], { name: "submit_result", arguments: { answer: "No read was executed." } }]);
+  const http = await heldMemoryServer(t);
+
+  // Act.
+  const result = await model.complete({ purpose: "recall-review", policy: "Read then submit.",
+    input: {}, submission, readTools: [memoryRead(http.client)] });
+
+  // Assert: neither tool in the mixed batch was accepted or executed.
+  assert.deepEqual(result, { answer: "No read was executed." });
+  assert.deepEqual(http.dispatched, []);
+  const feedback = requests[1]!.messages.filter((message: any) => message.role === "tool");
+  assert.equal(feedback.length, 2);
+  for (const message of feedback) {
+    assert.match(message.content, /separate.*turn/i);
+    assert.doesNotMatch(message.content, /not found/i);
+  }
+});
+
+test("private read errors retain the actual network failure beneath fetch failed", {
+  timeout: 10_000,
+}, async (t) => {
+  // Arrange: an actual closed localhost endpoint produces Node's nested fetch error.
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const client = new ApiForgetfulClient({
+    baseUrl: `http://127.0.0.1:${address.port}`, timeoutMs: 1000,
+  });
+  const { model, requests } = await fixture(t, [
+    { name: "read_memory", arguments: { id: 1 } },
+    { name: "submit_result", arguments: { answer: "The memory service is unavailable." } },
+  ]);
+
+  // Act.
+  await model.complete({ purpose: "recall-review", policy: "Read then submit.", input: {},
+    submission, readTools: [memoryRead(client)] });
+
+  // Assert: the model receives the real cause, not just the unhelpful outer fetch message.
+  const feedback = requests[1]!.messages.find((message: any) => message.role === "tool");
+  assert.match(feedback.content, /fetch failed/);
+  assert.match(feedback.content, /ECONNREFUSED/);
+});
+
+test("private tool diagnostics sanitize nested causes and stop at cycles", {
+  timeout: 10_000,
+}, async (t) => {
+  // Arrange: a faulty remote adapter supplies a cyclic error with synthetic credentials.
+  const cause = new Error("ECONNREFUSED password=fixture-secret");
+  const failure = new Error("fetch failed", { cause });
+  cause.cause = failure;
+  const { model, requests } = await fixture(t, [
+    { name: "read_memory", arguments: {} },
+    { name: "submit_result", arguments: { answer: "Connection refused." } },
+  ]);
+
+  // Act.
+  await model.complete({ purpose: "recall-review", policy: "Read then submit.", input: {},
+    submission, readTools: [{ name: "read_memory", description: "Read the remote record.",
+      parameters: Type.Object({}), execute: async () => { throw failure; } }] });
+
+  // Assert: retain the cause once, without secrets, recursion or a stack dump.
+  const feedback = requests[1]!.messages.find((message: any) => message.role === "tool");
+  assert.equal(feedback.content, "fetch failed\nCaused by: ECONNREFUSED [redacted]");
+});
+
+test("object-shaped private tool failures retain their diagnostics instead of Object text", {
+  timeout: 10_000,
+}, async (t) => {
+  // Arrange: some external clients reject with structured data rather than an Error instance.
+  const failure = { status: 422, responseBody: "Required field missing", field: "title" };
+  const { model, requests } = await fixture(t, [
+    { name: "read_memory", arguments: {} },
+    { name: "submit_result", arguments: { answer: "The service rejected the lookup." } },
+  ]);
+
+  // Act.
+  await model.complete({ purpose: "recall-review", policy: "Read then submit.", input: {},
+    submission, readTools: [{ name: "read_memory", description: "Read the remote record.",
+      parameters: Type.Object({}), execute: async () => { throw failure; } }] });
+
+  // Assert.
+  const feedback = requests[1]!.messages.find((message: any) => message.role === "tool");
+  assert.deepEqual(JSON.parse(feedback.content), {
+    status: 422, responseBody: "Required field missing", field: "title",
+  });
+});
+
+test("dual-stack connection refusal retains its code beneath an empty aggregate cause", {
+  timeout: 10_000,
+}, async (t) => {
+  // Arrange: use a real closed port and both loopback addresses, independent of host DNS settings.
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const { model, requests } = await fixture(t, [
+    { name: "read_memory", arguments: {} },
+    { name: "submit_result", arguments: { answer: "Both service addresses refused connections." } },
+  ]);
+
+  // Act: reproduce the network aggregate that fetch nests inside its outer failure.
+  await model.complete({ purpose: "recall-review", policy: "Read then submit.", input: {},
+    submission, readTools: [{ name: "read_memory", description: "Read the remote record.",
+      parameters: Type.Object({}), execute: async () => {
+        const socket = createConnection({ host: "dual-stack.test", port: address.port,
+          autoSelectFamily: true, lookup: (_host, _options, callback) => callback(null, [
+            { address: "::1", family: 6 }, { address: "127.0.0.1", family: 4 },
+          ]) });
+        const [cause] = await once(socket, "error");
+        assert.ok(cause instanceof AggregateError);
+        assert.equal(cause.message, "");
+        throw new TypeError("fetch failed", { cause });
+      } }] });
+
+  // Assert: an empty aggregate message cannot erase its actionable network code.
+  const feedback = requests[1]!.messages.find((message: any) => message.role === "tool");
+  assert.match(feedback.content, /fetch failed/);
+  assert.match(feedback.content, /ECONNREFUSED/);
+  assert.doesNotMatch(feedback.content, /Caused by: $/);
+});

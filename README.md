@@ -341,8 +341,10 @@ knowledge access uses the independently configured clients described above.
 API client errors preserve the actual HTTP status and response body, including validation field
 details, JSON and non-JSON bodies, plain `Not Found` responses and server-error diagnostics,
 subject to known-secret redaction and transport limits. Private tool validation identifies the
-field and applicable limit so the memory model can correct invalid arguments. Automatic recall
-keeps its failure-open behaviour.
+field and applicable limit so the memory model can correct invalid arguments. Network failures
+retain useful underlying causes, with bounded cause traversal and known-secret redaction.
+`forgetful_recall_wait` preserves cancellation and stale-session reasons rather than reporting
+only that the tool is unavailable. Automatic recall keeps its failure-open behaviour.
 
 Repository mapping comes from Git's origin and must have an `owner/repo` path; GitLab subgroups
 and self-hosted prefixes are supported. Project repository names allow 255 characters, but the
@@ -371,13 +373,18 @@ relationships and supporting documents or code artifacts within the existing dea
 explore even when the initial memory search is empty. It has no repository or external URL access.
 Strict project scope also applies to linked records and relationship endpoints. Internal stored-file
 support depends on the server's optional file feature; an unavailable feature does not prevent
-ordinary memory recall. Main-agent file access requires an independent client.
+ordinary memory recall. Failed optional entity/document/artifact lookups reach the private
+reviewer as diagnostics, separately from evidence; successful sibling records remain usable.
+An empty successful lookup is not reported as a failure. Main-agent file access requires an
+independent client.
 
 Review is one bounded model path within the existing overall deadline. The private review tool may
 retry invalid, unknown, duplicate, or semantically rejected submissions up to three total attempts.
 Rejected calls return an error tool result to the memory model; text-only replies get a correction
-message, not fallback JSON parsing. Redacted rejected arguments stay in the private review
-conversation so the model can correct them, not in main-agent context or Pi session history.
+message, not fallback JSON parsing. Reads and final submissions must use separate turns; mixed
+batches execute neither and explain that restriction without calling valid tools unavailable.
+Redacted rejected arguments stay in the private review conversation so the model can correct them,
+not in main-agent context or Pi session history.
 Cancellation, timeout, or exhausted attempts inject nothing; raw
 results are never a fallback for failed review. Summaries remain untrusted historical context. The
 model can retain title-only memory links as leads, but must not invent their unseen contents.
@@ -414,7 +421,9 @@ The extraction model can investigate a missing fact with the read-only `inspect_
 repository text files and HTTP(S) URLs, without shell execution, editing or uploads. Actual reads
 supply provenance and durable evidence IDs. A commit is reported only for matching committed bytes;
 modified files retain their working-tree status. Inspection supports UTF-8 text; file containment
-requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenance.
+requires Linux/WSL `/proc`. External Git metadata yields unknown commit provenance. Failed reads
+retain their structured diagnostic and evidence reference in an error tool result. Revoked read
+permission instead pauses capture without saving that inspection as evidence.
 This is not ongoing source curation.
 
 When a summary hides a needed source, the model can optionally use `read_capture_evidence` to read
@@ -501,13 +510,29 @@ operations are not replayed to restore later external changes. Unknown create ou
 unresolved rather than being matched by title or automatically recreated. Forgetful itself may
 create similarity links; explicit additions do not promise an exact final graph.
 
-Each private capture tool allows at most three attempts within its existing model request and
-three-minute deadline. Invalid calls receive validation feedback so the model can correct them;
+Each private capture submission allows at most three total attempts (initial plus two corrections)
+within its existing model request and three-minute deadline. Invalid calls receive validation
+feedback so the model can correct them;
 text-only replies and JSON strings inside arguments are not parsed as instructions. Private
 submission structure, eligible evidence IDs, action names and decision coverage remain validated.
-Forgetful owns stored-field requirements, types and lengths. These payloads reach REST unchanged;
-HTTP 400/422 rejections can receive a corrected candidate through `submit_capture_correction` on
-retry. Completed operations are retained; uncertain creates cannot be retried automatically.
+Forgetful owns stored-field requirements, types and lengths. These payloads reach REST unchanged.
+Definite HTTP 400/422 rejections and safe target-selection failures receive immediate correction
+before a retry-pending warning, when the task budget permits. In a new correction task, the model
+must call `report_capture_execution_failure` to receive the saved instruction, original error and
+receipts as an error tool result, then submit `submit_capture_correction`. Connection failures use
+the same report tool followed by their connection-review submission. The report only reads saved
+failure data; it never repeats a write or resumes the original private conversation.
+
+Each execution correction cycle allows three total executions: initial plus two corrections.
+Its progress survives task-budget yields and restarts. An exhausted cycle enters normal queue
+failure handling; a later eligible queue retry starts another bounded cycle under the existing
+three-failed-attempt limit. Server outages, rate limits, timeouts and connection failures instead
+keep the original diagnostic for normal queue retry, without extra model-correction calls.
+A missing-record lookup can be corrected; a failed dispatched write is not treated as a lookup.
+These counters are separate from private submission attempts and read turns. Completed operations
+are retained, and uncertain writes cannot be retried automatically.
+Unknown model-selected projects can be corrected using the existing project list, never silently
+redirected or automatically created. Missing project setup still requires human guidance.
 Diagnostic previews and model context remain redacted, without rewriting proposed stored fields.
 
 Capture can attach documents and code artifacts and model the entities and relationships behind

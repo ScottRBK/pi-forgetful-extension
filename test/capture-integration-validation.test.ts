@@ -14,7 +14,9 @@ const instanceId = "capture-integration-validation";
 const fact = { id: "fact", title: "Storage", content: "Use SQLite.", context: "User decision",
   keywords: [], tags: [], sourceEntryIds: ["user"] };
 const entity = { key: "database", input: { name: "SQLite", entity_type: "System" } };
-function answer(request: ModelRequest, value: unknown) {
+async function answer(request: ModelRequest, value: unknown) {
+  const report = request.readTools?.find(tool => tool.name === "report_capture_execution_failure");
+  if (report) await report.execute({}, new AbortController().signal);
   assert.ok(Value.Check(request.submission!.parameters as any, value));
   request.submission!.validate(value);
   return value;
@@ -67,7 +69,8 @@ for (const name of [undefined, null, 42]) {
       const queued = await service.enqueue(f.snapshot);
       await service.checkpoint();
       const pending = await f.queue.getJob(queued.jobId);
-      assert.equal((pending!.candidateOutcomes.fact as any).creation?.status, "completed");
+      assert.equal(pending!.status, "complete");
+      assert.equal(correction.outcome.creation.status, "completed");
       const reopened = new DurableQueueStore({ directory: f.directory, instanceId });
       const restarted = new CaptureService({ queue: reopened, client: f.client,
         model, instanceId });

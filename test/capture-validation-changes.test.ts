@@ -50,7 +50,9 @@ async function fixture(t: TestContext) {
   } as unknown as ForgetfulClient;
   return { directory, queue, client, inputs, saved };
 }
-function answer(request: ModelRequest, value: unknown) {
+async function answer(request: ModelRequest, value: unknown) {
+  const report = request.readTools?.find(tool => tool.name === "report_capture_execution_failure");
+  if (report) await report.execute({}, new AbortController().signal);
   assert.ok(Value.Check(request.submission!.parameters as any, value),
     "private schema rejected payload");
   request.submission!.validate(value);
@@ -125,20 +127,22 @@ test("capture can choose an existing project without an override rationale", asy
   assert.deepEqual(inputs[0]?.project_ids, [9]);
 });
 
-test("unknown capture project skips with a creation warning in public diagnostics", async (t) => {
-  // Arrange.
+test("unknown capture project exhausts correction without fallback or auto-create", async (t) => {
+  // Arrange: the model keeps selecting a nonexistent destination despite existing projects.
   const { queue, client, inputs } = await fixture(t);
+  const proposed = { ...fact, destinationProjectName: "Missing" };
   const capture = new CaptureService({ ...identity, queue, client, model: {
     async complete(request) {
-      return answer(request, { candidates: [{ ...fact, destinationProjectName: "Missing" }] });
+      return answer(request, request.purpose === "capture"
+        ? { candidates: [proposed] } : { candidate: proposed });
     },
   } });
   // Act.
   await capture.enqueue(snapshot());
-  await capture.checkpoint();
-  // Assert: the extension can surface the warning without creating a project.
+  const result = await capture.checkpoint();
+  // Assert: failed selection is visible after its bounded cycle; no silent destination choice.
   assert.equal(inputs.length, 0);
-  assert.match((await capture.diagnostics()).jobs[0].candidates[0].reason!, /create a project/i);
+  assert.match(result.errors[0]!, /No existing capture project matches selection/);
 });
 
 test("retry resets four charged tasks while preparation yields preserve the current allowance",
@@ -323,7 +327,7 @@ test("resource field correction preserves the accepted memory and completed enti
     await capture.checkpoint();
     const partial = (await queue.getJob(queued.jobId))!.candidateOutcomes.fact as any;
     const memoryId = partial.memoryId;
-    const entityId = partial.knowledgeState?.entities[0]?.id;
+    const entityId = failure.outcome.knowledgeState.entities[0].id;
     const restarted = new DurableQueueStore({ directory, ...identity });
     capture = new CaptureService({ ...identity, queue: restarted, client, model });
     await capture.checkpoint();
@@ -721,6 +725,7 @@ test("global queued capture reviews cross-project links and resumes without dupl
     assert.match(reviewed[0].policy, /global.*cross-project/i);
     assert.equal(pending.status, "pending");
     assert.match(pending.lastError!, /temporary target read failure/);
+    assert.equal(reviewed.length, 1, "A read outage resumes the saved connection decisions");
     const job = (await restarted.getJob(queued.jobId))!;
     assert.equal(job.status, "complete", job.lastError);
     assert.equal(inputs.length, 1, "Retry must reuse the successful capture creation");
@@ -762,6 +767,7 @@ test("project queued capture excludes foreign/shared records and blocks explicit
 
     // Act.
     const queued = await capture.enqueue(input);
+    await capture.checkpoint();
     await capture.checkpoint();
 
     // Assert: extra model-selected targets cannot bypass the persisted project boundary.
@@ -813,6 +819,7 @@ for (const action of ["add", "reject"] as const) {
 
         // Act.
         const queued = await capture.enqueue(snapshot());
+        await capture.checkpoint();
         await capture.checkpoint();
 
         // Assert: global scope never permits mutation involving an obsolete memory.

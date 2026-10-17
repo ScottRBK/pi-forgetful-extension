@@ -34,13 +34,8 @@ function submit(response: ServerResponse, id: number, name: string, args: unknow
     "data: [DONE]\n\n");
 }
 
-function linkTask(request: ProviderRequest) {
-  const message = request.messages.findLast((item) => item.role === "user");
-  assert.ok(message, "the provider must receive the current task");
-  return JSON.parse(message.content).candidates[0];
-}
 
-test("missing-link HTTP 404 reaches the retry provider intact after reopening the queue", {
+test("dispatched link HTTP 404 stays unresolved through the real Pi SDK boundary", {
   timeout: 15_000,
 }, async (t) => {
   // Arrange: real capture, disk queue, HTTP client and Pi SDK; only remote endpoints are scripted.
@@ -66,10 +61,15 @@ test("missing-link HTTP 404 reaches the retry provider intact after reopening th
     if (request.method === "POST" && path === "/v1/chat/completions") {
       const input: ProviderRequest = JSON.parse(body);
       providerRequests.push(input);
-      const name = input.tools[0]?.function.name ?? "missing-tool";
+      const reporting = input.tools.some(tool =>
+        tool.function.name === "report_capture_execution_failure") &&
+        !input.messages.some(message => message.role === "tool");
+      const name = reporting ? "report_capture_execution_failure"
+        : input.tools[0]?.function.name ?? "missing-tool";
       events.push(name);
       let args: unknown;
-      if (name === "submit_capture_candidates") args = { candidates: [candidate] };
+      if (name === "report_capture_execution_failure") args = {};
+      else if (name === "submit_capture_candidates") args = { candidates: [candidate] };
       else if (name === "submit_capture_decision") args = { action: "create" };
       else if (name === "submit_capture_links") {
         reviews++;
@@ -141,55 +141,34 @@ test("missing-link HTTP 404 reaches the retry provider intact after reopening th
   const expectedError = 'Forgetful DELETE /api/v1/memories/99/links/42 returned HTTP 404: ' +
     '{"error":"Link not found"}';
 
-  // Act: create the memory, receive the failed delete, then retry from fresh persisted state.
+  // Act: the dispatched mutation fails; another checkpoint cannot establish its outcome.
   const queued = await capture.enqueue(snapshot);
   assert.equal(queued.queued, true);
   const first = await capture.checkpoint();
-  assert.deepEqual(first.errors, [expectedError]);
-  assert.equal(providerRequests.length, 3, "failure ends this pass, not an immediate model turn");
-  const pending = await queue.getJob(queued.jobId);
-  assert.equal(pending?.status, "pending");
-  assert.equal(pending?.lastError, expectedError);
-  assert.equal(pending?.callCount, 3);
-  const pendingReview = (pending?.candidateOutcomes.decision as {
-    linkReview: CaptureLinkReview;
-  }).linkReview;
-  assert.deepEqual(pendingReview.executionResults, [
-    { operation: "unlink", targetId: 42, status: "failed", error: expectedError, httpStatus: 404 },
-  ]);
+  assert.deepEqual(first.errors, []);
+  assert.equal(providerRequests.length, 3);
   const reopened = new DurableQueueStore({ directory, instanceId });
   const restarted = new CaptureService({ queue: reopened, client: client(), model: model(),
     instanceId });
   const second = await restarted.checkpoint();
 
-  // Assert: the actual outgoing HTTP request contains the original failure and current records.
+  // Assert: no extra provider task, no lost diagnostic, and no mutation replay.
   assert.deepEqual(unexpectedRequests, []);
   assert.deepEqual(second.errors, []);
   assert.deepEqual(events, ["submit_capture_candidates", "submit_capture_decision",
-    "submit_capture_links", "DELETE returned 404", "submit_capture_links"]);
-  const linkRequests = providerRequests.filter((request) =>
-    request.tools[0]?.function.name === "submit_capture_links");
-  assert.equal(linkRequests.length, 2);
-  for (const [index, request] of linkRequests.entries()) {
-    const item = linkTask(request);
-    assert.equal(item.memory.id, 99);
-    assert.deepEqual(item.memory.linked_memory_ids, index === 0 ? [42] : []);
-    assert.deepEqual(item.eligibleMemoryIds, [42]);
-    assert.equal(item.memories[0].content, "Retry indefinitely.");
-  }
-  assert.deepEqual(linkTask(linkRequests[0]!).executionResults, []);
-  assert.deepEqual(linkTask(linkRequests[0]!).executionFailures, []);
-  const retried = linkTask(linkRequests[1]!);
-  assert.deepEqual(retried.executionResults, [
+    "submit_capture_links", "DELETE returned 404"]);
+  const finished = await reopened.getJob(queued.jobId);
+  assert.equal(finished?.status, "paused");
+  assert.equal(finished?.uncertainWrite, expectedError);
+  assert.equal(finished?.attempts, 0);
+  assert.equal(finished?.callCount, 3);
+  const outcome = finished?.candidateOutcomes.decision as {
+    memoryId: number; linkReview: CaptureLinkReview;
+  };
+  assert.equal(outcome.memoryId, 99);
+  assert.deepEqual(outcome.linkReview.executionResults, [
     { operation: "unlink", targetId: 42, status: "failed", error: expectedError, httpStatus: 404 },
   ]);
-  assert.deepEqual(retried.executionFailures, [{ operation: "connections", error: expectedError }]);
-  assert.equal(retried.completedWrites.memoryId, 99);
-  const finished = await reopened.getJob(queued.jobId);
-  assert.equal(finished?.status, "complete", finished?.lastError);
-  assert.equal(finished?.attempts, 2);
-  assert.equal(finished?.callCount, 1);
-  assert.equal((finished?.candidateOutcomes.decision as { memoryId: number }).memoryId, 99);
   assert.deepEqual(mutations, ["POST /api/v1/memories", "DELETE /api/v1/memories/99/links/42"],
     "retry must not recreate the saved memory or repeat a deletion without a new instruction");
   assert.deepEqual((await client().get(99)).linked_memory_ids, []);

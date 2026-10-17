@@ -1,9 +1,10 @@
+import { CaptureSelectionError } from "./capture-feedback.ts";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type {
   ForgetfulClient, Memory, Document, CodeArtifact, Entity, Scope,
 } from "./contracts.ts";
-import { hasSensitiveData } from "./privacy.ts";
+import { hasSensitiveData, errorMessage } from "./privacy.ts";
 
 // The same per-candidate memory selection bound used by capture overlap searches.
 export const CAPTURE_MEMORY_LIMIT = 8;
@@ -229,7 +230,7 @@ export function validateLinkReviews(
 }
 
 function operationError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 async function authorizedMemory(
@@ -237,7 +238,7 @@ async function authorizedMemory(
 ): Promise<Memory> {
   const memory = await client.get(id);
   if (memory.is_obsolete || (scope === "project" && !memory.project_ids.includes(destination)))
-    throw new Error("Memory is outside the destination project or obsolete");
+    throw new CaptureSelectionError("Memory is outside the destination project or obsolete");
   return memory;
 }
 

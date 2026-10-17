@@ -1,4 +1,6 @@
+import { errorMessage } from "./privacy.ts";
 import { createHash } from "node:crypto";
+import { inspect } from "node:util";
 
 import type {
   CodeArtifact,
@@ -82,6 +84,8 @@ export interface KnowledgeWriteReceipt {
 }
 
 export interface KnowledgeWriteState {
+  /** Actual rejected resource request, retained before asking the model to change fields. */
+  failure?: { kind: string; key: string; occurrence: number; input: unknown; error: string };
   /** Latest instruction digest for diagnostics; it does not gate receipt reuse. */
   instructionId?: string;
   entities: KnowledgeWriteReceipt[];
@@ -91,7 +95,7 @@ export interface KnowledgeWriteState {
   entityMemoryLinks: string[];
   linkedMemories: string[];
   attachmentsApplied?: boolean;
-  /** Write-ahead create attempts without a confirmed resource ID. */
+  /** Write-ahead mutations without a confirmed completion (legacy name retained on disk). */
   pendingCreates?: string[];
 }
 
@@ -128,6 +132,7 @@ interface KnowledgeAttachmentIds {
 
 function copyState(value: KnowledgeWriteState): KnowledgeWriteState {
   return {
+    ...(value.failure ? { failure: structuredClone(value.failure) } : {}),
     ...(value.instructionId === undefined ? {} : { instructionId: value.instructionId }),
     ...(value.pendingCreates?.length ? { pendingCreates: [...value.pendingCreates] } : {}),
     entities: value.entities.map((receipt) => ({ ...receipt })),
@@ -213,6 +218,7 @@ function receipts(value: unknown): KnowledgeWriteReceipt[] {
 
 function normalizedState(previous: Partial<KnowledgeWriteState>): KnowledgeWriteState {
   return {
+    ...(previous.failure ? { failure: structuredClone(previous.failure) } : {}),
     ...(previous.instructionId === undefined ? {} : { instructionId: previous.instructionId }),
     ...(previous.pendingCreates?.length
       ? { pendingCreates: [...previous.pendingCreates] } : {}),
@@ -272,11 +278,28 @@ export class KnowledgeWriter {
     return this.readMemory(plan.memoryId, signal);
   }
 
+  private async recordCreateFailure(
+    attempt: string, state: KnowledgeWriteState, save: KnowledgeWriteSave, error: unknown,
+  ): Promise<void> {
+    if (rejectedCreate(error)) {
+      // The service rejected this payload. Keep prior receipts and allow field correction.
+      state.pendingCreates = state.pendingCreates!.filter((item) => item !== attempt);
+      try { await save(); } catch {
+        // Preserve the service error; an older durable pending marker still blocks replay.
+      }
+    }
+    // All other failures may have accepted the create and must remain pending.
+    if (!rejectedCreate(error)) {
+      try { await save(); } catch { /* Keep the original failure and pending receipt. */ }
+    }
+  }
+
   private async createOnce<T extends { id: number }>(
     operation: {
       kind: string;
       key: string;
       occurrence: number;
+      input: unknown;
       create: () => Promise<T>;
     },
     plan: KnowledgeWritePlan,
@@ -303,14 +326,9 @@ export class KnowledgeWriter {
     try {
       created = await create();
     } catch (error) {
-      if (rejectedCreate(error)) {
-        // The service rejected this payload. Keep prior receipts and allow field correction.
-        state.pendingCreates = state.pendingCreates.filter((item) => item !== attempt);
-        try { await save(); } catch {
-          // Preserve the service error; an older durable pending marker still blocks replay.
-        }
-      }
-      // All other failures may have accepted the create and must remain pending.
+      state.failure = { kind, key, occurrence, input: operation.input,
+        error: error instanceof Error ? errorMessage(error) : inspect(error, { depth: 5 }) };
+      await this.recordCreateFailure(attempt, state, save, error);
       throw error;
     }
     if (!positiveId(created.id)) throw new Error(`Invalid knowledge ID for ${key}`);
@@ -333,6 +351,7 @@ export class KnowledgeWriter {
       return selected;
     }
     return this.createOnce({ kind: "entity", key: resource.key, occurrence: resource.occurrence,
+      input: resource.input,
       create: () => this.client.createEntity(resource.input, signal),
     }, plan, state, save, beforeWrite);
   }
@@ -367,6 +386,7 @@ export class KnowledgeWriter {
       return selected;
     }
     return this.createOnce({ kind: "document", key: resource.key, occurrence: resource.occurrence,
+      input: resource.input,
       create: () => this.client.createDocument(resource.input, signal),
     }, plan, state, save, beforeWrite);
   }
@@ -402,6 +422,7 @@ export class KnowledgeWriter {
     }
     return this.createOnce({ kind: "code artifact", key: resource.key,
       occurrence: resource.occurrence,
+      input: resource.input,
       create: () => this.client.createCodeArtifact(resource.input, signal),
     }, plan, state, save, beforeWrite);
   }
@@ -477,6 +498,34 @@ export class KnowledgeWriter {
     };
   }
 
+  /** Write-ahead protection also applies to connections, including lost PUT/POST replies. */
+  private async writeConnection(
+    operation: { kind: string; key: string; input: unknown; execute: () => Promise<unknown> },
+    plan: KnowledgeWritePlan, state: KnowledgeWriteState, save: KnowledgeWriteSave,
+    beforeWrite: KnowledgeWriteGuard | undefined,
+  ): Promise<void> {
+    const { kind, key, input, execute } = operation;
+    await beforeWrite?.();
+    const attempt = JSON.stringify([plan.operationId, kind, key]);
+    state.pendingCreates = [...(state.pendingCreates ?? []), attempt];
+    await save();
+    let dispatched = false;
+    try {
+      this.assertCanWrite?.();
+      dispatched = true;
+      await execute();
+    } catch (error) {
+      state.failure = { kind, key, occurrence: 0, input,
+        error: error instanceof Error ? errorMessage(error) : inspect(error, { depth: 5 }) };
+      if (!dispatched || rejectedCreate(error))
+        state.pendingCreates = state.pendingCreates.filter(item => item !== attempt);
+      try { await save(); } catch { /* The durable pending receipt still prevents replay. */ }
+      throw error;
+    }
+    // The caller checkpoints its completed receipt together with this marker's removal.
+    state.pendingCreates = state.pendingCreates.filter(item => item !== attempt);
+  }
+
   private async writeAttachments(
     plan: KnowledgeWritePlan,
     state: KnowledgeWriteState,
@@ -490,8 +539,10 @@ export class KnowledgeWriter {
     const requested = this.requestedAttachmentIds(plan, state);
     const ids = this.attachmentIds(memory, requested);
     if (this.attachmentsDiffer(memory, ids)) {
-      this.assertCanWrite?.();
-      await this.client.updateMemory(plan.memoryId, this.attachmentPatch(ids), signal);
+      const input = this.attachmentPatch(ids);
+      await this.writeConnection({ kind: "attachments", key: String(plan.memoryId), input,
+        execute: () => this.client.updateMemory(plan.memoryId, input, signal),
+      }, plan, state, save, beforeWrite);
     }
     state.attachmentsApplied = true;
     await save();
@@ -511,11 +562,10 @@ export class KnowledgeWriter {
       resource.input.source_entity_id;
     const targetId = stateId(state.entities, resource.targetEntityKey) ??
       resource.input.target_entity_id;
+    const input = { ...resource.input, source_entity_id: sourceId, target_entity_id: targetId };
     return this.createOnce({ kind: "relationship", key: resource.key,
-      occurrence: resource.occurrence,
-      create: () => this.client.createRelationship({
-        ...resource.input, source_entity_id: sourceId, target_entity_id: targetId,
-      }, signal),
+      occurrence: resource.occurrence, input,
+      create: () => this.client.createRelationship(input, signal),
     }, plan, state, save, beforeWrite);
   }
 
@@ -560,9 +610,10 @@ export class KnowledgeWriter {
     if (hasValue(state.entityMemoryLinks, key)) return;
     // As with relationship endpoints, a model key names its first resource occurrence.
     const entityId = stateId(state.entities, resource.entityKey);
-    await beforeWrite?.();
-    this.assertCanWrite?.();
-    await this.client.linkEntityMemory(entityId as number, plan.memoryId, signal);
+    await this.writeConnection({ kind: "entity link", key,
+      input: { entityId, memoryId: plan.memoryId },
+      execute: () => this.client.linkEntityMemory(entityId as number, plan.memoryId, signal),
+    }, plan, state, save, beforeWrite);
     if (!hasValue(state.entityMemoryLinks, key)) {
       state.entityMemoryLinks.push(key);
     }
@@ -598,9 +649,10 @@ export class KnowledgeWriter {
   ): Promise<void> {
     const key = `${plan.memoryId}:${linkedMemoryId}`;
     if (hasValue(state.linkedMemories, key)) return;
-    await beforeWrite?.();
-    this.assertCanWrite?.();
-    await this.client.linkMemories(plan.memoryId, [linkedMemoryId], signal);
+    await this.writeConnection({ kind: "memory link", key,
+      input: { memoryId: plan.memoryId, relatedIds: [linkedMemoryId] },
+      execute: () => this.client.linkMemories(plan.memoryId, [linkedMemoryId], signal),
+    }, plan, state, save, beforeWrite);
     if (!hasValue(state.linkedMemories, key)) {
       state.linkedMemories.push(key);
     }
@@ -635,7 +687,7 @@ export class KnowledgeWriter {
   ): Promise<KnowledgeWriteState> {
     const state = normalizedState(previous);
     if (state.pendingCreates?.length) {
-      throw new Error("Knowledge create outcome is unknown; automatic retry blocked");
+      throw new Error("Knowledge write outcome is unknown; automatic retry blocked");
     }
     state.instructionId = instructionId(plan);
     const save = async (): Promise<void> => {

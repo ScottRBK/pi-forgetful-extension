@@ -1,4 +1,4 @@
-import { sanitizeText } from "./privacy.ts";
+import { errorMessage, sanitizeText } from "./privacy.ts";
 import type {
   CodeArtifact,
   Document,
@@ -32,6 +32,12 @@ export interface KnowledgeExpansionResult {
   documentIds: number[];
   codeArtifactIds: number[];
   fileIds: number[];
+  /** Private reviewer diagnostics; never included in recalled text or source IDs. */
+  failures?: { operation: string; message: string }[];
+}
+
+interface ExpansionContext extends KnowledgeExpansionRequest {
+  failures: NonNullable<KnowledgeExpansionResult["failures"]>;
 }
 
 type RelationshipExpansion = {
@@ -119,10 +125,16 @@ function clean(value: string): string {
 
 async function safeCall<T>(
   operation: () => Promise<T>,
-  signal?: AbortSignal,
+  request: ExpansionContext,
+  operationName: string,
 ): Promise<T | undefined> {
+  const { signal, failures } = request;
   if (signal?.aborted) return undefined;
-  const operationResult = Promise.resolve().then(operation).catch(() => undefined);
+  const operationResult = Promise.resolve().then(operation).catch((error) => {
+    if (!signal?.aborted) failures.push({ operation: sanitizeText(operationName),
+      message: errorMessage(error) });
+    return undefined;
+  });
   if (!signal) return operationResult;
   return new Promise<T | undefined>((resolve) => {
     let settled = false;
@@ -154,24 +166,35 @@ export class KnowledgeReadService {
   async expand(request: KnowledgeExpansionRequest): Promise<KnowledgeExpansionResult> {
     const empty = this.emptyExpansion();
     if (request.signal?.aborted) return empty;
+    const context: ExpansionContext = { ...request, failures: [] };
     try {
-      const entities = await this.findEntities(request);
-      const relationships = await this.findRelationships(entities, request);
-      const memories = await this.findEntityMemories(entities, request);
-      const attachments = await this.findAttachments(request);
-      return this.formatExpansion(entities, relationships, memories, attachments);
-    } catch {
-      return empty;
+      const entities = await safeCall(() => this.findEntities(context),
+        context, "find_entities") ?? [];
+      const relationships = await safeCall(() => this.findRelationships(entities, context),
+        context, "find_relationships") ?? [];
+      const memories = await safeCall(() => this.findEntityMemories(entities, context),
+        context, "find_entity_memories") ?? [];
+      const attachments = await safeCall(() => this.findAttachments(context),
+        context, "find_attachments") ?? {
+        documents: [], artifacts: [], files: [], fileIds: [],
+      };
+      return { ...this.formatExpansion(entities, relationships, memories, attachments),
+        failures: context.failures };
+    } catch (error) {
+      if (!request.signal?.aborted) context.failures.push({ operation: "knowledge expansion",
+        message: errorMessage(error) });
+      return { ...empty, failures: context.failures };
     }
   }
 
-  private async findEntities(request: KnowledgeExpansionRequest): Promise<Entity[]> {
+  private async findEntities(request: ExpansionContext): Promise<Entity[]> {
     const names = [...new Set(request.entityNames
       .map((name) => name.trim())
       .filter((name) => name.length > 0))]
       .slice(0, MAX_EXPANSION_ENTITIES);
     const searched = await Promise.all(names.map((name) =>
-      safeCall(() => this.client.searchEntities(name, 6, request.signal), request.signal)));
+      safeCall(() => this.client.searchEntities(name, 6, request.signal),
+        request, `search_entities ${name}`)));
     const candidates = new Map<number, Entity>();
     for (const result of searched) {
       for (const entity of result ?? []) {
@@ -184,7 +207,8 @@ export class KnowledgeReadService {
     }
     const selected = [...candidates.values()].slice(0, MAX_EXPANSION_ENTITIES);
     const hydrated = await Promise.all(selected.map((candidate) =>
-      safeCall(() => this.client.getEntity(candidate.id, request.signal), request.signal)));
+      safeCall(() => this.client.getEntity(candidate.id, request.signal),
+        request, `get_entity ${candidate.id}`)));
     return selected.map((candidate, index) => {
       const entity = hydrated[index];
       if (entity?.id === candidate.id && validEntity(entity) &&
@@ -195,23 +219,24 @@ export class KnowledgeReadService {
 
   private async findRelationships(
     entities: Entity[],
-    request: KnowledgeExpansionRequest,
+    request: ExpansionContext,
   ): Promise<RelationshipExpansion[]> {
-    const relationships = await this.collectRelationships(entities, request.signal);
+    const relationships = await this.collectRelationships(entities, request);
     const endpoints = await this.resolveRelationshipEndpoints(
       entities,
       relationships,
-      request.signal,
+      request,
     );
     return this.formatRelationships(entities, relationships, endpoints, request);
   }
 
   private async collectRelationships(
     entities: Entity[],
-    signal?: AbortSignal,
+    request: ExpansionContext,
   ): Promise<EntityRelationship[]> {
     const relationshipResults = await Promise.all(entities.map((entity) =>
-      safeCall(() => this.client.getRelationships(entity.id, signal), signal)));
+      safeCall(() => this.client.getRelationships(entity.id, request.signal),
+        request, `get_relationships ${entity.id}`)));
     const relationships = new Map<number, EntityRelationship>();
     for (const result of relationshipResults) {
       for (const relationship of (result ?? []).slice(0, MAX_EXPANSION_RELATIONSHIPS)) {
@@ -226,7 +251,7 @@ export class KnowledgeReadService {
   private async resolveRelationshipEndpoints(
     entities: Entity[],
     relationships: EntityRelationship[],
-    signal?: AbortSignal,
+    request: ExpansionContext,
   ): Promise<Map<number, Entity>> {
     const endpoints = new Map(entities.map((entity) => [entity.id, entity]));
     const endpointIds = relationships.flatMap((relationship) => [
@@ -235,7 +260,8 @@ export class KnowledgeReadService {
     ]);
     const missingIds = [...new Set(endpointIds)].filter((id) => !endpoints.has(id));
     const fetched = await Promise.all(missingIds.map((id) =>
-      safeCall(() => this.client.getEntity(id, signal), signal)));
+      safeCall(() => this.client.getEntity(id, request.signal),
+        request, `get_entity ${id}`)));
     for (let index = 0; index < missingIds.length; index += 1) {
       const entity = fetched[index];
       if (entity?.id === missingIds[index] && validEntity(entity)) {
@@ -266,17 +292,18 @@ export class KnowledgeReadService {
 
   private async findEntityMemories(
     entities: Entity[],
-    request: KnowledgeExpansionRequest,
+    request: ExpansionContext,
   ): Promise<LinkedMemoryExpansion[]> {
     const linked = await Promise.all(entities.map((entity) =>
-      safeCall(() => this.client.getEntityMemories(entity.id, request.signal), request.signal)));
+      safeCall(() => this.client.getEntityMemories(entity.id, request.signal),
+        request, `get_entity_memories ${entity.id}`)));
     return this.collectEntityMemories(entities, linked, request);
   }
 
   private async collectEntityMemories(
     entities: Entity[],
     linked: ({ id: number; title: string }[] | undefined)[],
-    request: KnowledgeExpansionRequest,
+    request: ExpansionContext,
   ): Promise<LinkedMemoryExpansion[]> {
     const result: LinkedMemoryExpansion[] = [];
     const seen = new Set<number>();
@@ -294,12 +321,12 @@ export class KnowledgeReadService {
 
   private async isAllowedEntityMemory(
     id: number,
-    request: KnowledgeExpansionRequest,
+    request: ExpansionContext,
   ): Promise<boolean> {
     if (!this.readMemory) return request.scope !== "project";
     const memory = await safeCall(
       () => this.readMemory!(id, request.signal),
-      request.signal,
+      request, `get_memory ${id}`,
     );
     return Boolean(
       memory && validMemory(memory) &&
@@ -307,7 +334,7 @@ export class KnowledgeReadService {
     );
   }
 
-  private async findAttachments(request: KnowledgeExpansionRequest): Promise<Attachments> {
+  private async findAttachments(request: ExpansionContext): Promise<Attachments> {
     const documentIds = [
       ...new Set(request.memories.flatMap((memory) => memory.document_ids ?? [])),
     ]
@@ -320,15 +347,17 @@ export class KnowledgeReadService {
       .filter(validId).slice(0, MAX_EXPANSION_ATTACHMENTS);
     const [documents, artifacts] = await Promise.all([
       Promise.all(documentIds.map((id) =>
-        safeCall(() => this.client.getDocument(id, request.signal), request.signal))),
+        safeCall(() => this.client.getDocument(id, request.signal),
+          request, `get_document ${id}`))),
       Promise.all(artifactIds.map((id) =>
-        safeCall(() => this.client.getCodeArtifact(id, request.signal), request.signal))),
+        safeCall(() => this.client.getCodeArtifact(id, request.signal),
+          request, `get_code_artifact ${id}`))),
     ]);
     let files: FileSummary[] = [];
     if (fileIds.length > 0 && request.scope === "project" && validId(request.projectId)) {
       const summaries = await safeCall(
         () => this.client.listFiles(request.projectId, request.signal),
-        request.signal,
+        request, `list_files ${request.projectId}`,
       );
       files = (summaries ?? []).filter((file) =>
         fileIds.includes(file.id) &&

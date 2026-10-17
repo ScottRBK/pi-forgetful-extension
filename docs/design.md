@@ -346,7 +346,11 @@ Errors preserve the actual HTTP status and response body, including JSON and non
 validation field details, plain `Not Found` responses, all 5xx statuses and service diagnostics.
 Known-secret redaction and transport limits still apply. Private tools return those details to
 the memory model instead of substituting an extension interpretation; automatic recall retains
-its failure-open boundary.
+its failure-open boundary. Network diagnostics preserve useful underlying causes with bounded,
+cycle-safe traversal and known-secret redaction. Optional enrichment failures reach private review
+separately from source evidence, without discarding successful sibling reads. They never become
+raw recalled context or capture evidence. Recall-wait exceptions retain actionable cancellation
+and stale-session reasons.
 
 ## Capture lifecycle and durability
 
@@ -447,11 +451,15 @@ is then processed by the durable worker described above.
    eligibility is separate from visibility; failed tools establish failures, not successful changes.
 2. Ask the configured Pi memory model for atomic, evidenced candidates, without a fixed candidate
    count cap. Maintenance-only items carry a search description and evidence IDs instead of a
-   proposed stored memory. Resolve each to an existing target project; if none matches, skip it and
-   warn the user to create a project. Do not create projects automatically. It may inspect trusted
-   repository text and source URLs through a read-only tool before submitting candidates. Actual
-   observations carry durable evidence IDs and provenance; source editing, shell execution and
-   uploads are unavailable. It may also use `read_capture_evidence` to selectively read this task's
+   proposed stored memory. Resolve each to an existing target project. An unknown explicit model
+   selection gets bounded correction with the actual project list; never silently redirect it.
+   Missing project setup still requires human guidance. Do not create projects automatically.
+   It may inspect trusted repository text and source URLs through a read-only tool before
+   submitting candidates. Actual
+   observations carry durable evidence IDs and provenance; failed inspections carry the same
+   structured diagnostic and evidence reference in an error tool result. Permission revocation
+   pauses capture without saving inspection evidence. Source editing, shell execution and uploads
+   are unavailable. It may also use `read_capture_evidence` to selectively read this task's
    pinned originals by entry ID, without
    changing evidence identity or eligibility. Reads are optional, not a required read-before-cite
    check or a guarantee that every fact omitted from a summary will be discovered. Text pages
@@ -504,10 +512,17 @@ The capture service applies supersession in this order:
    Do not require replacement attachment selections to come from supplied records or satisfy local
    resource caps, reasons or project checks. The API owns stored-resource validation.
 3. Mark each selected old memory obsolete with the requested replacement ID, recording each result.
-   If an operation fails, return its actual error and completed receipts to the next funded task.
-   `submit_capture_correction` can revise rejected fields without replaying completed operations.
-   HTTP 400/422 create rejections allow correction; uncertain creates remain blocked across
-   restarts.
+   If an operation fails safely, checkpoint its actual instruction, error and receipts, then start
+   a funded correction task before ending the drain with a retry warning. The model must call the
+   read-only `report_capture_execution_failure` tool, receiving the saved failure as a paired
+   error result, before `submit_capture_correction` can revise rejected fields. This is a new
+   private task, not continuation of the original submitting conversation. Connection failures
+   use their existing connection-review submission with the same reporting requirement.
+   HTTP 400/422 dispatched rejections allow correction; uncertain writes remain blocked across
+   restarts. A pre-dispatch missing-record read is distinct from a dispatched mutation failure.
+   Outages (5xx, rate limits, transport timeouts or refused connections) use normal queue retry,
+   retaining their original diagnostic without asking the model to revise valid instructions.
+   Classification uses status, error type and dispatch receipts, not error-message matching.
 
 Automatic link selection limits full records to eight active, safe endpoints. Global scope allows
 cross-project and shared records; project scope selects only destination-exclusive records.
@@ -719,10 +734,15 @@ implementation bounds recall to one planner path and one review path per prompt,
 private submission attempts per path. The reviewer may explore only stored Forgetful records through
 read-only tools in that same path. Capture extraction, overlap and connection review each consume
 a task from the four-task budget for the current attempt. A failed-job retry resets that task count;
-preparation yields and ordinary cancellation retain the current allowance. The three failed-attempt
-limit is unchanged. Read turns, compaction and at most three submission attempts share each task's
-three-minute deadline. Debug counts provider invocations separately. HTTP requests retain their
-10-second default; explicit `timeout_ms` overrides both HTTP and overall recall, as before.
+preparation yields and ordinary cancellation retain the current allowance. Execution correction
+cycles separately allow three executions (initial plus two corrections), with a durable reserved
+attempt and saved failure per candidate/path. Task-budget yields and restarts never replenish that
+cycle. An exhausted cycle enters ordinary queue failure handling; only a later eligible queue
+retry explicitly starts another bounded cycle. The three failed-queue-attempt limit is unchanged.
+Read turns, compaction and at most three submission attempts share each task's three-minute
+deadline.
+Debug counts provider invocations separately. HTTP requests retain their 10-second default;
+explicit `timeout_ms` overrides both HTTP and overall recall, as before.
 
 ### Model capacity and record validation
 

@@ -58,7 +58,7 @@ import {
   modelSelectionFromModel,
   resolveMemoryModel,
 } from "./model.ts";
-import { sanitizeText } from "./privacy.ts";
+import { errorMessage, sanitizeText } from "./privacy.ts";
 import { buildCaptureSnapshot } from "./snapshot.ts";
 import {
   RecallService,
@@ -2892,8 +2892,8 @@ export function createForgetfulExtension(
               memoryIds: result.memoryIds.slice(0, 20),
             },
           };
-        } catch {
-          throw new Error("Forgetful recall wait is unavailable.");
+        } catch (error) {
+          throw new Error(errorMessage(error));
         }
       },
     });

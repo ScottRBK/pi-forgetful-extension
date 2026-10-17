@@ -39,6 +39,10 @@ The intended experience requires no memory commands during normal work:
   and cache damage falls back to pinned history without masking original-source failures;
 - capture can create and link memories, entities, relationships, documents, and code artifacts;
   file uploads are excluded;
+- safe execution failures receive immediate correction through a new private task with a real
+  failure-report tool result; three execution attempts per cycle survive yields/restarts, separate
+  from private submission attempts and the queue failure allowance; completed/uncertain writes
+  are never replayed, and connection corrections retain their own review context;
 - configured scope is authoritative and independent of each capture destination; global scope
   allows cross-project capture links, while project scope keeps links within the destination;
   queued capture uses its pinned scope, and both link endpoints must remain active;
@@ -138,18 +142,40 @@ flowchart TB
 An editable Excalidraw version is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).
 
-## Forgetful Integration and Agent Tool behaviour
-It is important to note that responses from forgetful are not masked or obscured to by the tools
-and that the agent is able too understand why a request to forgetful failed, as such we should
-pass the execption or response body to the model without translation into our own interpretation.
+## Forgetful integration and tool-error handling
 
-That means the model should see what Forgetful actually said, including for:
+Preserve what Forgetful actually said, not an extension-written interpretation: HTTP status,
+JSON or non-JSON response body, validation field details, plain `Not Found` responses, and service
+or network diagnostics. This includes 5xx errors. Known-secret redaction and transport limits still
+apply. Failed private tool calls return error results to their model immediately; source errors
+retain their structured details. Optional recall failures remain diagnostics, not recalled facts.
 
- - all HTTP statuses, including 5xx;
- - JSON and non-JSON bodies;
- - validation field details;
- - plain 404 bodies such as Not Found;
- - service diagnostics when they are present.
+Error visibility and permission to retry are separate decisions. For capture execution, classify
+failures using HTTP status, error type and dispatch receipts, never guesses from error wording:
+
+- Confirmed HTTP 400/422 rejections allow immediate, bounded model correction of the rejected
+  instruction. A 404 lookup before mutation, or an explicit local target-selection error, can
+  likewise let the model correct its selection. Never silently choose a different destination.
+- HTTP 5xx, 429, transport timeouts and connection failures retain their original diagnostics for
+  normal queue retry where safe. Do not spend extra correction-model calls on service outages.
+- A failed dispatched write may already have succeeded. Unless its rejection is definite under
+  the existing receipt rules, keep it uncertain and blocked; never blindly replay it. A mutation
+  404 is not equivalent to a missing-record lookup. Completed writes are never replayed either.
+- Permission loss and lifecycle cancellation pause work through their existing handling; they
+  are not errors for the model to correct. Lifecycle cancellation consumes no correction attempt.
+
+Correction uses a new private task, not a reconstructed original conversation. The model must call
+`report_capture_execution_failure` to receive the saved instruction, original error and receipts
+as a real paired error result before submitting a correction. That tool only reads saved failure
+information. Candidate/resource correction and connection review retain their separate contexts.
+Keep synchronous submission validators free of network writes.
+
+An execution correction cycle permits three total executions: initial plus two corrections.
+Its remaining allowance and reserved attempt survive budget yields and restarts. This is separate
+from the three private submission attempts, per-pass model-task budget and three failed queue
+attempts. Only a later eligible queue retry may start another bounded execution cycle. Read-tool
+exploration retains its deadline/context bounds, not a new three-read-error limit.
+
 ## Repository hygiene
 
 Keep agent handoffs and disposable review reports outside the repository. Put durable guidance in

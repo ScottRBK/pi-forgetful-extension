@@ -1,3 +1,5 @@
+import { inspect } from "node:util";
+
 const REDACTED = "[redacted]";
 
 const credentialPatterns = [
@@ -29,6 +31,34 @@ export function sanitizeText(text: string): string {
   for (const pattern of credentialPatterns)
     result = result.replace(pattern, REDACTED);
   return result;
+}
+
+function diagnosticMessage(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message) return error.message;
+    // Node's dual-stack connection errors may have an empty AggregateError message.
+    return "code" in error && typeof error.code === "string" ? error.code : error.name;
+  }
+  if (typeof error === "string") return error;
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized !== undefined) return serialized;
+  } catch { /* Cyclic or non-JSON values still have a bounded diagnostic below. */ }
+  return inspect(error, { depth: 2, customInspect: false, getters: false });
+}
+
+/** Preserve actionable causes without exposing stacks or recursively dumping exception objects. */
+export function errorMessage(error: unknown): string {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  for (let depth = 0; depth < 4 && current !== undefined && !seen.has(current); depth++) {
+    seen.add(current);
+    const message = diagnosticMessage(current);
+    if (!messages.includes(message)) messages.push(message);
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return sanitizeText(messages.join("\nCaused by: "));
 }
 
 export function hasSensitiveData(text: string): boolean {

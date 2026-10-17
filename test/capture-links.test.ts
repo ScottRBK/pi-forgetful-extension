@@ -32,11 +32,15 @@ function model(reply: (name: string, input: any) => unknown) {
     find: () => ({ provider: "test", id: "memory", maxTokens: 8_000,
       contextWindow: 200_000, input: ["text"] }) as any,
     complete: async (_model, context) => {
-      const tool = context.tools![0]!;
+      const report = context.tools!.find(tool => tool.name === "report_capture_execution_failure");
+      const reporting = report && !context.messages.some(message => message.role === "toolResult" &&
+        message.toolName === "report_capture_execution_failure");
+      const tool = reporting ? report : context.tools![0]!;
       const input = decodeProviderContext(context).input;
       return { role: "assistant", api: "test", provider: "test", model: "memory",
         content: [{ type: "toolCall", id: "submission", name: tool.name,
-          arguments: await reply(tool.name, input) }], stopReason: "toolUse", timestamp: Date.now(),
+          arguments: reporting ? {} : await reply(tool.name, input) }],
+        stopReason: "toolUse", timestamp: Date.now(),
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } as any;
     },
@@ -220,6 +224,10 @@ test(`invalid batch preserves valid sibling; malformed ID=${malformedId}`, realO
             newClaim: "new", reason: "Invalid authority" },
           { candidateId: "good", action: "create" }] };
         }
+        if (name === "submit_capture_correction") {
+          assert.match(input.outcome.executionFailure, /HTTP 404/);
+          return { candidate: input.candidate, decision: { action: "skip" } };
+        }
         return { reviews: input.candidates.map((item: any) => ({ candidateId: item.candidateId,
           decisions: [] })) };
       }) });
@@ -228,23 +236,18 @@ test(`invalid batch preserves valid sibling; malformed ID=${malformedId}`, realO
     await service.checkpoint();
     // Assert.
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal(job.status, malformedId ? "complete" : "pending", job.lastError);
+    assert.equal(job.status, "complete", job.lastError);
     assert.equal(corrections, malformedId ? 3 : 1);
     // No link task runs before the rejected target read; the valid sibling's write survives.
-    assert.equal(job.callCount, 2);
-    if (malformedId) assert.equal((job.candidateOutcomes.bad as any).stage, "skipped");
-    else {
-      assert.match(job.lastError ?? "", /HTTP 404: \{"error":"Memory not found"\}/);
-      assert.equal((job.candidateOutcomes.bad as any).stage, "decided");
-      assert.deepEqual(job.submissionRejections, []);
-    }
+    assert.equal(job.callCount, malformedId ? 2 : 3);
+    assert.equal((job.candidateOutcomes.bad as any).stage, "skipped");
     const good = job.candidateOutcomes.good as any;
-    assert.equal(good.stage, malformedId ? "created" : "links-pending");
+    assert.equal(good.stage, "created");
     assert.equal((await client.get(good.memoryId)).content, candidate("good").content);
   });
 }
 
-test("lost unlink response reaches the model before it explicitly leaves the absent edge alone",
+test("lost unlink response stays unresolved without model correction or replay",
   realOptions, async (t) => {
     // Arrange: transport loses the successful mutation reply, as can happen on disconnect.
     const baseUrl = await startForgetful(t);
@@ -272,7 +275,6 @@ test("lost unlink response reaches the model before it explicitly leaves the abs
       if (name === "submit_capture_candidates") return { candidates: [candidate()] };
       if (name === "submit_capture_decision") return { action: "create" };
       reviews++;
-      if (reviews === 2) assert.match(JSON.stringify(input), /Lost unlink response/);
       return { reviews: [{ candidateId: "decision", decisions: [
         { memoryId: misleading.id, action: reviews === 1 ? "reject" : "ignore",
           reason: "No useful connection remains." },
@@ -283,7 +285,7 @@ test("lost unlink response reaches the model before it explicitly leaves the abs
     // Act.
     await service.checkpoint();
     const before = (await queue.getJob(queued.jobId))!;
-    assert.equal(before.status, "pending");
+    assert.equal(before.status, "paused");
     const savedId = (before.candidateOutcomes.decision as any).memoryId;
     const restarted = new CaptureService({
       queue: new DurableQueueStore({ directory, instanceId: "links" }), client, instanceId: "links",
@@ -292,9 +294,10 @@ test("lost unlink response reaches the model before it explicitly leaves the abs
     await restarted.checkpoint();
     // Assert.
     const after = (await queue.getJob(queued.jobId))!;
-    assert.equal(after.status, "complete", after.lastError);
-    assert.equal(after.callCount, 1);
-    assert.equal(reviews, 2);
+    assert.equal(after.status, "paused", after.lastError);
+    assert.match(after.uncertainWrite!, /Lost unlink response/);
+    assert.equal(after.callCount, 3);
+    assert.equal(reviews, 1);
     assert.equal(deletes, 1);
     assert.equal(creates, 2, "One setup memory and one capture creation");
     assert.equal((after.candidateOutcomes.decision as any).memoryId, savedId);
@@ -465,7 +468,8 @@ for (const scenario of [
       assert.ok(stored.linked_memory_ids!.includes(endpoint.id));
       assert.equal(attempts, 3, "each of the three attempts gets a fresh model-call budget");
       assert.deepEqual(finalResult.discardedJobs?.map((item) => item.jobId), [queued.jobId]);
-      assert.deepEqual(finalResult.errors, ["Memory model request failed"]);
+      assert.deepEqual(finalResult.errors,
+        ["Memory model request failed\nCaused by: Transient provider failure"]);
       return;
     }
     // Scope and uncertainty block writes; changed claims do not veto model operations.
@@ -869,10 +873,11 @@ test("retry does not repeat a verified unlink after another writer restores the 
     await service.checkpoint();
     // Assert: completed removal is not repaired and an uncertain second removal is not replayed.
     const job = (await queue.getJob(queued.jobId))!;
-    assert.equal(job.status, "pending", job.lastError);
+    assert.equal(job.status, "paused", job.lastError);
     assert.ok((await setup.get(receipt.memoryId)).linked_memory_ids!.includes(first.id));
-    assert.equal(job.callCount, 1);
-    assert.equal(reviews, 2);
+    assert.equal(job.callCount, 3);
+    assert.equal(reviews, 1);
+    assert.match(job.lastError!, /Interrupted second mutation/);
     assert.equal(firstDeletes, 1);
     assert.ok((await setup.get(receipt.memoryId)).linked_memory_ids!.includes(second.id));
   });
@@ -1149,10 +1154,10 @@ for (const [status, phase] of [[404, "inspection"], [503, "inspection"],
         repo_name: `test/unavailable-${status}` });
       const missing = await setup.create({ ...candidate(), project_ids: [project.id] });
       const useful = await setup.create({ ...candidate(), project_ids: [project.id] });
-      let captureCreated = false, reviewed = false, reviews = 0;
+      let captureCreated = false, reviewed = false, reviews = 0, unavailable = true;
       const serviceText = `Selected endpoint unavailable: service diagnostic ${status}`;
       const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
-        if (captureCreated && init?.method === "GET" &&
+        if (unavailable && captureCreated && init?.method === "GET" &&
             String(url).endsWith(`/memories/${missing.id}`)) {
           if (phase === "inspection" || (phase === "application" && reviewed))
             return new Response(serviceText, { status });
@@ -1189,11 +1194,24 @@ for (const [status, phase] of [[404, "inspection"], [503, "inspection"],
       await service.checkpoint();
       const job = (await queue.getJob(queued.jobId))!;
       if (phase === "application") {
-        assert.notEqual(job.status, "complete");
-        assert.ok(job.lastError?.includes(serviceText), job.lastError);
-        await service.checkpoint();
-        assert.equal(reviews, 2);
-        assert.equal((await queue.getJob(queued.jobId))!.callCount, 1);
+        if (status === 404) {
+          assert.equal(job.status, "complete", job.lastError);
+          assert.equal(reviews, 2);
+          assert.equal(job.callCount, 4);
+        } else {
+          assert.equal(job.status, "pending");
+          assert.match(JSON.stringify(job.candidateOutcomes), new RegExp(serviceText));
+          const failed = await service.checkpoint();
+          assert.ok(failed.errors[0]?.includes(serviceText));
+          assert.equal(reviews, 1);
+          unavailable = false;
+          await service.checkpoint();
+          const recovered = (await queue.getJob(queued.jobId))!;
+          assert.equal(recovered.status, "complete", recovered.lastError);
+          assert.equal(reviews, 1, "Resume the saved decisions without another model review");
+          const memoryId = (recovered.candidateOutcomes.decision as any).memoryId;
+          assert.deepEqual((await setup.get(memoryId)).linked_memory_ids, []);
+        }
         return;
       }
       if (status === 503) {

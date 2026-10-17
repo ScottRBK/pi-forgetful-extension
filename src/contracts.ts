@@ -251,6 +251,11 @@ export class ModelEvidencePage {
   ) {}
 }
 
+/** Explicit failed read with structured detail; ordinary service JSON remains ordinary data. */
+export class ModelReadErrorResult {
+  constructor(readonly value: unknown) {}
+}
+
 export interface ModelReadTool {
   name: string;
   description: string;

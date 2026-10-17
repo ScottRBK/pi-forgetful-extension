@@ -15,6 +15,7 @@ import { Value } from "typebox/value";
 import type { TSchema } from "typebox";
 import {
   ModelEvidencePage,
+  ModelReadErrorResult,
   ModelSubmissionError,
   ModelTaskPause,
   type MemoryModelClient,
@@ -27,7 +28,7 @@ import {
   isRecallConcurrency,
   type ModelSelection,
 } from "./config.ts";
-import { sanitizeText, sanitizeValue } from "./privacy.ts";
+import { errorMessage, sanitizeText, sanitizeValue } from "./privacy.ts";
 import type { DiagnosticLogger } from "./logging.ts";
 import { evidenceMessage, evidencePageContent, MemoryTaskContext } from "./model-context.ts";
 import { mapConcurrent } from "./concurrency.ts";
@@ -179,8 +180,7 @@ function toolCalls(message: AssistantMessage): ToolCall[] {
 }
 
 function rejectionText(error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error);
-  return sanitizeText(detail);
+  return errorMessage(error);
 }
 
 function sanitizedAssistantForHistory(message: AssistantMessage): AssistantMessage {
@@ -218,6 +218,7 @@ function appendCallCountCorrection(
   calls: ToolCall[],
   submissionName: string,
   base: string,
+  readNames: string[],
 ): void {
   if (calls.length === 0) {
     context.messages.push({
@@ -229,8 +230,8 @@ function appendCallCountCorrection(
   }
   context.messages.push(sanitizedAssistantForHistory(response));
   for (const call of calls) {
-    const reason = call.name === submissionName
-      ? base
+    const reason = call.name === submissionName || readNames.includes(call.name)
+      ? `${base} Perform reads and the final submission in separate turns; no tools were executed.`
       : `${base} Tool "${sanitizeText(call.name)}" not found.`;
     context.messages.push(errorToolResult(call, rejectionText(reason)));
   }
@@ -616,7 +617,9 @@ export class PiMemoryModel implements MemoryModelClient {
       return {
         role: "toolResult", toolCallId: call.id, toolName: call.name,
         content: value instanceof ModelEvidencePage ? evidencePageContent(value)
-          : [textBlock(serializeInput(value))], isError: false, timestamp: Date.now(),
+          : [textBlock(serializeInput(
+            value instanceof ModelReadErrorResult ? value.value : value))],
+        isError: value instanceof ModelReadErrorResult, timestamp: Date.now(),
       };
     } catch (error) {
       if (error instanceof ModelTaskPause || request.signal?.aborted || deadline.timedOut) {
@@ -689,7 +692,8 @@ export class PiMemoryModel implements MemoryModelClient {
           `${calls.length} tool calls.`;
         rejected++;
         recordRejection(attempt, base);
-        appendCallCountCorrection(context, response, calls, submission.name, base);
+        appendCallCountCorrection(context, response, calls, submission.name, base,
+          reads.map((read) => read.name));
         continue;
       }
 

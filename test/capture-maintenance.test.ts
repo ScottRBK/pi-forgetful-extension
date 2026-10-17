@@ -36,8 +36,11 @@ async function fixture(t: TestContext,
 }
 function retireModel(ids: number[]) {
   return { async complete(request: ModelRequest) {
-    const response = request.purpose === "capture" ? { candidates: [maintenance] } :
-      { action: "retire", conflictingMemoryIds: ids, reason };
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
+    const response = request.purpose === "capture" ? { candidates: [maintenance] }
+      : request.submission.name === "submit_capture_correction" ? { candidate: maintenance }
+      : { action: "retire", conflictingMemoryIds: ids, reason };
     request.submission.validate(response);
     return response;
   } };
@@ -160,10 +163,14 @@ const combined = { title: "Dependency policy", content:
 function mergeModel(ids: number[], onCompose?: (request: ModelRequest) => void,
   candidate: unknown = addition) {
   return { async complete(request: ModelRequest) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
     let response: unknown;
     if (request.purpose === "capture") response = { candidates: [candidate] };
     else if (request.submission.name === "submit_capture_decision")
       response = { action: "merge", conflictingMemoryIds: ids, reason: "Add the adopted guard." };
+    else if (request.submission.name === "submit_capture_correction")
+      response = { candidate: (request.input as any).candidate };
     else if (request.submission.name === "submit_capture_merge") {
       onCompose?.(request);
       response = combined;
@@ -347,8 +354,12 @@ test("merge composition rejects malformed submission before any replacement is c
     const old = await client.create({ ...fact, project_ids: [project.id] });
     const model = mergeModel([old.id]);
     const complete = model.complete;
-    model.complete = async (request) => request.submission.name === "submit_capture_merge"
-      ? { content: "incomplete replacement" } : complete(request);
+    let corrections = 0;
+    model.complete = async (request) => {
+      if (request.submission.name === "submit_capture_correction") corrections++;
+      return request.submission.name === "submit_capture_merge"
+        ? { content: "incomplete replacement" } : complete(request);
+    };
     const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
     // Act.
     const queued = await service.enqueue(snapshot(project));
@@ -357,6 +368,7 @@ test("merge composition rejects malformed submission before any replacement is c
     const job = (await queue.getJob(queued.jobId))!;
     assert.equal(job.status, "pending");
     assert.match(job.lastError!, /complete combined memory fields/);
+    assert.equal(corrections, 0, "Submission failure is separate from execution correction");
     assert.equal((await client.get(old.id)).is_obsolete, false);
     assert.equal((job.candidateOutcomes.policy as any).creation, undefined);
   });
@@ -385,6 +397,8 @@ for (const action of ["retire", "merge"] as const) {
         : mergeModel([old.id, second.id]);
       const complete = model.complete;
       model.complete = async (request) => {
+        await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         if (request.submission.name === "submit_capture_correction") {
           correctionError = (request.input as any).outcome.executionFailure;
           // A changed target selection cannot discard completed writes.
@@ -417,12 +431,16 @@ for (const failure of ["preservation", "obsolete"] as const) {
       const old = await api.create({ ...fact, project_ids: [project.id] });
       const lead = await api.create({ ...fact, project_ids: [project.id] });
       await api.knowledge.linkMemories(old.id, [lead.id]);
-      let failed = 0;
+      let failed = 0, submitted: unknown;
       const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
         const response = await fetch(url, init);
         const matches = failure === "preservation"
           ? init?.method === "POST" && String(url).endsWith("/links") : init?.method === "DELETE";
-        if (matches) { failed++; throw new Error(`${failure} response lost`); }
+        if (matches) {
+          submitted = JSON.parse(String(init?.body));
+          failed++;
+          throw new Error(`${failure} response lost`);
+        }
         return response;
       } });
       const service = new CaptureService({ client, queue, instanceId: "maintenance",
@@ -440,6 +458,10 @@ for (const failure of ["preservation", "obsolete"] as const) {
       assert.equal(job.status, "paused");
       assert.match(job.uncertainWrite!, new RegExp(`${failure} response lost`));
       assert.equal(failed, 1);
+      if (failure === "preservation") {
+        const plan = (job.candidateOutcomes.policy as any).mergePlan;
+        assert.deepEqual(plan.connections.receipts[`memory:${lead.id}`].input, submitted);
+      }
       assert.equal((await api.get(old.id)).is_obsolete, failure === "obsolete");
     });
 }
@@ -535,8 +557,10 @@ test("merge rechecks preserved endpoint scope after cancellation before retiring
     await api.knowledge.updateMemory(lead.id, { project_ids: [other.id] });
     // Act: completed edge receipts must not bypass the configured scope on resume.
     const reopened = new DurableQueueStore({ directory, instanceId: "maintenance" });
-    await new CaptureService({ client: api, queue: reopened, instanceId: "maintenance",
-      model: mergeModel([old.id]) }).checkpoint();
+    const resumed = new CaptureService({ client: api, queue: reopened, instanceId: "maintenance",
+      model: mergeModel([old.id]) });
+    await resumed.checkpoint();
+    await resumed.checkpoint();
     // Assert: the old record remains useful while its connection cannot be carried forward.
     const job = (await reopened.getJob(queued.jobId))!;
     assert.equal(job.status, "pending");
@@ -572,8 +596,10 @@ for (const remove of [false, true]) {
         const id = (pending.candidateOutcomes.policy as any).replacementId;
         await api.knowledge.updateMemory(id, { document_ids: [] });
         const reopened = new DurableQueueStore({ directory, instanceId: "maintenance" });
-        await new CaptureService({ client, queue: reopened, instanceId: "maintenance", model })
-          .checkpoint();
+        const resumed = new CaptureService({ client, queue: reopened,
+          instanceId: "maintenance", model });
+        await resumed.checkpoint();
+        await resumed.checkpoint();
       }
       // Assert: completed writes are historical receipts, never a permission to silently repair.
       const job = (await queue.getJob(queued.jobId))!;
@@ -630,6 +656,9 @@ test("another candidate's completed retirement does not freeze a rejected merge 
     let corrections = 0;
     const service = new CaptureService({ client, queue, instanceId: "maintenance", model: {
       async complete(request) {
+        await request.readTools?.find(tool =>
+          tool.name === "report_capture_execution_failure")
+          ?.execute({}, new AbortController().signal);
         let response: unknown;
         switch (request.submission.name) {
           case "submit_capture_candidates":
@@ -804,6 +833,8 @@ test("merge rechecks inherited scope after composition before creating a replace
     } });
     const initial = mergeModel([old.id]);
     const model = { async complete(request: ModelRequest) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       const response = await initial.complete(request);
       if (request.submission.name === "submit_capture_merge")
         await api.knowledge.linkMemories(old.id, [lead.id]);
@@ -812,6 +843,8 @@ test("merge rechecks inherited scope after composition before creating a replace
     const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
     // Act.
     await service.enqueue({ ...snapshot(project), scope: "project" });
+    const progress = await service.checkpoint();
+    assert.deepEqual(progress.errors, []);
     const result = await service.checkpoint();
     // Assert: the final pre-create read detects the new invalid endpoint without duplicating.
     assert.match(result.errors.join("\n"), /Cannot preserve merge connection/);
@@ -836,7 +869,11 @@ test("retirement preflights every target and corrects an invalid selection witho
     } });
     const initial = retireModel([old.id, 999999]);
     const model = { async complete(request: ModelRequest) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       if (request.submission.name !== "submit_capture_correction") return initial.complete(request);
+      assert.equal(deletes, 0, "Every target must be preflighted before the first DELETE");
+      assert.equal((await api.get(old.id)).is_obsolete, false);
       correction = (request.input as any).outcome.executionFailure;
       const response = { candidate: maintenance,
         decision: { action: "retire", conflictingMemoryIds: [old.id], reason } };
@@ -847,8 +884,8 @@ test("retirement preflights every target and corrects an invalid selection witho
     // Act: fail the deterministic preflight, then correct the selected targets.
     const queued = await service.enqueue(snapshot(project));
     await service.checkpoint();
-    assert.equal(deletes, 0, "Every target must be preflighted before the first DELETE");
-    assert.equal((await api.get(old.id)).is_obsolete, false);
+    assert.equal(deletes, 1, "The corrected selection executes in the same drain");
+    assert.equal((await api.get(old.id)).is_obsolete, true);
     await service.checkpoint();
     // Assert: exact server error reaches correction; the valid target can then retire.
     const job = (await queue.getJob(queued.jobId))!;
@@ -873,6 +910,8 @@ test("a rejected composed merge is corrected from the original server error with
     } });
     const initial = mergeModel([old.id]);
     const model = { async complete(request: ModelRequest): Promise<unknown> {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       if (request.submission.name === "submit_capture_merge") {
         compositions++;
         return { ...combined, content: "x".repeat(2500) };
@@ -917,6 +956,8 @@ test("batched merges defer composition budgets as progress across cancellation a
         project_ids: [project.id] })).id);
     let selections = 0, compositions = 0;
     const model = { async complete(request: ModelRequest): Promise<unknown> {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       let response: unknown;
       if (request.submission.name === "submit_capture_candidates") response = { candidates };
       else if (request.submission.name === "submit_capture_decisions") {
@@ -973,6 +1014,8 @@ test("mixed create and merges yield an unfunded link review without consuming fa
     } });
     const tasks: string[] = [];
     const model = { async complete(request: ModelRequest): Promise<unknown> {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
       tasks.push(request.submission.name);
       let response: unknown;
       if (request.submission.name === "submit_capture_candidates") response = { candidates };
@@ -1071,6 +1114,8 @@ for (const action of ["create", "supersede"] as const) {
           ...(i < 2 || action === "supersede" ? { conflictingMemoryIds: [originals[i]],
             reason: "Adopted policy change" } : {}) }));
         const model = { async complete(request: ModelRequest): Promise<unknown> {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
           tasks.push(request.submission.name);
           let response: unknown;
           if (request.submission.name === "submit_capture_candidates") response = { candidates };
@@ -1157,6 +1202,8 @@ test("a zero configured budget completes single-candidate capture in one-call pa
     const tasks: string[] = [];
     const service = new CaptureService({ client, queue, instanceId: "maintenance", maxModelCalls: 0,
       model: { async complete(request) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
         tasks.push(request.submission.name);
         if (request.purpose === "capture") return { candidates: [addition] };
         if (request.submission.name === "submit_capture_decision") return { action: "create" };
@@ -1194,6 +1241,8 @@ for (const recover of [true, false]) {
       } });
       const tasks: string[] = [];
       const model = { async complete(request: ModelRequest): Promise<unknown> {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
         tasks.push(request.submission.name);
         let response: unknown;
         if (request.purpose === "capture") response = { candidates: [bad] };
@@ -1218,7 +1267,7 @@ for (const recover of [true, false]) {
       let failures = 0, finished = false;
 
       // Act: restart every pass, including after correction spends the entire allowance.
-      for (let pass = 1; pass <= 8; pass++) {
+      for (let pass = 1; pass <= 30; pass++) {
         const result = await service.checkpoint();
         if (result.errors.length) {
           assert.equal(result.errors.length, 1);
@@ -1228,12 +1277,13 @@ for (const recover of [true, false]) {
         const job = await queue.getJob(queued.jobId);
         if (!job || job.status === "complete") {
           assert.equal(Boolean(job), recover);
-          if (job) assert.equal(job.attempts, 2);
+          if (job) assert.equal(job.attempts, 1);
           else assert.equal(result.discardedJobs?.[0]?.jobId, queued.jobId);
           finished = true;
           break;
         }
-        assert.equal(job.attempts, failures, "Only actual REST rejections spend failure attempts");
+        assert.equal(job.attempts, failures,
+          "Only exhausted execution cycles spend queue failures");
         if (!result.errors.length) {
           assert.equal(result.continuation, "ready");
           assert.equal(job.callCount, 0);
@@ -1246,11 +1296,11 @@ for (const recover of [true, false]) {
 
       // Assert: correction is saved before yielding; repeated rejection expires after three tries.
       assert.equal(finished, true, "Minimum budgets must never continue without bounded progress");
-      assert.equal(failures, recover ? 1 : 3);
-      assert.equal(creates, recover ? 2 : 3);
+      assert.equal(failures, recover ? 0 : 3);
+      assert.equal(creates, recover ? 2 : 9);
       assert.deepEqual(tasks, ["submit_capture_candidates", "submit_capture_decision",
-        "submit_capture_correction",
-        recover ? "submit_capture_links" : "submit_capture_correction"]);
+        ...Array(recover ? 1 : 8).fill("submit_capture_correction"),
+        ...(recover ? ["submit_capture_links"] : [])]);
     });
 }
 

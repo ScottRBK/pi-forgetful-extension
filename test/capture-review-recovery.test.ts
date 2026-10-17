@@ -23,7 +23,9 @@ function snapshot(): CaptureSnapshot {
       { id: "answer", role: "assistant", text: "Noted." },
     ] };
 }
-function answer(request: ModelRequest, value: unknown) {
+async function answer(request: ModelRequest, value: unknown) {
+  const report = request.readTools?.find(tool => tool.name === "report_capture_execution_failure");
+  if (report) await report.execute({}, new AbortController().signal);
   request.submission!.validate(value);
   return value;
 }
@@ -218,8 +220,8 @@ test("missing supersession target supplies actual REST error for correction afte
     // Act: a missing read fails before any replacement, then a new process corrects that target.
     await capture.checkpoint();
     const first = (await f.queue.getJob(queued.jobId))!;
-    assert.equal(first.status, "pending");
-    assert.equal((await client.get(old.id)).is_obsolete, false);
+    assert.equal(first.status, "complete");
+    assert.equal((await client.get(old.id)).is_obsolete, true);
     const restarted = new DurableQueueStore({ directory: f.directory, ...identity });
     await new CaptureService({ ...identity, queue: restarted, client, model }).checkpoint();
     // Assert: actual status/body reach the model, then the new target is executed once.
@@ -349,7 +351,7 @@ test("sibling cycle feeds candidate-specific correction and recomputes execution
     const queued = await capture.enqueue(snapshot());
     // Act: execute, restart, and break the cycle by correcting its failed instruction.
     await capture.checkpoint();
-    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.writes, ["create"]);
     const restarted = new DurableQueueStore({ directory: f.directory, ...identity });
     await new CaptureService({ ...identity, queue: restarted, client: f.client, model })
       .checkpoint();
@@ -456,7 +458,7 @@ test("target correction preserves a sibling's completed creation receipt across 
     // Act: restart with one completed creation and one failed instruction.
     await capture.checkpoint();
     const before = (await f.queue.getJob(queued.jobId))!.candidateOutcomes.saved as any;
-    assert.equal(before.creation.status, "completed");
+    assert.equal((receiptDuringCorrection as any).status, "completed");
     assert.deepEqual(f.writes, ["create"]);
     const restarted = new DurableQueueStore({ directory: f.directory, ...identity });
     await new CaptureService({ ...identity, queue: restarted, client: f.client, model })
@@ -466,7 +468,7 @@ test("target correction preserves a sibling's completed creation receipt across 
     const finished = (await restarted.getJob(queued.jobId))!;
     assert.equal(finished.status, "complete", finished.lastError);
     assert.deepEqual(f.writes, ["create"]);
-    assert.deepEqual(receiptDuringCorrection, before.creation);
+    assert.equal((receiptDuringCorrection as any).result.id, before.memoryId);
     assert.equal((finished.candidateOutcomes.failed as any).memoryId, before.memoryId);
   });
 

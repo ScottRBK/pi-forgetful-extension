@@ -4773,3 +4773,67 @@ test("debug reports discarded capture once without reading deleted queue diagnos
     await fixture.cleanup();
   }
 });
+
+test("recall wait preserves cancellation rather than replacing it with unavailable", async () => {
+  // Arrange: recall remains active while its independent wait is cancelled.
+  let release!: (value: RecallResult) => void;
+  const pending = new Promise<RecallResult>((resolve) => { release = resolve; });
+  const fixture = await harness({ recallService: {
+    async recall() { return pending; },
+    async deeper() { return { text: "", memoryIds: [], scope: "global" as const }; },
+  } });
+  const controller = new AbortController();
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.entries.push(entry("cancel-wait-user", "root", "user", "wait for memory"));
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "wait for memory", systemPrompt: "base",
+    });
+    // Act: cancel after the tool has entered its pending recall wait.
+    const waiting = fixture.tools.get("forgetful_recall_wait")!.execute(
+      "cancel-wait", {}, controller.signal, undefined, fixture.ctx,
+    );
+    setImmediate(() => controller.abort());
+
+    // Assert: the tool reports the actionable reason rather than the generic fallback.
+    await assert.rejects(waiting, /Forgetful recall wait was cancelled\./);
+  } finally {
+    release({ text: "", memoryIds: [], scope: "global" });
+    await fixture.cleanup();
+  }
+});
+
+test("recall wait explains a session change without delivering stale memory", async () => {
+  // Arrange: the wait starts for one session, but a different session becomes active.
+  let release!: (value: RecallResult) => void;
+  const pending = new Promise<RecallResult>((resolve) => { release = resolve; });
+  const fixture = await harness({ recallService: {
+    async recall() { return pending; },
+    async deeper() { return { text: "", memoryIds: [], scope: "global" as const }; },
+  } });
+  try {
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    fixture.entries.push(entry("stale-wait-user", "root", "user", "wait for memory"));
+    await fixture.emit("before_agent_start", {
+      type: "before_agent_start", prompt: "wait for memory", systemPrompt: "base",
+    });
+
+    // Act: let initialization settle before changing the session beneath the pending wait.
+    const waiting = fixture.tools.get("forgetful_recall_wait")!.execute(
+      "stale-wait", {}, undefined, undefined, fixture.ctx,
+    );
+    setImmediate(() => {
+      fixture.ctx.sessionManager.getSessionId = () => "different-session";
+      release({ text: "STALE_MEMORY_MUST_NOT_ESCAPE", memoryIds: [99], scope: "global" });
+    });
+
+    // Assert: the error preserves the stale-session reason and never includes recalled content.
+    await assert.rejects(waiting, (error: Error) => {
+      assert.equal(error.message, "Forgetful recall wait is no longer current.");
+      return true;
+    });
+  } finally {
+    release({ text: "", memoryIds: [], scope: "global" });
+    await fixture.cleanup();
+  }
+});
