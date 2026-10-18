@@ -90,6 +90,8 @@ export const CAPTURE_LINK_PARAMETERS = Type.Object({
 
 export const CAPTURE_LINK_POLICY = [
   "Review connections against the supplied full stored records and candidate evidence.",
+  "Shared evidenceEntries are supplied once; use each candidate's sourceEntryIds to select",
+  "its evidence by entry ID. Other candidates' evidence does not support this candidate.",
   "Submit exactly one submit_capture_links call with one review per candidate and one decision",
   "per supplied endpoint. Memory links are untyped and bidirectional. Keep useful explanations,",
   "constraints, dependencies and distinct related facts. Similar wording alone proves nothing.",

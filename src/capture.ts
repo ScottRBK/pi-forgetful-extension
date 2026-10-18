@@ -136,7 +136,6 @@ interface CaptureBatchInput {
   candidate: CaptureCandidate;
   destinationProjectId: number;
   overlaps: Memory[];
-  evidenceEntries: EvidenceEntry[];
   neighborhood: CaptureNeighborhood;
 }
 
@@ -578,7 +577,8 @@ const OVERLAP_BATCH_PROTOCOL =
   "Submit exactly one submit_capture_decisions call with one decision per supplied candidate ID. " +
   "Each action is create, skip, merge, supersede, retire, or escalate. Reject no candidate " +
   "based on another's evidence. You can select an equivalent sibling by equivalentCandidateId. " +
-  "No JSON text.";
+  "Shared evidenceEntries are supplied once; use each candidate's sourceEntryIds to select its " +
+  "evidence by entry ID. No JSON text.";
 const OVERLAP_JUDGMENT_RULES = [
   MAINTENANCE_GUIDANCE,
   "Judge durable novelty, equivalence and contradictions from candidate, evidence and context. " +
@@ -650,6 +650,14 @@ function sourceEvidence(
   return candidate.sourceEntryIds
     .map((id) => entries.get(id))
     .filter((entry): entry is EvidenceEntry => Boolean(entry));
+}
+
+/** Preserve full source records once per request; each candidate retains its own citation IDs. */
+function sharedSourceEvidence(
+  candidates: CaptureCandidate[], snapshot: CaptureSnapshot,
+): EvidenceEntry[] {
+  const entries = candidates.flatMap(candidate => sourceEvidence(candidate, snapshot));
+  return [...new Map(entries.map(entry => [entry.id, entry])).values()];
 }
 
 type CandidateValidation<T> =
@@ -2077,8 +2085,7 @@ export class CaptureService {
       if (loaded.status === "skipped") continue;
       inputs.push({ candidate, destinationProjectId: prepared.destination,
         overlaps: loaded.overlaps,
-        neighborhood: await this.existingNeighborhood(current, candidate, prepared.destination),
-        evidenceEntries: sourceEvidence(candidate, current.snapshot) });
+        neighborhood: await this.existingNeighborhood(current, candidate, prepared.destination) });
     }
     return { job: current, inputs };
   }
@@ -2140,8 +2147,10 @@ export class CaptureService {
       const response = await this.model.complete({ purpose: "overlap", submission,
         diagnosticContext: this.correlation(current),
         policy: this.policyFor(current.snapshot, "overlapBatch"),
-        input: { candidates: inputs.map((input) => ({ ...input,
+        input: { candidates: inputs.map(input => ({ ...input,
           candidate: overlapCandidate(input.candidate) })),
+          evidenceEntries: sharedSourceEvidence(inputs.map(input => input.candidate),
+            current.snapshot),
           siblings: candidates.map(overlapCandidate), ...captureWorkMetadata(current.snapshot),
           modelVersion: current.snapshot.modelVersion },
         conversation: captureConversation(current.snapshot),
@@ -3556,6 +3565,8 @@ export class CaptureService {
             "failed instructions and receipts before submitting revised connections." : ""),
         conversation: captureConversation(current.snapshot),
         input: { ...captureWorkMetadata(current.snapshot), scope: current.snapshot.scope,
+          evidenceEntries: sharedSourceEvidence(inputs.map(({ candidateId }) =>
+            candidates.find(candidate => candidate.id === candidateId)!), current.snapshot),
           candidates: inputs.map(({ candidateId, review }) => ({ candidateId,
           destinationProjectId:
             record(current.candidateOutcomes[candidateId])?.destinationProjectId,
@@ -3575,8 +3586,8 @@ export class CaptureService {
           automaticIds: review.automaticIds?.filter((id) =>
             review.memories!.some((memory) => memory.id === id)),
           ...(review.previous ? { previous: review.previous } : {}),
-          evidenceEntries: sourceEvidence(candidates.find((c) => c.id === candidateId)!,
-            current.snapshot) })) },
+          sourceEntryIds: candidates.find(candidate => candidate.id === candidateId)!
+            .sourceEntryIds })) },
       });
     } finally {
       if (rejections.length) current = await this.queue.checkpoint(current.id,

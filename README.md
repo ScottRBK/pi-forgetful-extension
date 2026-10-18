@@ -417,6 +417,10 @@ replacement, or preserves an uncertain conflict for the originating session. Que
 per-candidate outcomes so partial writes are retained while the model corrects rejected fields
 using the actual Forgetful error.
 
+Batched overlap checks and link reviews supply each cited source record once in a shared evidence
+list. Each candidate keeps its own `sourceEntryIds`, so shared storage does not mix their evidence.
+Full source records and the private context limit remain unchanged.
+
 The extraction model can investigate a missing fact with the read-only `inspect_source` tool:
 repository text files and HTTP(S) URLs, without shell execution, editing or uploads. Actual reads
 supply provenance and durable evidence IDs. A commit is reported only for matching committed bytes;
