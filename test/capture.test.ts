@@ -223,7 +223,7 @@ test("large rejected candidate keeps reason, evidence and bounded raw details", 
   const rejected = lines.map((line) => JSON.parse(line))
     .find((entry) => entry.event === "capture.candidate_rejected");
   assert.equal(rejected.data?.jobId, queued.jobId);
-  assert.equal(rejected.data.reason, "assistant messages are not eligible evidence");
+  assert.match(rejected.data.reason, /"assistant-1": assistant messages are not eligible evidence/);
   assert.equal(rejected.data.entries[0].role, "assistant");
   assert.equal(rejected.data.candidate.truncated, true);
   assert.match(rejected.data.candidate.preview, /Oversized title/);
@@ -645,8 +645,8 @@ test("capture candidate submission retries through the durable checkpoint flow",
   assert.match(diagnosticJob.submissionRejections?.[0] ?? "", /must be object/);
 });
 
-test("capture retries when every submitted candidate has invalid evidence", async (t) => {
-  // Arrange: the first tool call cites only ineligible evidence, then corrects both fields.
+test("capture returns actionable feedback for every invalid evidence citation", async (t) => {
+  // Arrange: visible custom messages remain context, not eligible evidence.
   const directory = await mkdtemp(join(tmpdir(), "pi-forgetful-capture-evidence-retry-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const queue = new DurableQueueStore({ directory, instanceId: "instance-a" });
@@ -678,7 +678,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
                 context: "The user adopted the database decision.",
                 keywords: ["sqlite"],
                 tags: ["decision"],
-                sourceEntryIds: ["unknown-entry"],
+                sourceEntryIds: ["unknown-entry", "background-result-1", "unknown-entry-2"],
                 evidenceType: "verifiedToolChange",
               },
               {
@@ -688,7 +688,7 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
                 context: "The assistant reported completion.",
                 keywords: ["migration"],
                 tags: ["change"],
-                sourceEntryIds: ["assistant-1"],
+                sourceEntryIds: ["assistant-1", "memory-result-1", "user-1"],
                 evidenceType: "userDecision",
               },
             ],
@@ -724,19 +724,36 @@ test("capture retries when every submitted candidate has invalid evidence", asyn
     instanceId: "instance-a",
   });
 
-  // Act.
-  await service.enqueue(snapshot());
+  const input = snapshot();
+  input.conversation = [
+    ...input.entries,
+    { type: "custom_message", customType: "agentshell-job-result",
+      id: "background-result-1", content: "Background result; do not echo this text in errors." },
+    { type: "message", id: "memory-result-1", message: { role: "toolResult",
+      toolName: "forgetful_recall_wait", content: "Recalled facts are not capture evidence." } },
+  ];
+
+  // Act: reject the first submission and accept a correction in the same private task.
+  await service.enqueue(input);
   const result = await service.checkpoint();
 
-  // Assert: all-invalid gets correction feedback; a valid sibling submission still writes.
+  // Assert: feedback identifies every bad citation without promoting contextual messages.
   assert.deepEqual(result.errors, []);
   assert.equal(captureAttempts, 2);
   const feedback = contexts[1]?.messages.at(-1) as Record<string, any> | undefined;
   assert.equal(feedback?.role, "toolResult");
   assert.equal(feedback?.toolCallId, "capture-invalid-evidence");
   assert.equal(feedback?.isError, true);
-  assert.match(feedback?.content?.[0]?.text ?? "", /references unknown evidence/i);
-  assert.match(feedback?.content?.[0]?.text ?? "", /assistant messages are not eligible/i);
+  const error = feedback?.content?.[0]?.text ?? "";
+  assert.match(error, /candidate "wrong-tool-kind"/);
+  assert.match(error, /"unknown-entry": sourceEntryIds references unknown evidence/);
+  assert.match(error, /"unknown-entry-2": sourceEntryIds references unknown evidence/);
+  assert.match(error, /"background-result-1": custom messages are context, not eligible evidence/);
+  assert.match(error, /candidate "assistant-evidence"/);
+  assert.match(error, /"assistant-1": assistant messages are not eligible evidence/);
+  assert.match(error, /"memory-result-1": memory operations are not eligible evidence/);
+  assert.match(error, /Cite only IDs listed in eligibleEvidence or returned by inspect_source/);
+  assert.doesNotMatch(error, /"user-1"|Background result; do not echo/);
   assert.equal(client.created.length, 1);
   const diagnostics = await service.diagnostics();
   assert.equal(diagnostics.jobs[0]?.status, "complete");
@@ -2190,7 +2207,8 @@ test("invalid candidates are recorded as skipped while valid candidates continue
   const rejected = diagnostics.jobs[0]?.candidates.find(
     (candidate) => candidate.id === "candidate-assistant-only",
   );
-  assert.equal(rejected?.reason, "assistant messages are not eligible evidence");
+  assert.match(rejected?.reason ?? "",
+    /"assistant-1": assistant messages are not eligible evidence/);
   assert.equal(
     (
       job?.candidateOutcomes["candidate-valid-after-invalid"] as {
@@ -2259,7 +2277,8 @@ test("capture diagnostics distinguish evidence errors, project warnings and serv
     diagnostics.jobs[0]?.candidates.filter(({ reason }) => reason !== undefined)
       .map(({ id, reason }) => [id, reason]) ?? [],
   );
-  assert.equal(reasons["unknown-evidence"], "sourceEntryIds references unknown evidence");
+  assert.match(reasons["unknown-evidence"] ?? "",
+    /"unknown-entry": sourceEntryIds references unknown evidence/);
   assert.ok(JSON.stringify(model.requests).includes("No existing capture project"));
   assert.equal(diagnostics.jobs[0]?.lastError, 'HTTP 422: {"detail":"title field required"}');
   assert.equal(client.attempted.length, 3);

@@ -683,15 +683,31 @@ function captureResource(raw: unknown, kind: string, index: number): Record<stri
 
 function captureEvidenceError(ids: string[], snapshot: CaptureSnapshot): string | undefined {
   const sources = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
-  for (const id of ids) {
+  const conversation = snapshot.sourceConversation ?? snapshot.conversation ?? [];
+  const errors: string[] = [];
+  for (const id of new Set(ids)) {
     const entry = sources.get(id);
-    if (!entry) return "sourceEntryIds references unknown evidence";
-    if (entry.role === "assistant")
-      return "assistant messages are not eligible evidence";
-    if (isMemoryOperation(entry.toolName ?? ""))
-      return "memory operations are not eligible evidence";
+    // Context explains exclusions but never authorizes a citation missing from saved evidence.
+    const original = entry ? undefined
+      : record(conversation.find((value) => record(value)?.id === id));
+    const message = entry ?? record(original?.message);
+    let reason: string | undefined;
+    if (message?.role === "assistant") {
+      reason = "assistant messages are not eligible evidence";
+    } else if (isMemoryOperation(
+      stringValue(message?.toolName) ?? stringValue(original?.customType) ?? "",
+    )) {
+      reason = "memory operations are not eligible evidence";
+    } else if (!entry) {
+      reason = original?.type === "custom_message"
+        ? "custom messages are context, not eligible evidence"
+        : "sourceEntryIds references unknown evidence";
+    }
+    if (reason) errors.push(`${JSON.stringify(sanitizeText(id).slice(0, 200))}: ${reason}`);
   }
-  return undefined;
+  if (errors.length === 0) return undefined;
+  return `${errors.join("; ")}. ` +
+    "Cite only IDs listed in eligibleEvidence or returned by inspect_source.";
 }
 
 function eligibleCandidate(
@@ -785,7 +801,8 @@ function captureCandidateSubmission(
     validate(input: unknown): unknown {
       const extraction = parseCandidates(input, snapshot);
       if (extraction.skipped.length > 0) {
-        const reasons = [...new Set(extraction.skipped.map((item) => item.reason))];
+        const reasons = extraction.skipped.map((item) =>
+          `candidate ${JSON.stringify(sanitizeText(item.id).slice(0, 200))}: ${item.reason}`);
         throw new InvalidCaptureOutput(
           `submitted capture candidates were invalid: ${reasons.join("; ")}`,
         );

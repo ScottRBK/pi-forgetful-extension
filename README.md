@@ -408,6 +408,9 @@ prevents replay.
 Skipped work stays visible but cannot be cited as capture evidence. A live worker extracts
 candidates through the private `submit_capture_candidates` tool, without a fixed candidate cap.
 It validates eligible evidence IDs and resolves an existing destination, then checks overlap there.
+Invalid citation feedback names each rejected candidate and source ID, explains the exclusion, and
+points to eligible evidence or source-inspection IDs. Visible custom messages remain context only;
+this feedback does not make them eligible evidence or increase the three-submission allowance.
 If no project matches, it skips the candidate and warns that a project needs creating. The overlap
 model submits `create`, `skip`, `merge`, `supersede`, `retire`, or `escalate` through the private
 `submit_capture_decision` tool. Extraction can also submit maintenance-only work with a search
