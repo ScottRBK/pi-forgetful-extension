@@ -6,7 +6,7 @@ Members and connections within each view are uncapped.
 Parallel arrows are summarized.
 Cross-diagram relationships are retained in the complete relationship list.
 
-Included: 230 boxes. Calls without in-scope endpoints: 0.
+Included: 243 boxes. Calls without in-scope endpoints: 0.
 
 ## Test filtering
 
@@ -14,34 +14,49 @@ Mode: exclude.
 Saved detector version: 2.
 Test paths: `scripts/forgetful-test-server.py`, `test`.
 Keep paths: none.
-Calls removed by test filtering: 489. Type relationships removed: 164.
+Calls removed by test filtering: 649. Type relationships removed: 191.
 
 - `scripts/forgetful-test-server.py`: 4 source occurrences (test-path).
 - `test/async-recall-pi-integration.test.ts`: 16 source occurrences (test-path).
 - `test/background-startup-pi.test.ts`: 3 source occurrences (test-path).
 - `test/background-ui-pi.test.ts`: 13 source occurrences (test-path).
+- `test/capture-backlog-history-pi.test.ts`: 13 source occurrences (test-path).
 - `test/capture-batches.test.ts`: 8 source occurrences (test-path).
-- `test/capture-cancellation.test.ts`: 7 source occurrences (test-path).
+- `test/capture-cancellation.test.ts`: 8 source occurrences (test-path).
 - `test/capture-cleanup-pi.test.ts`: 6 source occurrences (test-path).
 - `test/capture-context-pi.test.ts`: 2 source occurrences (test-path).
 - `test/capture-context.test.ts`: 2 source occurrences (test-path).
 - `test/capture-drain-pi.test.ts`: 6 source occurrences (test-path).
+- `test/capture-error-diagnostic.test.ts`: 2 source occurrences (test-path).
 - `test/capture-execution.test.ts`: 4 source occurrences (test-path).
 - `test/capture-gate-pi.test.ts`: 3 source occurrences (test-path).
 - `test/capture-history-model.test.ts`: 4 source occurrences (test-path).
 - `test/capture-history-restart-pi.test.ts`: 7 source occurrences (test-path).
 - `test/capture-history.test.ts`: 4 source occurrences (test-path).
+- `test/capture-immediate-feedback.test.ts`: 6 source occurrences (test-path).
+- `test/capture-integration-validation.test.ts`: 3 source occurrences (test-path).
+- `test/capture-link-error-feedback.test.ts`: 7 source occurrences (test-path).
+- `test/capture-link-presence.test.ts`: 2 source occurrences (test-path).
 - `test/capture-links.test.ts`: 4 source occurrences (test-path).
+- `test/capture-maintenance-pi.test.ts`: 3 source occurrences (test-path).
+- `test/capture-maintenance.test.ts`: 5 source occurrences (test-path).
+- `test/capture-overlap-context.test.ts`: 3 source occurrences (test-path).
 - `test/capture-pause.test.ts`: 2 source occurrences (test-path).
+- `test/capture-project-warning-pi.test.ts`: 2 source occurrences (test-path).
 - `test/capture-resolution-context.test.ts`: 2 source occurrences (test-path).
 - `test/capture-resolution-execution.test.ts`: 3 source occurrences (test-path).
+- `test/capture-review-recovery.test.ts`: 12 source occurrences (test-path).
 - `test/capture-shutdown-pi.test.ts`: 3 source occurrences (test-path).
-- `test/capture-source-conflict-pi.test.ts`: 4 source occurrences (test-path).
+- `test/capture-source-conflict-pi.test.ts`: 5 source occurrences (test-path).
+- `test/capture-source-feedback.test.ts`: 2 source occurrences (test-path).
 - `test/capture-structured-arguments.test.ts`: 18 source occurrences (test-path).
 - `test/capture-trust-pi.test.ts`: 3 source occurrences (test-path).
-- `test/capture.test.ts`: 40 source occurrences (test-path).
+- `test/capture-validation-changes.test.ts`: 26 source occurrences (test-path).
+- `test/capture.test.ts`: 43 source occurrences (test-path).
 - `test/config.test.ts`: 2 source occurrences (test-path).
-- `test/extension.test.ts`: 60 source occurrences (test-path).
+- `test/conflict-handoff-pi.test.ts`: 5 source occurrences (test-path).
+- `test/extension-surface-pi.test.ts`: 2 source occurrences (test-path).
+- `test/extension.test.ts`: 58 source occurrences (test-path).
 - `test/fixtures/background-ui-provider.ts`: 2 source occurrences (test-path).
 - `test/fixtures/live-context-provider.ts`: 9 source occurrences (test-path).
 - `test/fixtures/memory-quality.ts`: 13 source occurrences (test-path).
@@ -51,10 +66,10 @@ Calls removed by test filtering: 489. Type relationships removed: 164.
 - `test/http-validation.test.ts`: 2 source occurrences (test-path).
 - `test/knowledge-capture.test.ts`: 21 source occurrences (test-path).
 - `test/knowledge-execution.test.ts`: 4 source occurrences (test-path).
-- `test/knowledge-exploration-errors.test.ts`: 5 source occurrences (test-path).
-- `test/knowledge-pi-integration.test.ts`: 5 source occurrences (test-path).
-- `test/knowledge-tool-execution.test.ts`: 3 source occurrences (test-path).
+- `test/knowledge-exploration-errors.test.ts`: 6 source occurrences (test-path).
+- `test/knowledge-tool-execution.test.ts`: 4 source occurrences (test-path).
 - `test/knowledge-tools.test.ts`: 12 source occurrences (test-path).
+- `test/live-capture-maintenance.test.ts`: 2 source occurrences (test-path).
 - `test/live-capture-submission.test.ts`: 18 source occurrences (test-path).
 - `test/live-connected-memory-quality.test.ts`: 2 source occurrences (test-path).
 - `test/live-context-quality.test.ts`: 16 source occurrences (test-path).
@@ -65,19 +80,29 @@ Calls removed by test filtering: 489. Type relationships removed: 164.
 - `test/model-context.test.ts`: 21 source occurrences (test-path).
 - `test/model-read-tools.test.ts`: 8 source occurrences (test-path).
 - `test/model.test.ts`: 8 source occurrences (test-path).
-- `test/pi-integration.test.ts`: 10 source occurrences (test-path).
+- `test/pi-integration.test.ts`: 8 source occurrences (test-path).
 - `test/pi-tool-session.ts`: 6 source occurrences (test-path).
 - `test/provider-context.ts`: 4 source occurrences (test-path).
+- `test/queue-history-refresh.test.ts`: 4 source occurrences (test-path).
+- `test/queue-summary-paths.test.ts`: 9 source occurrences (test-path).
 - `test/queue.test.ts`: 5 source occurrences (test-path).
 - `test/real-forgetful.ts`: 2 source occurrences (test-path).
 - `test/recall-concurrency-pi.test.ts`: 4 source occurrences (test-path).
 - `test/recall-concurrency.test.ts`: 6 source occurrences (test-path).
+- `test/recall-enrichment-errors.test.ts`: 4 source occurrences (test-path).
 - `test/recall-persistence-native-pi.test.ts`: 21 source occurrences (test-path).
 - `test/recall-persistence-pi.test.ts`: 21 source occurrences (test-path).
 - `test/recall-plan.test.ts`: 3 source occurrences (test-path).
 - `test/recall.test.ts`: 35 source occurrences (test-path).
+- `test/repository-validation.test.ts`: 2 source occurrences (test-path).
+- `test/server-owned-validation.test.ts`: 2 source occurrences (test-path).
+- `test/setup-pi.test.ts`: 2 source occurrences (test-path).
 - `test/snapshot.test.ts`: 3 source occurrences (test-path).
 - `test/source-inspection.test.ts`: 3 source occurrences (test-path).
+- `test/validation-links.test.ts`: 18 source occurrences (test-path).
+- `test/validation-recall.test.ts`: 10 source occurrences (test-path).
+- `test/validation-resource-identity.test.ts`: 2 source occurrences (test-path).
+- `test/validation-writer.test.ts`: 4 source occurrences (test-path).
 
 ## Diagram 1
 
@@ -111,46 +136,64 @@ classDiagram
         -refresh() void
         close() void
     }
-    class c0005["CaptureLinkReview"] {
+    class c0005["CaptureCorrectionCycle"] {
         <<interface>>
-        status: Type2
+        cycle: number
+        attempts: number
+        phase: Type2
+        failureKind: Type3
+        failure: unknown
+    }
+    class c0006["CaptureSelectionError"] {
+        <<class>>
+    }
+    class c0007["src/capture-feedback.ts"] {
+        <<module>>
+        correctableCaptureError(error: unknown) boolean
+        initialCorrectionCycle() CaptureCorrectionCycle
+        captureFailureReport(failure: unknown) Type4
+    }
+    class c0008["CaptureLinkReview"] {
+        <<interface>>
+        status: Type5
         memory: Memory
         memories: Memory[]
         automaticIds: number[]
-        unreviewed: Type3
+        unreviewed: Type6
         decisions: LinkDecision[]
         verifiedIds: number[]
         reason: string
         previous: PreviousConnections
-        resources: Type4
+        resources: Type7
         preservation: PreservationDecision
         preservationVerified: boolean
         executionResults: ConnectionResult[]
         previousResults: ConnectionResult[]
-        failures: Type5
+        failures: Type8
     }
-    class c0006["ConnectionResult"] {
+    class c0009["ConnectionResult"] {
         <<interface>>
-        operation: Type6
+        operation: Type9
         targetId: number
-        status: Type7
+        status: Type10
         error: string
+        httpStatus: number
     }
-    class c0007["LinkDecision"] {
+    class c0010["LinkDecision"] {
         <<interface>>
         memoryId: number
-        action: Type8
+        action: Type11
         reason: string
     }
-    class c0008["PreservationDecision"] {
+    class c0011["PreservationDecision"] {
         <<interface>>
-        status: Type9
+        status: Type12
         documentIds: number[]
         codeArtifactIds: number[]
         entityIds: number[]
         reason: string
     }
-    class c0009["PreviousConnections"] {
+    class c0012["PreviousConnections"] {
         <<interface>>
         memory: Memory
         documents: Document[]
@@ -159,66 +202,78 @@ classDiagram
         entityIds: number[]
         complete: boolean
     }
-    class c0010["src/capture-links.ts"] {
+    class c0013["src/capture-links.ts"] {
         <<module>>
         wantsEdge(decision: LinkDecision) boolean
         exclusiveMemory(memory: Memory, destination: number) boolean
-        readSelectedMemory(client: ForgetfulClient, id: number, unreviewed: Type11) Type10
+        readSelectedMemory(client: ForgetfulClient, id: number, unreviewed: Type14) Type13
         prepareLinkReview(Signature1)
         validateLinkDecisions(Signature2)
-        validatePreservation(preservation: Type15, review: CaptureLinkReview) void
-        validateLinkReviews(value: unknown, inputs: Type17) Type16
+        validateLinkReviews(value: unknown, inputs: Type18) Type17
         operationError(error: unknown) string
         authorizedMemory(Signature3)
         executeConnection(Signature4)
         applyLinkReview(Signature5)
-        finishLinkExecution(initial: CaptureLinkReview, save: Type20) Promise~CaptureLinkReview~
+        finishLinkExecution(initial: CaptureLinkReview, save: Type21) Promise~CaptureLinkReview~
         readAttachmentRecords(Signature6)
         preparePreviousConnections(Signature7)
         preserveConnections(Signature8)
     }
-    class c0011["CandidateDestination"] {
+    class c0014["MergeAccess"] {
         <<interface>>
-        projectId: number
-        projectName: string
-        rationale: string
+        destination: number
+        scope: Scope
+        beforeRead: Type22
     }
-    class c0012["CandidateExtraction"] {
+    class c0015["MergeConnections"] {
+        <<interface>>
+        memoryIds: number[]
+        entityIds: number[]
+        documentIds: number[]
+        codeArtifactIds: number[]
+        fileIds: number[]
+        receipts: Type25
+    }
+    class c0016["MergeExecution"] {
+        <<interface>>
+        save: Type22
+        assertCanWrite: Type23
+    }
+    class c0017["MergeWriteUncertain"] {
+        <<class>>
+    }
+    class c0018["src/capture-merge.ts"] {
+        <<module>>
+        union(...lists: Type26) number[]
+        collectMergeConnections(Signature9)
+        requireResourceScope(Signature10)
+        checkMergeEntity(client: ForgetfulClient, id: number, access: MergeAccess) Promise~void~
+        checkMergeAttachments(Signature11)
+        preflightMergeConnections(Signature12)
+        preserveMergeConnections(Signature13)
+    }
+    class c0019["CandidateExtraction"] {
         <<interface>>
         candidates: CaptureCandidate[]
-        skipped: Type23
+        skipped: Type29
     }
-    class c0013["CandidateFields"] {
-        <<interface>>
-        title: string
-        content: string
-        context: string
-        sourceEntryIds: string[]
-        kind: Type24
-    }
-    class c0014["CandidateLists"] {
-        <<interface>>
-        keywords: string[]
-        tags: string[]
-        sourceFiles: string[]
-    }
-    class c0015["CandidateValidation"] {
+    class c0020["CandidateValidation"] {
         <<type_alias>>
-        alias: Type25
+        alias: Type30
         valid: true
         value: T
         reason: string
         valid: false
     }
-    class c0016["CaptureAction"] {
+    class c0021["CaptureAction"] {
         <<type_alias>>
-        alias: Type26
+        alias: Type31
     }
-    class c0017["CaptureActivityPhase"] {
+    class c0022["CaptureActivityPhase"] {
         <<type_alias>>
-        alias: Type27
+        alias: Type32
     }
-    class c0018["CaptureAdvanceInput"] {
+    class c0023["CaptureAdvanceInput"] {
         <<interface>>
         sessionId: string
         branchId: string
@@ -226,21 +281,22 @@ classDiagram
         finalEntryId: string
         snapshotId: string
     }
-    class c0019["CaptureBatchInput"] {
+    class c0024["CaptureBatchInput"] {
         <<interface>>
         candidate: CaptureCandidate
         destinationProjectId: number
         overlaps: Memory[]
-        evidenceEntries: EvidenceEntry[]
         neighborhood: CaptureNeighborhood
     }
-    class c0020["CaptureBranch"] {
+    class c0025["CaptureBranch"] {
         <<interface>>
         sessionId: string
         branchId: string
     }
-    class c0021["CaptureCandidate"] {
+    class c0026["CaptureCandidate"] {
         <<interface>>
+        kind: Type33
+        searchDescription: string
         id: string
         title: string
         content: string
@@ -249,7 +305,7 @@ classDiagram
         tags: string[]
         importance: number
         sourceEntryIds: string[]
-        evidenceType: Type28
+        evidenceType: Type34
         destinationProjectId: number
         destinationProjectName: string
         destinationRationale: string
@@ -262,27 +318,27 @@ classDiagram
         codeArtifacts: CaptureCodeArtifactResource[]
         relationships: CaptureRelationshipResource[]
     }
-    class c0022["CaptureCheckpointOptions"] {
+    class c0027["CaptureCheckpointOptions"] {
         <<interface>>
         sessionId: string
         branchId: string
         excludeBranches: CaptureBranch[]
     }
-    class c0023["CaptureCheckpointResult"] {
+    class c0028["CaptureCheckpointResult"] {
         <<interface>>
         processed: number
         processedJobIds: string[]
-        discardedJobs: Type29
+        discardedJobs: Type35
         paused: boolean
         errors: string[]
         deferredBranches: CaptureBranch[]
-        continuation: Type30
+        continuation: Type36
     }
-    class c0024["CaptureCodeArtifactResource"] {
+    class c0029["CaptureCodeArtifactResource"] {
         <<interface>>
         sourceEntryIds: string[]
     }
-    class c0025["CaptureDecision"] {
+    class c0030["CaptureDecision"] {
         <<interface>>
         action: CaptureAction
         reason: string
@@ -299,7 +355,7 @@ classDiagram
         enrich: boolean
         entityMemoryKeys: string[]
     }
-    class c0026["CaptureDiagnosticCandidate"] {
+    class c0031["CaptureDiagnosticCandidate"] {
         <<interface>>
         id: string
         sourceEntryIds: string[]
@@ -311,13 +367,14 @@ classDiagram
         reason: string
         memoryId: number
         replacementId: number
+        retiredCount: number
         conflictId: string
-        linkReview: Type31
+        linkReview: Type37
     }
-    class c0027["CaptureDiagnosticConflict"] {
+    class c0032["CaptureDiagnosticConflict"] {
         <<interface>>
         id: string
-        status: Type32
+        status: Type38
         candidateId: string
         destinationProjectId: number
         sourceEntryIds: string[]
@@ -325,7 +382,7 @@ classDiagram
         reason: string
         replacementId: number
     }
-    class c0028["CaptureDiagnosticJob"] {
+    class c0033["CaptureDiagnosticJob"] {
         <<interface>>
         id: string
         status: QueueJobStatus
@@ -337,26 +394,32 @@ classDiagram
         submissionRejections: string[]
         lastError: string
     }
-    class c0029["CaptureDiagnostics"] {
+    class c0034["CaptureDiagnostics"] {
         <<interface>>
         jobs: CaptureDiagnosticJob[]
         conflicts: CaptureDiagnosticConflict[]
     }
-    class c0030["CaptureDocumentResource"] {
+    class c0035["CaptureDocumentResource"] {
         <<interface>>
         sourceEntryIds: string[]
     }
-    class c0031["CaptureEnqueueResult"] {
+    class c0036["CaptureEnqueueResult"] {
         <<interface>>
         queued: boolean
         jobId: string
         reason: string
     }
-    class c0032["CaptureEntityResource"] {
+    class c0037["CaptureEntityResource"] {
         <<interface>>
         sourceEntryIds: string[]
     }
-    class c0033["CaptureNeighborhood"] {
+    class c0038["CaptureMergePlan"] {
+        <<interface>>
+        candidate: CaptureCandidate
+        memories: Memory[]
+        connections: MergeConnections
+    }
+    class c0039["CaptureNeighborhood"] {
         <<interface>>
         entities: Entity[]
         documents: Document[]
@@ -364,162 +427,185 @@ classDiagram
         relationships: EntityRelationship[]
         truncated: boolean
     }
-    class c0034["CaptureOperation"] {
+    class c0040["CaptureOperation"] {
         <<interface>>
         jobId: string
         conflictId: string
         uncertainWrite: CaptureUncertainWrite
         supersession: SupersessionReceipt
+        modelFailure: Type39
     }
-    class c0035["CapturePause"] {
+    class c0041["CapturePause"] {
         <<class>>
         constructor(reason: string) unknown
     }
-    class c0036["CapturePendingConflict"] {
+    class c0042["CapturePendingConflict"] {
         <<interface>>
-        verifiedOrigin: Type33
+        verifiedOrigin: Type40
     }
-    class c0037["CaptureRelationshipResource"] {
+    class c0043["CaptureProgress"] {
+        <<class>>
+    }
+    class c0044["CaptureRelationshipResource"] {
         <<interface>>
         sourceEntryIds: string[]
     }
-    class c0038["CaptureResolveResult"] {
+    class c0045["CaptureResolveResult"] {
         <<interface>>
-        status: Type34
+        status: Type41
         conflict: PendingConflict
     }
-    class c0039["CaptureResourceReuse"] {
+    class c0046["CaptureResourceReuse"] {
         <<interface>>
-        entities: Type35
-        documents: Type35
-        codeArtifacts: Type35
-        relationships: Type35
+        entities: Type42
+        documents: Type42
+        codeArtifacts: Type42
+        relationships: Type42
     }
-    class c0040["CaptureService"] {
+    class c0047["CaptureService"] {
         <<class>>
         -queue: DurableQueueStore
         -client: ForgetfulClient
-        -readSavedMemory: Type36
+        -readSavedMemory: Type43
         -model: MemoryModelClient
         -identity: QueueIdentity
         -sessionId: string
         -branchId: string
         -policy: string
-        -isEnabled: Type37
-        -getMode: Type38
-        -canWriteNow: Type39
-        -canReadNow: Type39
-        -maxCandidates: number
+        -isEnabled: Type44
+        -getMode: Type45
+        -canWriteNow: Type46
+        -canReadNow: Type46
         -maxModelCalls: number
         -maxJobsPerCheckpoint: number
-        -now: Type40
+        -now: Type47
         -knowledgeWriter: KnowledgeWriter
         -logger: DiagnosticLogger
         -stopped: unknown
         -cancellation: unknown
         -interruptedModelJobs: unknown
         -operations: unknown
-        -onActivity: Type41
+        -onActivity: Type48
         -activities: unknown
         -activityPhase: CaptureActivityPhase
         constructor(options: CaptureServiceOptions) unknown
         -readSignal(signal: AbortSignal) AbortSignal
-        -activity(phase: CaptureActivityPhase, operation: Type42) Promise~T~
+        -activity(phase: CaptureActivityPhase, operation: Type49) Promise~T~
         -publishActivity() void
-        -read(operation: Type43, signal: AbortSignal, phase: Type44) Promise~T~
-        -mutate(operation: Type43, signal: AbortSignal) Promise~T~
+        -read(operation: Type50, signal: AbortSignal, phase: Type51) Promise~T~
+        -mutate(operation: Type50, signal: AbortSignal) Promise~T~
         -cancellableClient(client: ForgetfulClient) ForgetfulClient
         -cancellableKnowledge(client: KnowledgeClient) KnowledgeClient
         -correlation(job: QueueJob, candidateId: string) unknown
-        -emit(level: Type45, event: string, data: Type46) void
+        -emit(level: Type52, event: string, data: Type53) void
         -enabled(mode: CaptureMode) Promise~boolean~
         -ensureModelCallAllowed(job: QueueJob) Promise~void~
         -assertWriteAllowedNow() void
         -ensureWriteAllowed(jobMode: CaptureMode) Promise~void~
-        -policyFor(snapshot: CaptureSnapshot, purpose: Type47) string
+        -policyFor(snapshot: CaptureSnapshot, purpose: Type54) string
         enqueue(snapshot: CaptureSnapshot) Promise~CaptureEnqueueResult~
         -enqueueSnapshot(snapshot: CaptureSnapshot) Promise~CaptureEnqueueResult~
-        -resolveDestination(candidate: CaptureCandidate, context: WorkContext) Type48
-        -addConflict(Signature9)
-        -checkpointOutcome(Signature10)
-        -destinationProjects(Signature11)
-        -validateDecisionResources(Signature12)
-        -validateDecision(Signature13)
-        -createMemory(Signature14)
-        -writeKnowledge(Signature15)
-        -applySupersession(Signature16)
+        -resolveDestination(candidate: CaptureCandidate, context: WorkContext) Type55
+        -addConflict(Signature14)
+        -checkpointOutcome(Signature15)
+        -destinationProjects(Signature16)
+        -validateDecision(Signature17)
+        -createMemory(Signature18)
+        -writeKnowledge(Signature19)
+        -supersessionAlreadyApplied(Signature20)
+        -applySupersession(Signature21)
         -recordSupersession(receipt: SupersessionReceipt) Promise~void~
-        -finishSupersession(Signature17)
-        -processReplacementCheckpoint(Signature18)
-        -processKnowledgeCheckpoint(Signature19)
-        -prepareDestination(job: QueueJob, candidate: CaptureCandidate) Type52
-        -loadOverlaps(Signature20)
-        -neighborhoodEntity(job: QueueJob, id: number, destination: number) Type55
-        -neighborhoodEntities(Signature21)
-        -neighborhoodRelationships(job: QueueJob, entities: Entity[]) Type57
-        -existingNeighborhood(Signature22)
-        -validateEquivalentCandidate(Signature23)
+        -finishSupersession(Signature22)
+        -processReplacementCheckpoint(Signature23)
+        -processKnowledgeCheckpoint(Signature24)
+        -prepareDestination(job: QueueJob, candidate: CaptureCandidate) Type59
+        -loadOverlaps(Signature25)
+        -neighborhoodEntity(job: QueueJob, id: number, destination: number) Type62
+        -neighborhoodMatches(job: QueueJob, input: unknown) Promise~Entity[]~
+        -neighborhoodEntities(Signature26)
+        -neighborhoodRelationships(job: QueueJob, entities: Entity[]) Type64
+        -existingNeighborhood(Signature27)
+        -prepareOverlapBatch(job: QueueJob, candidates: CaptureCandidate[]) Type65
         -decideOverlapBatch(job: QueueJob, candidates: CaptureCandidate[]) Promise~QueueJob~
-        -decideOverlap(Signature24)
-        -recordEscalation(Signature25)
-        -supersedeCandidate(Signature26)
-        -equivalentMemory(Signature27)
-        -applyDecision(Signature28)
-        -processCandidate(Signature29)
+        -decideOverlap(Signature28)
+        -recordEscalation(Signature29)
+        -supersedeCandidate(Signature30)
+        -readMaintenanceTargets(Signature31)
+        -confirmedRetirement(id: number) boolean
+        -preflightRetirement(Signature32)
+        -composeMerge(Signature33)
+        -verifyRequestedMerge(Signature34)
+        -finishMerge(Signature35)
+        -mergeCandidate(Signature36)
+        -retireCandidate(Signature37)
+        -equivalentMemory(Signature38)
+        -skipCandidate(Signature39)
+        -applyDecision(Signature40)
+        -processCandidate(Signature41)
+        -evidenceReadTool(job: QueueJob) ModelReadTool
         -sourceInspectionTool(job: QueueJob) ModelReadTool
-        -loadCandidates(job: QueueJob) Type59
+        -loadCandidates(job: QueueJob) Type68
         -reviewExecutionFailure(job: QueueJob, candidate: CaptureCandidate) Promise~QueueJob~
-        -recordCandidateFailure(Signature30)
-        -processCandidates(Signature31)
-        -refreshLinkReview(Signature32)
-        -prepareLinkReviews(job: QueueJob, candidates: CaptureCandidate[]) Type62
-        -planLinkReviews(Signature33)
+        -correctedCaptureOutcome(Signature42)
+        -isModelFailure(error: unknown) boolean
+        -saveCorrectableFailure(Signature43)
+        -recordCandidateFailure(Signature44)
+        -candidateUncertainty(outcome: Type61, error: unknown) Type72
+        -connectionUncertainty(outcome: Type61) Type72
+        -pauseCandidate(Signature45)
+        -correctCandidateFailures(Signature46)
+        -processCandidates(Signature47)
+        -processOrderedCandidates(Signature48)
+        -refreshLinkReview(Signature49)
+        -migrateLegacyLinkReview(Signature50)
+        -prepareLinkReviews(job: QueueJob, candidates: CaptureCandidate[]) Type75
+        -planLinkReviews(Signature51)
         -executeLinkReview(job: QueueJob, candidate: CaptureCandidate) Promise~QueueJob~
+        -recordLinkReviewFailure(current: QueueJob, failure: Type76) Promise~void~
+        -previousSupersessionCompleted(Signature52)
+        -finishReviewedSupersession(Signature53)
+        -executeLinkReviews(job: QueueJob, candidates: CaptureCandidate[]) Type77
         -reviewLinks(job: QueueJob, candidates: CaptureCandidate[]) Promise~QueueJob~
-        -processJob(job: QueueJob, result: CaptureCheckpointResult) Type63
-        -runBranchWorker(Signature34)
-        -processBranchJob(job: QueueJob, result: CaptureCheckpointResult) Type64
-        -recordBranchFailure(Signature35)
-        -checkpointBranch(Signature36)
-        -checkpointBranches(options: Type65) Promise~CaptureBranch[]~
-        -appendCheckpointResult(Signature37)
-        checkpoint(options: Type65) Promise~CaptureCheckpointResult~
+        -processJob(job: QueueJob, result: CaptureCheckpointResult) Type78
+        -runBranchWorker(Signature54)
+        -processBranchJob(job: QueueJob, result: CaptureCheckpointResult) Type79
+        -recordBranchFailure(Signature55)
+        -checkpointBranch(Signature56)
+        -checkpointBranches(options: Type80) Promise~CaptureBranch[]~
+        -appendCheckpointResult(Signature57)
+        checkpoint(options: Type80) Promise~CaptureCheckpointResult~
         processPending(options: CaptureCheckpointOptions) Promise~CaptureCheckpointResult~
-        diagnostics(options: Type66) Promise~CaptureDiagnostics~
-        pendingConflicts(options: Type67) Promise~CapturePendingConflict[]~
+        diagnostics(options: Type81) Promise~CaptureDiagnostics~
+        pendingConflicts(options: Type82) Promise~CapturePendingConflict[]~
         pendingConflicts(sessionId: string, branchId: string) Promise~CapturePendingConflict[]~
-        pendingConflicts(Signature38)
+        pendingConflicts(Signature58)
         -verifyConflictOrigin(conflict: PendingConflict) Promise~CapturePendingConflict~
         -ownedConflict(conflictId: string) Promise~PendingConflict~
-        -rejectConflict(Signature39)
-        -selectResolutionEvidence(Signature40)
-        -validateResolutionEvidence(Signature41)
+        -rejectConflict(Signature59)
+        -selectResolutionEvidence(Signature60)
+        -validateResolutionEvidence(Signature61)
         -resolutionTarget(conflict: PendingConflict) ConflictResolutionTarget
-        -markConflictResolved(Signature42)
+        -markConflictResolved(Signature62)
         -revisionResources(current: Memory, destination: number, previous: Memory) unknown
-        -validateRevisionText(item: Type69) void
-        -planConflictReplacement(Signature43)
-        -validateConflictMemory(Signature44)
-        -authorizeResolutionMemory(id: number, destination: number) Promise~void~
-        -authorizeResolutionAttachments(conflict: PendingConflict) Promise~void~
-        -updateResolutionReplacement(Signature45)
+        -planConflictReplacement(Signature63)
+        -updateResolutionReplacement(Signature64)
         -createResolutionReplacement(conflict: PendingConflict) Promise~number~
-        -linkResolutionEntity(Signature46)
+        -linkResolutionEntity(Signature65)
         -executeResolutionLinks(conflict: PendingConflict, replacementId: number) Promise~void~
-        -applyConflictResolution(Signature47)
+        -applyConflictResolution(Signature66)
         -failConflictResolution(conflictId: string, error: unknown) Promise~never~
-        -resolveConflictOwned(Signature48)
-        resolveConflict(Signature49)
+        -resolveConflictOwned(Signature67)
+        resolveConflict(Signature68)
         resolve(conflictId: string, input: ResolveConflictInput) Promise~CaptureResolveResult~
-        advance(input: Type71) Promise~void~
-        advanceWatermark(input: Type71) Promise~void~
-        watermark(context: Type72) unknown
+        advance(input: Type85) Promise~void~
+        advanceWatermark(input: Type85) Promise~void~
+        watermark(context: Type86) unknown
         stop(_sessionId: string, _branchId: string) void
     }
-    class c0041["CaptureServiceOptions"] {
+    class c0048["CaptureServiceOptions"] {
         <<interface>>
         logger: DiagnosticLogger
-        onActivity: Type73
+        onActivity: Type87
         queue: DurableQueueStore
         client: ForgetfulClient
         model: MemoryModelClient
@@ -529,142 +615,132 @@ classDiagram
         sessionId: string
         branchId: string
         policy: string
-        isEnabled: Type37
-        getMode: Type38
-        canWriteNow: Type39
-        canReadNow: Type39
+        isEnabled: Type44
+        getMode: Type45
+        canWriteNow: Type46
+        canReadNow: Type46
         maxCandidates: number
         maxModelCalls: number
         maxJobsPerCheckpoint: number
-        now: Type40
+        now: Type47
     }
-    class c0042["CaptureUncertainWrite"] {
+    class c0049["CaptureUncertainWrite"] {
         <<class>>
     }
-    class c0043["ConflictResolutionEvidence"] {
+    class c0050["ConflictResolutionEvidence"] {
         <<interface>>
         evidenceEntryIds: string[]
         selectedAdditionalEntries: EvidenceEntry[]
         reason: string
         additionalEvidence: string
     }
-    class c0044["ConflictResolutionTarget"] {
+    class c0051["ConflictResolutionTarget"] {
         <<interface>>
         oldMemory: Memory
         candidate: CaptureCandidate
         fakeJob: QueueJob
     }
-    class c0045["InvalidCaptureOutput"] {
+    class c0052["InvalidCaptureOutput"] {
         <<class>>
         constructor(reason: string) unknown
     }
-    class c0046["ResolveConflictInput"] {
+    class c0053["MissingCaptureDestination"] {
+        <<class>>
+        constructor(candidate: CaptureCandidate, projects: Type88) unknown
+        projects: Type88
+    }
+    class c0054["ResolveConflictInput"] {
         <<interface>>
-        action: Type74
+        action: Type89
         reason: string
         evidenceEntryIds: string[]
         additionalEvidence: string
         additionalEntries: EvidenceEntry[]
         conversation: readonly unknown[]
     }
-    class c0047["RichResources"] {
-        <<type_alias>>
-        alias: Type75
-    }
-    class c0048["src/capture.ts"] {
+    class c0055["src/capture.ts"] {
         <<module>>
+        reusableMergeComposition(plan: Type70, decision: Type90) boolean
         conflictResolutionEvidence(evidence: ConflictResolutionEvidence) unknown
         blockedSave(diagnostic: string) Error
         clone(value: T) T
-        record(value: unknown) Type54
-        stringValue(value: unknown, max: number) Type76
+        record(value: unknown) Type61
+        stringValue(value: unknown, max: number) Type91
         strings(value: unknown, max: unknown, itemMax: number) string[]
-        numberValue(value: unknown) Type77
-        projectId(value: unknown) Type77
+        projectId(value: unknown) Type57
         snapshotForPersistence(snapshot: CaptureSnapshot) CaptureSnapshot
-        captureConversation(snapshot: CaptureSnapshot) readonly unknown[]
         captureWorkMetadata(snapshot: CaptureSnapshot) unknown
         sourceEvidence(candidate: CaptureCandidate, snapshot: CaptureSnapshot) EvidenceEntry[]
-        evidenceType(value: unknown) Type24
+        sharedSourceEvidence(Signature69)
         invalidCandidate(reason: string) CandidateValidation~T~
         validCandidate(value: T) CandidateValidation~T~
-        candidateEvidenceIneligibilityReason(source: EvidenceEntry[], kind: Type24) Type76
-        candidateEvidenceIsEligible(source: EvidenceEntry[], kind: Type24) boolean
-        candidateFields(Signature50)
-        candidateLists(item: Type46) CandidateValidation~CandidateLists~
-        candidateDestination(item: Type46) Type78
-        resourceInput(item: Type46) Type46
-        resourceStrings(Signature51)
-        resourceString(value: unknown, label: string, max: number) CandidateValidation~string~
-        resourceEvidence(Signature52)
-        resourceKey(item: Type46, fallback: string) CandidateValidation~string~
-        entityClassification(input: Type46) Type79
-        entityResource(Signature53)
-        documentResource(Signature54)
-        codeArtifactResource(Signature55)
-        relationshipResource(Signature56)
-        parseResourceList(Signature57)
-        richResources(Signature58)
-        buildCandidate(Signature59)
-        eligibleCandidate(Signature60)
-        parseCandidates(Signature61)
+        captureResource(raw: unknown, kind: string, index: number) Type53
+        captureEvidenceError(ids: string[], snapshot: CaptureSnapshot) Type91
+        eligibleCandidate(Signature70)
+        parseCandidates(Signature71)
         boundedSubmissionRejections(value: readonly string[]) string[]
         appendSubmissionRejection(rejections: string[], reason: string) void
-        captureCandidateSubmission(Signature62)
-        decisionMemoryId(response: Type46) Type77
-        decisionTargetMemoryId(response: Type46) Type77
-        decisionMemoryIds(response: Type46) Type12
-        decisionEvidenceIds(response: Type46) Type88
-        decisionText(response: Type46, field: Type89) Type76
-        decisionPartial(response: Type46) boolean
-        applyEnrichmentDecision(response: Type46, decision: CaptureDecision) void
-        applyEquivalentCandidate(response: Type46, decision: CaptureDecision) void
+        captureCandidateSubmission(Signature72)
+        decisionMemoryId(response: Type53) Type57
+        decisionTargetMemoryId(response: Type53) Type57
+        decisionMemoryIds(response: Type53) Type94
+        decisionEvidenceIds(response: Type53) Type95
+        decisionText(response: Type53, field: Type96) Type91
+        decisionPartial(response: Type53) boolean
+        applyEnrichmentDecision(response: Type53, decision: CaptureDecision) void
+        applyEquivalentCandidate(response: Type53, decision: CaptureDecision) void
         parseDecision(value: unknown) CaptureDecision
         decisionConflictIds(decision: CaptureDecision) number[]
-        firstConflictId(decision: CaptureDecision) Type77
-        currentProjectId(context: WorkContext) Type77
-        memoryInput(Signature63)
-        captureKnowledgePlan(Signature64)
-        overlapCandidate(candidate: CaptureCandidate) Type46
+        firstConflictId(decision: CaptureDecision) Type57
+        currentProjectId(context: WorkContext) Type57
+        captureProvenance(candidate: CaptureCandidate, context: WorkContext) unknown
+        memoryInput(Signature73)
+        resourceInput(input: T, defaults: Type53) T
+        captureKnowledgePlan(Signature74)
+        overlapCandidate(candidate: CaptureCandidate) Type53
+        definitelyRejected(error: unknown) boolean
+        errorMessage(error: unknown) string
         scrubError(error: unknown) string
         isFinalOutcome(outcome: unknown) boolean
         trustedAdditionalEntries(value: unknown) EvidenceEntry[]
     }
-    class c0049["src/concurrency.ts"] {
+    class c0056["src/concurrency.ts"] {
         <<module>>
-        mapConcurrent(items: readonly T[], concurrency: number, operation: Type91) Promise~R[]~
+        mapConcurrent(items: readonly T[], concurrency: number, operation: Type98) Promise~R[]~
     }
-    class c0050["ForgetfulConfig"] {
+    class c0057["ForgetfulConfig"] {
         <<interface>>
         enabled: boolean
         captureMode: CaptureMode
         verbosity: Verbosity
         logging: FileLogLevel
+        logDirectory: string
         scope: Scope
         scopeSource: ScopeSource
         instance: ForgetfulInstanceConfig
+        recallDeadlineMs: number
         recallModelTimeoutMs: number
         recallConcurrency: number
         contextLimitTokens: number
         model: ModelSelection
         prompts: PromptOverlays
         warnings: string[]
-        paths: Type92
+        paths: Type99
     }
-    class c0051["ForgetfulInstanceConfig"] {
+    class c0058["ForgetfulInstanceConfig"] {
         <<interface>>
         baseUrl: string
         token: string
         tokenEnv: string
         timeoutMs: number
     }
-    class c0052["JsonReadResult"] {
+    class c0059["JsonReadResult"] {
         <<interface>>
         value: unknown
         exists: boolean
         malformed: boolean
     }
-    class c0053["LoadConfigOptions"] {
+    class c0060["LoadConfigOptions"] {
         <<interface>>
         agentDir: string
         cwd: string
@@ -675,16 +751,16 @@ classDiagram
         userPromptDir: string
         projectPromptDir: string
     }
-    class c0054["ModelSelection"] {
+    class c0061["ModelSelection"] {
         <<interface>>
         provider: string
         id: string
     }
-    class c0055["PersistedProjectSettings"] {
+    class c0062["PersistedProjectSettings"] {
         <<interface>>
         scope: unknown
     }
-    class c0056["PersistedUserSettings"] {
+    class c0063["PersistedUserSettings"] {
         <<interface>>
         base_url: unknown
         token: unknown
@@ -696,77 +772,79 @@ classDiagram
         debug: unknown
         verbosity: unknown
         logging: unknown
+        log_directory: unknown
         recall_model_timeout_ms: unknown
         recall_concurrency: unknown
         context_limit_tokens: unknown
         model: unknown
     }
-    class c0057["PromptName"] {
+    class c0064["PromptName"] {
         <<type_alias>>
-        alias: Type93
+        alias: Type100
     }
-    class c0058["PromptOverlays"] {
+    class c0065["PromptOverlays"] {
         <<interface>>
         classification: string
         recall: string
         capture: string
     }
-    class c0059["ScopeSource"] {
+    class c0066["ScopeSource"] {
         <<type_alias>>
-        alias: Type94
+        alias: Type101
     }
-    class c0060["Verbosity"] {
+    class c0067["Verbosity"] {
         <<type_alias>>
-        alias: Type95
+        alias: Type102
     }
-    class c0061["src/config.ts"] {
+    class c0068["src/config.ts"] {
         <<module>>
         isRecallConcurrency(value: unknown) value is number
         resolveRecallConcurrency(value: unknown, warnings: string[]) number
         resolveContextLimit(value: unknown, warnings: string[]) number
         isFileLogLevel(value: unknown) value is FileLogLevel
+        resolveLogDirectory(value: unknown, agentDir: string, warnings: string[]) string
         isVerbosity(value: unknown) value is Verbosity
         resolveVerbosity(user: PersistedUserSettings, warnings: string[]) Verbosity
-        isRecord(value: unknown) Type96
-        parseModel(value: unknown) Type97
+        isRecord(value: unknown) Type103
+        parseModel(value: unknown) Type104
         asBoolean(value: unknown, fallback: boolean) boolean
         asPositiveInteger(value: unknown, fallback: number) number
-        asString(value: unknown) Type76
+        asString(value: unknown) Type91
         readJson(path: string) Promise~JsonReadResult~
-        readPromptDirectory(Signature65)
-        mergePrompts(Signature66)
+        readPromptDirectory(Signature75)
+        mergePrompts(Signature76)
         resolveCaptureMode(value: unknown, warnings: string[]) CaptureMode
-        resolveScope(Signature67)
+        resolveScope(Signature77)
         defaultAgentDir() string
         userSettingsPath(agentDir: unknown) string
         projectSettingsPath(cwd: string) string
         loadForgetfulConfig(options: LoadConfigOptions) Promise~ForgetfulConfig~
         writeJson(path: string, value: unknown) Promise~void~
         writeProjectScope(cwd: string, scope: Scope) Promise~void~
-        updateUserSettings(path: string, update: Type99) Promise~void~
-        updateForgetfulConnection(path: string, connection: Type100) Promise~void~
-        modelToString(model: Type97) Type76
+        updateUserSettings(path: string, update: Type106) Promise~void~
+        updateForgetfulConnection(path: string, connection: Type107) Promise~void~
+        modelToString(model: Type104) Type91
     }
-    class c0062["CaptureHistorySummary"] {
+    class c0069["CaptureHistorySummary"] {
         <<interface>>
         throughEntryId: string
         text: string
     }
-    class c0063["CaptureMode"] {
+    class c0070["CaptureMode"] {
         <<type_alias>>
-        alias: Type101
+        alias: Type108
     }
-    class c0064["CaptureSnapshot"] {
+    class c0071["CaptureSnapshot"] {
         <<interface>>
         id: string
         context: WorkContext
         instanceId: string
         entries: EvidenceEntry[]
         conversation: readonly unknown[]
-        conversationCoverage: Type102
+        conversationCoverage: Type109
         sourceConversation: readonly unknown[]
         historySummary: CaptureHistorySummary
-        processedThroughEntryId: Type103
+        processedThroughEntryId: Type110
         leafEntryId: string
         finalEntryId: string
         mode: CaptureMode
@@ -775,54 +853,54 @@ classDiagram
         modelVersion: string
         createdAt: string
     }
-    class c0065["CodeArtifact"] {
+    class c0072["CodeArtifact"] {
         <<interface>>
         id: number
         updated_at: string
     }
-    class c0066["CodeArtifactInput"] {
+    class c0073["CodeArtifactInput"] {
         <<interface>>
         title: string
         description: string
         code: string
         language: string
         tags: string[]
-        project_id: Type104
+        project_id: Type111
     }
-    class c0067["CodeArtifactSummary"] {
+    class c0074["CodeArtifactSummary"] {
         <<type_alias>>
-        alias: Type105
+        alias: Type112
     }
-    class c0068["CompactedConversation"] {
+    class c0075["CompactedConversation"] {
         <<interface>>
         summary: string
         summarizedThroughEntryId: string
         retainedConversation: readonly unknown[]
     }
-    class c0069["Document"] {
+    class c0076["Document"] {
         <<interface>>
         id: number
         updated_at: string
     }
-    class c0070["DocumentInput"] {
+    class c0077["DocumentInput"] {
         <<interface>>
         title: string
         description: string
         content: string
         document_type: string
         tags: string[]
-        project_id: Type104
+        project_id: Type111
     }
-    class c0071["DocumentSummary"] {
+    class c0078["DocumentSummary"] {
         <<type_alias>>
-        alias: Type106
+        alias: Type113
     }
-    class c0072["Entity"] {
+    class c0079["Entity"] {
         <<interface>>
         id: number
         updated_at: string
     }
-    class c0073["EntityInput"] {
+    class c0080["EntityInput"] {
         <<interface>>
         name: string
         entity_type: EntityType
@@ -832,31 +910,31 @@ classDiagram
         aka: string[]
         project_ids: number[]
     }
-    class c0074["EntityRelationship"] {
+    class c0081["EntityRelationship"] {
         <<interface>>
         id: number
     }
-    class c0075["EntityRelationshipInput"] {
+    class c0082["EntityRelationshipInput"] {
         <<interface>>
         source_entity_id: number
         target_entity_id: number
         relationship_type: string
     }
-    class c0076["EntityType"] {
+    class c0083["EntityType"] {
         <<type_alias>>
-        alias: Type107
+        alias: Type114
     }
-    class c0077["EvidenceEntry"] {
+    class c0084["EvidenceEntry"] {
         <<interface>>
         id: string
-        role: Type108
+        role: Type115
         text: string
         toolName: string
         toolCallId: string
         isError: boolean
         details: unknown
     }
-    class c0078["FileSummary"] {
+    class c0085["FileSummary"] {
         <<interface>>
         id: number
         filename: string
@@ -864,9 +942,9 @@ classDiagram
         mime_type: string
         size_bytes: number
         tags: string[]
-        project_id: Type104
+        project_id: Type111
     }
-    class c0079["ForgetfulClient"] {
+    class c0086["ForgetfulClient"] {
         <<interface>>
         knowledge: KnowledgeClient
         +getMemoryEntityIds(id: number, signal: AbortSignal) Promise~number[]~
@@ -877,53 +955,56 @@ classDiagram
         +linkProject(id: number, repoName: string, signal: AbortSignal) Promise~Project~
         +create(input: MemoryInput, signal: AbortSignal) Promise~MemoryCreateResult~
         +get(id: number, signal: AbortSignal) Promise~Memory~
-        +supersede(Signature68)
+        +obsolete(Signature78)
+        +supersede(Signature79)
     }
-    class c0080["KnowledgeClient"] {
+    class c0087["KnowledgeClient"] {
         <<interface>>
         +searchEntities(query: string, limit: number, signal: AbortSignal) Promise~Entity[]~
         +getEntity(id: number, signal: AbortSignal) Promise~Entity~
         +createEntity(input: EntityInput, signal: AbortSignal) Promise~Entity~
-        +updateEntity(Signature69)
-        +getEntityMemories(id: number, signal: AbortSignal) Type109
+        +updateEntity(Signature80)
+        +getEntityMemories(id: number, signal: AbortSignal) Type116
         +linkEntityMemory(entityId: number, memoryId: number, signal: AbortSignal) Promise~void~
         +getRelationships(id: number, signal: AbortSignal) Promise~EntityRelationship[]~
-        +createRelationship(Signature70)
+        +createRelationship(Signature81)
         +listDocuments(projectId: number, signal: AbortSignal) Promise~DocumentSummary[]~
         +getDocument(id: number, signal: AbortSignal) Promise~Document~
         +createDocument(input: DocumentInput, signal: AbortSignal) Promise~Document~
-        +updateDocument(Signature71)
-        +listCodeArtifacts(Signature72)
+        +updateDocument(Signature82)
+        +listCodeArtifacts(Signature83)
         +getCodeArtifact(id: number, signal: AbortSignal) Promise~CodeArtifact~
         +createCodeArtifact(input: CodeArtifactInput, signal: AbortSignal) Promise~CodeArtifact~
-        +updateCodeArtifact(Signature73)
+        +updateCodeArtifact(Signature84)
         +listFiles(projectId: number, signal: AbortSignal) Promise~FileSummary[]~
         +getFile(id: number, signal: AbortSignal) Promise~StoredFile~
-        +updateMemory(Signature74)
+        +updateMemory(Signature85)
         +linkMemories(id: number, relatedIds: number[], signal: AbortSignal) Promise~void~
         +unlinkMemories(id: number, targetId: number, signal: AbortSignal) Promise~void~
     }
-    class c0081["LinkedMemory"] {
+    class c0088["LinkedMemory"] {
         <<interface>>
         memory: Memory
         link_source_id: number
     }
-    class c0082["Memory"] {
+    class c0089["Memory"] {
         <<interface>>
         id: number
         is_obsolete: boolean
-        superseded_by: Type104
+        superseded_by: Type111
+        obsolete_reason: Type110
+        obsoleted_at: Type110
         linked_memory_ids: number[]
         access_count: number
-        last_accessed_at: Type103
+        last_accessed_at: Type110
         updated_at: string
     }
-    class c0083["MemoryCreateResult"] {
+    class c0090["MemoryCreateResult"] {
         <<interface>>
         id: number
         autoLinkedMemoryIds: number[]
     }
-    class c0084["MemoryInput"] {
+    class c0091["MemoryInput"] {
         <<interface>>
         title: string
         content: string
@@ -940,12 +1021,12 @@ classDiagram
         code_artifact_ids: number[]
         file_ids: number[]
     }
-    class c0085["MemoryModelClient"] {
+    class c0092["MemoryModelClient"] {
         <<interface>>
-        +prepareCapture(request: ModelRequest) Type110
+        +prepareCapture(request: ModelRequest) Type117
         +complete(request: ModelRequest) Promise~unknown~
     }
-    class c0086["MemorySearchResult"] {
+    class c0093["MemorySearchResult"] {
         <<interface>>
         query: string
         primary_memories: Memory[]
@@ -954,33 +1035,46 @@ classDiagram
         token_count: number
         truncated: boolean
     }
-    class c0087["ModelReadTool"] {
+    class c0094["ModelEvidencePage"] {
+        <<class>>
+        constructor(entryId: string, record: unknown, offset: number, limit: number) unknown
+        entryId: string
+        record: unknown
+        offset: number
+        limit: number
+    }
+    class c0095["ModelReadErrorResult"] {
+        <<class>>
+        constructor(value: unknown) unknown
+        value: unknown
+    }
+    class c0096["ModelReadTool"] {
         <<interface>>
         name: string
         description: string
         parameters: unknown
         +execute(input: unknown, signal: AbortSignal) Promise~unknown~
     }
-    class c0088["ModelRequest"] {
+    class c0097["ModelRequest"] {
         <<interface>>
-        purpose: Type111
+        purpose: Type118
         policy: string
         input: unknown
         conversation: readonly unknown[]
-        onConversationCompacted: Type112
+        onConversationCompacted: Type119
         signal: AbortSignal
         submission: ModelSubmissionTool
         readTools: ModelReadTool[]
         readConcurrency: number
-        readBatchContext: Type113
-        diagnosticContext: Type114
+        readBatchContext: Type120
+        diagnosticContext: Type121
     }
-    class c0089["ModelSubmissionError"] {
+    class c0098["ModelSubmissionError"] {
         <<class>>
         constructor(message: string, rejectionReasons: string[]) unknown
         rejectionReasons: string[]
     }
-    class c0090["ModelSubmissionTool"] {
+    class c0099["ModelSubmissionTool"] {
         <<interface>>
         name: string
         description: string
@@ -988,31 +1082,34 @@ classDiagram
         +validate(input: unknown) unknown
         +onRejection(reason: string, input: unknown) void
     }
-    class c0091["Project"] {
+    class c0100["ModelTaskPause"] {
+        <<class>>
+    }
+    class c0101["Project"] {
         <<interface>>
         id: number
         name: string
-        repo_name: Type103
+        repo_name: Type110
         description: string
     }
-    class c0092["ProjectInput"] {
+    class c0102["ProjectInput"] {
         <<interface>>
         name: string
         description: string
         repo_name: string
     }
-    class c0093["Provenance"] {
+    class c0103["Provenance"] {
         <<interface>>
         source_repo: string
         source_files: string[]
         source_url: string
         encoding_version: string
     }
-    class c0094["Scope"] {
+    class c0104["Scope"] {
         <<type_alias>>
-        alias: Type115
+        alias: Type122
     }
-    class c0095["SearchRequest"] {
+    class c0105["SearchRequest"] {
         <<interface>>
         query: string
         query_context: string
@@ -1023,11 +1120,11 @@ classDiagram
         max_links: number
         max_links_per_primary: number
     }
-    class c0096["StoredFile"] {
+    class c0106["StoredFile"] {
         <<interface>>
         data: string
     }
-    class c0097["WorkContext"] {
+    class c0107["WorkContext"] {
         <<interface>>
         cwd: string
         repoName: string
@@ -1036,57 +1133,52 @@ classDiagram
         sessionId: string
         branchId: string
     }
-    class c0098["src/encode.ts"] {
-        <<module>>
-        bundledSkillPaths() string[]
-        buildEncodePrompt(context: Type116, direction: string) Promise~string~
-    }
-    class c0099["AutomaticCaptureJobOutcome"] {
+    class c0108["AutomaticCaptureJobOutcome"] {
         <<interface>>
         ready: boolean
         terminal: boolean
         noCandidates: boolean
-        candidateStages: Type117
-        failure: Type118
+        candidateStages: Type123
+        failure: Type124
     }
-    class c0100["AutomaticRecall"] {
+    class c0109["AutomaticRecall"] {
         <<type_alias>>
         alias: RecallJob
     }
-    class c0101["BoundedWaitOutcome"] {
+    class c0110["BoundedWaitOutcome"] {
         <<type_alias>>
-        alias: Type119
-        kind: Type120
+        alias: Type125
+        kind: Type126
         value: T
-        kind: Type121
-        kind: Type122
+        kind: Type127
+        kind: Type128
         error: unknown
-        kind: Type123
+        kind: Type129
     }
-    class c0102["CaptureFeedbackItem"] {
+    class c0111["CaptureFeedbackItem"] {
         <<interface>>
         jobId: string
         state: CaptureFeedbackState
         outcome: AutomaticCaptureJobOutcome
     }
-    class c0103["CaptureFeedbackState"] {
+    class c0112["CaptureFeedbackState"] {
         <<interface>>
         reportedCandidateKeys: Set~string~
         lastFailureKey: string
         lastUnavailable: boolean
         retried: boolean
     }
-    class c0104["CaptureServicePort"] {
+    class c0113["CaptureServicePort"] {
         <<interface>>
         +enqueue(snapshot: CaptureSnapshot) Promise~unknown~
         +checkpoint(options: CaptureCheckpointOptions) Promise~CaptureCheckpointResult~
-        +advanceWatermark(update: Type124) Promise~unknown~
-        +stop(sessionId: string, branchId: string) Type125
-        +pendingConflicts(options: Type67) Promise~unknown[]~
-        +diagnostics(options: Type66) Promise~unknown~
-        +resolveConflict(conflictId: string, resolution: Type126) Promise~unknown~
+        +advanceWatermark(update: Type130) Promise~unknown~
+        +stop(sessionId: string, branchId: string) Type131
+        +pendingConflicts(options: Type82) Promise~unknown[]~
+        +diagnostics(options: Type81) Promise~unknown~
+        +resolveConflict(conflictId: string, resolution: Type132) Promise~unknown~
     }
-    class c0105["DiagnosticCandidate"] {
+    class c0114["DiagnosticCandidate"] {
         <<interface>>
         id: unknown
         stage: unknown
@@ -1099,42 +1191,42 @@ classDiagram
         content: unknown
         durationMs: unknown
     }
-    class c0106["DiagnosticParts"] {
+    class c0115["DiagnosticParts"] {
         <<interface>>
         candidates: number
-        stages: Type127
+        stages: Type133
         outcomes: string[]
     }
-    class c0107["ExtensionWorkContext"] {
+    class c0116["ExtensionWorkContext"] {
         <<interface>>
         projects: Project[]
     }
-    class c0108["ForgetfulExtensionDependencies"] {
+    class c0117["ForgetfulExtensionDependencies"] {
         <<interface>>
         client: ForgetfulClient
-        createClient: Type128
+        createClient: Type134
         recall: RecallServicePort
         capture: CaptureServicePort
-        createRecall: Type129
-        createCapture: Type130
-        resolveWorkContext: Type131
+        createRecall: Type135
+        createCapture: Type136
+        resolveWorkContext: Type137
     }
-    class c0109["ForgetfulExtensionOptions"] {
+    class c0118["ForgetfulExtensionOptions"] {
         <<interface>>
         agentDir: string
-        config: Type132
+        config: Type138
         dependencies: ForgetfulExtensionDependencies
-        policies: Type133
+        policies: Type139
     }
-    class c0110["PendingQueuedRecall"] {
+    class c0119["PendingQueuedRecall"] {
         <<type_alias>>
         alias: RecallJob
     }
-    class c0111["PolicyName"] {
+    class c0120["PolicyName"] {
         <<type_alias>>
-        alias: Type134
+        alias: Type140
     }
-    class c0112["PreparedRuntime"] {
+    class c0121["PreparedRuntime"] {
         <<interface>>
         logger: FileLogger
         config: ForgetfulConfig
@@ -1143,28 +1235,28 @@ classDiagram
         recall: RecallServicePort
         context: ExtensionWorkContext
         sessionId: string
-        currentLeaf: Type103
+        currentLeaf: Type110
         branchId: string
         queueDirectory: string
     }
-    class c0113["RecallActivity"] {
+    class c0122["RecallActivity"] {
         <<interface>>
         memoryCount: number
         scope: Scope
         reason: string
     }
-    class c0114["RecallContextMessage"] {
+    class c0123["RecallContextMessage"] {
         <<interface>>
         role: string
         content: unknown
         customType: unknown
         details: unknown
     }
-    class c0115["RecallJob"] {
+    class c0124["RecallJob"] {
         <<interface>>
         key: string
         jobId: string
-        kind: Type135
+        kind: Type141
         runtime: Runtime
         branchId: string
         generation: number
@@ -1172,24 +1264,18 @@ classDiagram
         controller: AbortController
         promise: Promise~RecallResult~
         userEntryId: string
-        phase: Type136
+        phase: Type142
         result: RecallResult
         boundarySeen: boolean
         terminalConsumed: boolean
         resultSent: boolean
     }
-    class c0116["RecallServicePort"] {
+    class c0125["RecallServicePort"] {
         <<interface>>
-        +recall(request: Type137) Promise~RecallResult~
+        +recall(request: Type143) Promise~RecallResult~
         +deeper(request: DeeperRecallRequest) Promise~RecallResult~
     }
-    class c0117["RecallToolDetails"] {
-        <<interface>>
-        memoryIds: number[]
-        scope: Scope
-        unavailable: boolean
-    }
-    class c0118["Runtime"] {
+    class c0126["Runtime"] {
         <<interface>>
         logger: FileLogger
         activity: ForgetfulActivity
@@ -1204,104 +1290,100 @@ classDiagram
         queue: DurableQueueStore
         context: ExtensionWorkContext
         branchId: string
-        baselineEntryId: Type103
+        baselineEntryId: Type110
         lastCaptureEntryId: string
-        pendingCaptureJobs: Type138
+        pendingCaptureJobs: Type144
         recoveryResult: CaptureCheckpointResult
         captureFeedbackFlush: Promise~void~
         captureCheckpointTail: Promise~void~
+        captureRetryScheduled: boolean
         captureTriggerId: number
-        captureDeferrals: Type139
-        capturePass: Promise~CaptureCheckpointResult~
+        captureDeferrals: Type145
         settledCaptureTail: Promise~void~
-        activeResolutions: Set~Promise~unknown~~
         lifecycleController: AbortController
         initialization: Promise~void~
         ready: boolean
         discoveryError: unknown
         lastRecall: RecallActivity
         skipNextCapture: boolean
-        notifiedConflictIds: Set~string~
     }
-    class c0119["SetupAuthentication"] {
+    class c0127["SetupAuthentication"] {
         <<interface>>
         tokenEnv: string
         token: string
     }
-    class c0120["State"] {
+    class c0128["State"] {
         <<interface>>
         runtime: Runtime
-        pendingQueuedRecall: Type140
-        automaticRecalls: Type141
-        recallJobs: Type142
+        pendingQueuedRecall: Type146
+        automaticRecalls: Type147
+        recallJobs: Type148
         skipNextCapture: boolean
         shownWarnings: Set~string~
         generation: number
         loading: Promise~Runtime~
     }
-    class c0121["src/extension.ts"] {
+    class c0129["src/extension.ts"] {
         <<module>>
-        boundedWait(Signature75)
+        boundedWait(Signature86)
         setupEndpointSuggestion(value: string) string
-        promptSetupEndpoint(ctx: ExtensionContext, config: ForgetfulConfig) Type144
-        promptSetupAuthentication(ctx: ExtensionContext) Type145
+        promptSetupEndpoint(ctx: ExtensionContext, config: ForgetfulConfig) Type150
+        promptSetupAuthentication(ctx: ExtensionContext) Type151
         makeInstanceId(config: ForgetfulConfig) string
-        policyText(config: ForgetfulConfig, policies: Type133, name: PolicyName) string
+        policyText(config: ForgetfulConfig, policies: Type139, name: PolicyName) string
         sessionKey(ctx: ExtensionContext, branchId: string) string
         boundedErrorDiagnostic(error: unknown) string
         textMessage(text: string) UserMessage
         snapshotWorkContext(context: ExtensionWorkContext) ExtensionWorkContext
         messageContentText(content: unknown) string
         usefulRecallText(result: RecallResult) string
-        savedRecallResultText(result: RecallResult, kind: Type135) string
-        automaticRecallTerminalText(Signature76)
-        automaticRecallResultStatus(result: RecallResult) Type146
+        savedRecallResultText(result: RecallResult, kind: Type141) string
+        automaticRecallTerminalText(Signature87)
+        automaticRecallResultStatus(result: RecallResult) Type152
         recallActivitySummary(activity: RecallActivity) string
-        recordRecallActivity(Signature77)
+        recordRecallActivity(Signature88)
         recallContextEntries(ctx: ExtensionContext) EvidenceEntry[]
-        latestBranchUserEntry(ctx: ExtensionContext) Type147
-        latestContextUserPrompt(messages: Type148) Type76
-        resolutionEvidence(Signature78)
-        conflictBelongsToActiveBranch(Signature79)
+        latestBranchUserEntry(ctx: ExtensionContext) Type153
+        latestContextUserPrompt(messages: Type154) Type91
+        conflictBelongsToActiveBranch(Signature89)
         defaultWorkContext(ctx: ExtensionContext, branchId: string) ExtensionWorkContext
-        canonicalRepository(remote: string) Type76
-        qualifiedRepository(host: string, path: string) Type76
-        discoverWorkContext(Signature80)
-        parseSelection(value: string) Type97
-        pickMemoryModel(ctx: ExtensionContext, currentModel: Type150) Type149
-        notify(ctx: ExtensionContext, message: string, type: Type151) void
-        log(Signature81)
-        logFailure(Signature82)
-        findResolutionConflict(Signature83)
-        resolutionStatus(value: unknown) string
+        canonicalRepository(remote: string) Type91
+        qualifiedRepository(host: string, path: string) Type91
+        discoverWorkContext(Signature90)
+        parseSelection(value: string) Type104
+        pickMemoryModel(ctx: ExtensionContext, currentModel: Type156) Type155
+        notify(ctx: ExtensionContext, message: string, type: Type157) void
+        log(Signature91)
+        logFailure(Signature92)
         diagnosticSourceIds(value: unknown) string
         claimText(value: unknown) string
-        diagnosticCandidateDetail(value: unknown, stages: Type127) Type76
+        diagnosticCandidateDetail(value: unknown, stages: Type133) Type91
         collectDiagnosticParts(jobs: unknown[]) DiagnosticParts
         diagnosticSummary(value: unknown) string
-        captureJobId(value: unknown) Type76
+        captureJobId(value: unknown) Type91
         captureWasQueued(value: unknown) boolean
-        captureProcessedJobIds(value: Type154) string[]
-        captureFeedbackReason(value: unknown) Type76
-        automaticCaptureJobOutcome(value: unknown, jobId: string) Type155
-        readCaptureOutcome(Signature84)
-        recordCaptureRetry(#123; state#44; outcome #125;: CaptureFeedbackItem) Type157
+        captureProcessedJobIds(value: Type159) string[]
+        captureFeedbackReason(value: unknown) Type91
+        automaticCaptureJobOutcome(value: unknown, jobId: string) Type160
+        readCaptureOutcome(Signature93)
+        recordCaptureRetry(#123; state#44; outcome #125;: CaptureFeedbackItem) Type162
         collectCaptureFeedback(items: CaptureFeedbackItem[]) unknown
         captureCount(count: number, singular: string, plural: string) string
-        skippedReasonBreakdown(reasons: Type127) string
-        captureFeedbackParts(summary: Type158) string[]
-        automaticCaptureFeedback(items: CaptureFeedbackItem[], unavailable: number) Type159
+        skippedReasonBreakdown(reasons: Type133) string
+        captureFailurePart(summary: Type163, noOtherParts: boolean) Type91
+        captureFeedbackParts(summary: Type163) string[]
+        automaticCaptureFeedback(items: CaptureFeedbackItem[], unavailable: number) Type164
         createForgetfulExtension(options: ForgetfulExtensionOptions) ExtensionFactory
     }
-    class c0122["src/foreground-tools.ts"] {
+    class c0130["src/foreground-tools.ts"] {
         <<module>>
         registerForegroundTool(pi: ExtensionAPI, definition: ToolDefinition~T~) void
     }
-    class c0123["ApiKnowledgeClient"] {
+    class c0131["ApiKnowledgeClient"] {
         <<class>>
-        constructor(request: KnowledgeRequest, parseMemory: Type160) unknown
+        constructor(request: KnowledgeRequest, parseMemory: Type165) unknown
         -request: KnowledgeRequest
-        -parseMemory: Type160
+        -parseMemory: Type165
         searchEntities(query: string, limit: unknown, signal: AbortSignal) Promise~Entity[]~
         getEntity(entityId: number, signal: AbortSignal) Promise~Entity~
         createEntity(input: EntityInput, signal: AbortSignal) Promise~Entity~
@@ -1313,43 +1395,44 @@ classDiagram
         listDocuments(projectId: number, signal: AbortSignal) Promise~DocumentSummary[]~
         getDocument(documentId: number, signal: AbortSignal) Promise~Document~
         createDocument(input: DocumentInput, signal: AbortSignal) Promise~Document~
-        updateDocument(Signature85)
+        updateDocument(Signature94)
         listCodeArtifacts(projectId: number, signal: AbortSignal) Promise~CodeArtifactSummary[]~
         getCodeArtifact(artifactId: number, signal: AbortSignal) Promise~CodeArtifact~
         createCodeArtifact(input: CodeArtifactInput, signal: AbortSignal) Promise~CodeArtifact~
-        updateCodeArtifact(Signature86)
+        updateCodeArtifact(Signature95)
         updateMemory(memoryId: number, input: Partial~MemoryInput~, signal: AbortSignal) unknown
         linkMemories(memoryId: number, relatedIds: number[], signal: AbortSignal) Promise~void~
         unlinkMemories(memoryId: number, targetId: number, signal: AbortSignal) Promise~void~
         listFiles(projectId: number, signal: AbortSignal) Promise~FileSummary[]~
         getFile(fileId: number, signal: AbortSignal) Promise~StoredFile~
     }
-    class c0124["KnowledgeRequest"] {
+    class c0132["KnowledgeRequest"] {
         <<type_alias>>
-        alias: Type161
+        alias: Type166
     }
-    class c0125["src/http-knowledge.ts"] {
+    class c0133["src/http-knowledge.ts"] {
         <<module>>
-        object(value: unknown) Type46
+        object(value: unknown) Type53
         text(value: unknown, max: number, empty: unknown, field: unknown) string
         id(value: unknown) number
         ids(value: unknown) number[]
         strings(value: unknown, max: unknown) string[]
         records(value: unknown, key: string) unknown[]
-        provenance(value: Type46) Provenance
-        entityBody(input: Partial~EntityInput~, partial: unknown) Type46
+        provenance(value: Type53) Provenance
+        entityBody(input: Partial~EntityInput~, partial: unknown) Type53
         entity(value: unknown) Entity
-        relationshipBody(input: EntityRelationshipInput) Type46
+        relationshipBody(input: EntityRelationshipInput) Type53
         relationship(value: unknown) EntityRelationship
-        memoryMetadata(value: Type46) Type46
-        resourceBody(input: Type162, code: boolean, partial: unknown) Type46
+        memoryMetadata(value: Type53) Type53
+        resourceBody(input: Type167, code: boolean, partial: unknown) Type53
         document(value: unknown) Document
         artifact(value: unknown) CodeArtifact
-        summary(value: unknown, code: boolean) Type163
+        summary(value: unknown, code: boolean) Type168
+        requestSegment(value: unknown) string
         projectPath(path: string, projectId: number) string
         fileSummary(value: unknown) FileSummary
     }
-    class c0126["ApiForgetfulClient"] {
+    class c0134["ApiForgetfulClient"] {
         <<class>>
         knowledge: unknown
         -baseUrl: URL
@@ -1367,16 +1450,16 @@ classDiagram
         create(input: MemoryInput, signal: AbortSignal) Promise~MemoryCreateResult~
         get(id: number, signal: AbortSignal) Promise~Memory~
         getMemoryEntityIds(id: number, signal: AbortSignal) Promise~number[]~
-        supersede(Signature87)
-        -createBody(input: MemoryInput) Type46
+        supersede(Signature96)
+        obsolete(Signature97)
         -validId(id: number) number
         -endpoint(path: string) string
         -responseByteLimit(method: string, url: URL) number
-        -request(Signature88)
-        -throwResponseError(Signature89)
+        -request(Signature98)
+        -throwResponseError(Signature99)
         -readResponse(response: Response, signal: AbortSignal, maxBytes: number) Promise~string~
     }
-    class c0127["ApiForgetfulClientOptions"] {
+    class c0135["ApiForgetfulClientOptions"] {
         <<interface>>
         baseUrl: string
         token: string
@@ -1384,31 +1467,31 @@ classDiagram
         maxResponseBytes: number
         fetchImpl: typeof fetch
     }
-    class c0128["ForgetfulAbortError"] {
+    class c0136["ForgetfulAbortError"] {
         <<class>>
         constructor(message: unknown) unknown
     }
-    class c0129["ForgetfulHttpError"] {
+    class c0137["ForgetfulHttpError"] {
         <<class>>
         status: number
         responseBody: string
         constructor(message: string, status: number, responseBody: string) unknown
     }
-    class c0130["ForgetfulSchemaError"] {
+    class c0138["ForgetfulSchemaError"] {
         <<class>>
         constructor(message: string) unknown
     }
-    class c0131["ForgetfulTimeoutError"] {
+    class c0139["ForgetfulTimeoutError"] {
         <<class>>
         constructor(message: unknown) unknown
     }
-    class c0132["src/http.ts"] {
+    class c0140["src/http.ts"] {
         <<module>>
-        isObject(value: unknown) Type96
-        directEntityId(edge: unknown, memoryId: number) Type77
-        requiredString(value: unknown, field: string) string
+        isObject(value: unknown) Type103
+        directEntityId(edge: unknown, memoryId: number) Type57
+        requiredString(value: unknown, field: string, allowEmpty: unknown) string
         projectText(value: string, field: string, max: number) string
-        optionalString(value: unknown, field: string) Type76
+        optionalString(value: unknown, field: string) Type91
         requiredInteger(value: unknown, field: string) number
         nonNegativeInteger(value: unknown, field: string) number
         integerArray(value: unknown, field: string) number[]
@@ -1419,22 +1502,25 @@ classDiagram
         localHost(hostname: string) boolean
         trimTrailingSlashes(pathname: string) string
         makeAbortError() ForgetfulAbortError
-        validatedSearchOptions(request: SearchRequest) Type166
-        addSearchProjectFilter(body: Type46, request: SearchRequest) void
-        searchBody(request: SearchRequest) Type46
+        defaultWhenOmitted(value: Type171, fallback: T) T
+        searchBody(request: SearchRequest) Type53
         uniqueMemories(memories: Memory[]) Memory[]
         parseLinkedMemories(value: unknown) LinkedMemory[]
-        parseSearchPayload(Signature90)
+        parseSearchPayload(Signature100)
         flattenSearchResult(result: MemorySearchResult) Memory[]
     }
-    class c0133["Attachments"] {
+    class c0141["Attachments"] {
         <<interface>>
         documents: Document[]
         artifacts: CodeArtifact[]
         files: FileSummary[]
         fileIds: number[]
     }
-    class c0134["KnowledgeExpansionRequest"] {
+    class c0142["ExpansionContext"] {
+        <<interface>>
+        failures: Type172
+    }
+    class c0143["KnowledgeExpansionRequest"] {
         <<interface>>
         memories: Memory[]
         entityNames: string[]
@@ -1442,7 +1528,7 @@ classDiagram
         projectId: number
         signal: AbortSignal
     }
-    class c0135["KnowledgeExpansionResult"] {
+    class c0144["KnowledgeExpansionResult"] {
         <<interface>>
         text: string
         memoryIds: number[]
@@ -1451,23 +1537,24 @@ classDiagram
         documentIds: number[]
         codeArtifactIds: number[]
         fileIds: number[]
+        failures: Type173
     }
-    class c0136["KnowledgeReadService"] {
+    class c0145["KnowledgeReadService"] {
         <<class>>
         -readMemory: MemoryReader
-        constructor(client: KnowledgeClient, options: Type167) unknown
+        constructor(client: KnowledgeClient, options: Type174) unknown
         -client: KnowledgeClient
         expand(request: KnowledgeExpansionRequest) Promise~KnowledgeExpansionResult~
-        -findEntities(request: KnowledgeExpansionRequest) Promise~Entity[]~
-        -findRelationships(Signature91)
-        -collectRelationships(Signature92)
-        -resolveRelationshipEndpoints(Signature93)
-        -formatRelationships(Signature94)
-        -findEntityMemories(Signature95)
-        -collectEntityMemories(Signature96)
-        -isAllowedEntityMemory(id: number, request: KnowledgeExpansionRequest) Promise~boolean~
-        -findAttachments(request: KnowledgeExpansionRequest) Promise~Attachments~
-        -formatExpansion(Signature97)
+        -findEntities(request: ExpansionContext) Promise~Entity[]~
+        -findRelationships(Signature101)
+        -collectRelationships(Signature102)
+        -resolveRelationshipEndpoints(Signature103)
+        -formatRelationships(Signature104)
+        -findEntityMemories(Signature105)
+        -collectEntityMemories(Signature106)
+        -isAllowedEntityMemory(id: number, request: ExpansionContext) Promise~boolean~
+        -findAttachments(request: ExpansionContext) Promise~Attachments~
+        -formatExpansion(Signature107)
         -appendEntityLines(lines: string[], entities: Entity[]) void
         -appendRelationshipLines(lines: string[], relationships: RelationshipExpansion[]) void
         -appendLinkedMemoryLines(lines: string[], linkedMemories: LinkedMemoryExpansion[]) void
@@ -1476,38 +1563,38 @@ classDiagram
         -appendFileLines(lines: string[], files: FileSummary[], fileIds: number[]) void
         -emptyExpansion() KnowledgeExpansionResult
     }
-    class c0137["KnowledgeReadServiceOptions"] {
+    class c0146["KnowledgeReadServiceOptions"] {
         <<interface>>
         readMemory: MemoryReader
     }
-    class c0138["LinkedMemoryExpansion"] {
+    class c0147["LinkedMemoryExpansion"] {
         <<type_alias>>
         entity: Entity
         id: number
         title: string
     }
-    class c0139["MemoryReader"] {
+    class c0148["MemoryReader"] {
         <<type_alias>>
-        alias: Type171
+        alias: Type178
     }
-    class c0140["RelationshipExpansion"] {
+    class c0149["RelationshipExpansion"] {
         <<type_alias>>
         relationship: EntityRelationship
         source: Entity
         target: Entity
     }
-    class c0141["src/knowledge-read.ts"] {
+    class c0150["src/knowledge-read.ts"] {
         <<module>>
         validId(value: unknown) value is number
         validEntity(value: unknown) value is Entity
         validRelationship(value: unknown) value is EntityRelationship
         validMemory(value: unknown) value is Memory
         inEntityScope(entity: Entity, scope: Scope, projectId: number) boolean
-        inProjectScope(resourceProjectId: Type172, scope: Scope, projectId: number) boolean
+        inProjectScope(resourceProjectId: Type27, scope: Scope, projectId: number) boolean
         clean(value: string) string
-        safeCall(operation: Type42, signal: AbortSignal) Type173
+        safeCall(operation: Type49, request: ExpansionContext, operationName: string) Type179
     }
-    class c0142["KnowledgeReadContext"] {
+    class c0151["KnowledgeReadContext"] {
         <<interface>>
         client: ForgetfulClient
         knowledge: KnowledgeClient
@@ -1516,26 +1603,26 @@ classDiagram
         projectId: number
         signal: AbortSignal
     }
-    class c0143["KnowledgeReadRequest"] {
+    class c0152["KnowledgeReadRequest"] {
         <<type_alias>>
-        alias: Type174
+        alias: Type180
         operation: string
     }
-    class c0144["KnowledgeToolContext"] {
+    class c0153["KnowledgeToolContext"] {
         <<interface>>
         cwd: string
         repoName: string
         commit: string
-        project: Type175
+        project: Type181
         scope: Scope
     }
-    class c0145["KnowledgeToolResult"] {
+    class c0154["KnowledgeToolResult"] {
         <<interface>>
-        content: Type176
-        details: Type46
+        content: Type182
+        details: Type53
         file: StoredFile
     }
-    class c0146["KnowledgeWriteContext"] {
+    class c0155["KnowledgeWriteContext"] {
         <<interface>>
         client: ForgetfulClient
         knowledge: KnowledgeClient
@@ -1543,72 +1630,70 @@ classDiagram
         context: KnowledgeToolContext
         projectId: number
         signal: AbortSignal
-        beforeWrite: Type13
-        checkWriteState: Type21
+        beforeWrite: Type22
+        checkWriteState: Type23
     }
-    class c0147["KnowledgeWriteRequest"] {
+    class c0156["KnowledgeWriteRequest"] {
         <<type_alias>>
-        alias: Type174
+        alias: Type180
         operation: string
     }
-    class c0148["ResolvedWriteProject"] {
+    class c0157["ResolvedWriteProject"] {
         <<interface>>
         id: number
         repoName: string
     }
-    class c0149["ToolImage"] {
+    class c0158["ToolImage"] {
         <<type_alias>>
         data: string
         mimeType: string
-        type: Type177
+        type: Type183
     }
-    class c0150["ToolText"] {
+    class c0159["ToolText"] {
         <<type_alias>>
         text: string
-        type: Type178
+        type: Type184
     }
-    class c0151["src/knowledge-tools.ts"] {
+    class c0160["src/knowledge-tools.ts"] {
         <<module>>
         leftoverSearchField(description: string) unknown
         isEntityType(value: unknown) value is EntityType
-        record(value: unknown, label: string) Type46
+        record(value: unknown, label: string) Type53
         requiredText(value: unknown, field: string, max: number) string
-        optionalText(value: unknown, field: string, max: number) Type76
+        optionalText(value: unknown, field: string, max: number) Type91
         requiredId(value: unknown, field: string) number
-        optionalId(value: unknown, field: string) Type77
-        boundedId(value: unknown, field: string, maximum: number) Type77
-        boundedNonNegativeInteger(value: unknown, field: string, maximum: number) Type77
+        optionalId(value: unknown, field: string) Type57
+        boundedId(value: unknown, field: string, maximum: number) Type57
         requiredIds(value: unknown, field: string) number[]
-        optionalIds(value: unknown, field: string) Type12
+        optionalIds(value: unknown, field: string) Type94
         requiredStrings(value: unknown, field: string, maxItems: unknown) string[]
-        optionalStrings(value: unknown, field: string, maxItems: unknown) Type88
-        optionalImportance(value: unknown) Type77
-        commit(value: unknown) Type76
+        optionalStrings(value: unknown, field: string, maxItems: unknown) Type95
+        optionalImportance(value: unknown) Type57
+        commit(value: unknown) Type91
         checkOperation(value: unknown, choices: Set~string~) string
         containsSensitiveData(value: unknown) boolean
         rejectSensitiveInput(value: unknown) void
-        need(input: Type46, fields: Type179) void
-        validateReadSearch(input: Type46, op: string) void
-        validateReadIdentity(input: Type46, op: string) void
-        validateReadPagination(input: Type46, op: string) void
+        need(input: Type53, fields: Type185) void
+        validateReadSearch(input: Type53, op: string) void
+        validateReadPagination(input: Type53, op: string) void
         validateKnowledgeReadRequest(value: unknown) KnowledgeReadRequest
-        validateEntityFields(input: Type46) void
+        validateEntityFields(input: Type53) void
         validateKnowledgeWriteRequest(value: unknown) KnowledgeWriteRequest
         rich(client: ForgetfulClient) KnowledgeClient
         currentProject(context: KnowledgeToolContext, requested: number) number
-        resolveWriteProject(Signature98)
+        resolveWriteProject(Signature108)
         inMemoryProject(memory: Memory, projectId: number) boolean
         inEntityProject(entity: Entity, projectId: number) boolean
         json(value: unknown) string
-        page(value: Type180, field: Type181, offset: number, limit: number) unknown
-        listPage(values: T[], offset: number, limit: number) Type182
-        boundedListPage(values: T[], offset: number, limit: number) Type183
-        fileContent(file: StoredFile, offset: number, limit: number) Type184
-        readResult(value: unknown, details: Type46) KnowledgeToolResult
-        assertReadMemory(Signature99)
-        assertReadEntity(Signature100)
+        page(value: Type186, field: Type187, offset: number, limit: number) unknown
+        listPage(values: T[], offset: number, limit: number) Type188
+        boundedListPage(values: T[], offset: number, limit: number) Type189
+        fileContent(file: StoredFile, offset: number, limit: number) Type190
+        readResult(value: unknown, details: Type53) KnowledgeToolResult
+        assertReadMemory(Signature109)
+        assertReadEntity(Signature110)
         requireReadKnowledge(read: KnowledgeReadContext) KnowledgeClient
-        requestedReadProject(read: KnowledgeReadContext) Type77
+        requestedReadProject(read: KnowledgeReadContext) Type57
         readProjects(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
         readMemories(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
         readMemory(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
@@ -1622,23 +1707,23 @@ classDiagram
         readCodeArtifact(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
         readFiles(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
         readFile(read: KnowledgeReadContext) Promise~KnowledgeToolResult~
-        executeKnowledgeRead(Signature101)
-        provenance(context: KnowledgeToolContext, request: Type46) Type185
-        effectiveCommit(context: KnowledgeToolContext, request: Type46) Type76
-        updateProvenance(Signature102)
-        beforeMutation(beforeWrite: Type186, signal: AbortSignal) Promise~void~
-        memoryInProject(Signature103)
-        entityInProject(Signature104)
-        hydrateEntities(Signature105)
-        validateAttachments(Signature106)
+        executeKnowledgeRead(Signature111)
+        provenance(context: KnowledgeToolContext, request: Type53) Type191
+        effectiveCommit(context: KnowledgeToolContext, request: Type53) Type91
+        updateProvenance(Signature112)
+        beforeMutation(beforeWrite: Type192, signal: AbortSignal) Promise~void~
+        memoryInProject(Signature113)
+        entityInProject(Signature114)
+        hydrateEntities(Signature115)
+        validateAttachments(Signature116)
         compactString(value: unknown) unknown
         compactObjectEntry(key: string, value: unknown, depth: number) unknown
         compactWriteValue(value: unknown, depth: unknown) unknown
         writeResult(value: unknown, operation: string) KnowledgeToolResult
-        createMemory(Signature107)
-        createEntity(Signature108)
-        createDocument(Signature109)
-        createCodeArtifact(Signature110)
+        createMemory(Signature117)
+        createEntity(Signature118)
+        createDocument(Signature119)
+        createCodeArtifact(Signature120)
         replacementMemory(write: KnowledgeWriteContext) Promise~Memory~
         updateMemory(write: KnowledgeWriteContext) Promise~KnowledgeToolResult~
         supersedeMemory(write: KnowledgeWriteContext) Promise~KnowledgeToolResult~
@@ -1648,40 +1733,40 @@ classDiagram
         createRelationship(write: KnowledgeWriteContext) Promise~KnowledgeToolResult~
         updateDocument(write: KnowledgeWriteContext) Promise~KnowledgeToolResult~
         updateCodeArtifact(write: KnowledgeWriteContext) Promise~KnowledgeToolResult~
-        executeKnowledgeWrite(Signature111)
+        executeKnowledgeWrite(Signature121)
     }
-    class c0152["KnowledgeAttachmentIds"] {
+    class c0161["KnowledgeAttachmentIds"] {
         <<interface>>
         documentIds: number[]
         codeArtifactIds: number[]
     }
-    class c0153["KnowledgeCodeArtifactPlan"] {
+    class c0162["KnowledgeCodeArtifactPlan"] {
         <<interface>>
         key: string
         existingId: number
         input: CodeArtifactInput
     }
-    class c0154["KnowledgeDocumentPlan"] {
+    class c0163["KnowledgeDocumentPlan"] {
         <<interface>>
         key: string
         existingId: number
         input: DocumentInput
     }
-    class c0155["KnowledgeEntityMemoryLinkPlan"] {
+    class c0164["KnowledgeEntityMemoryLinkPlan"] {
         <<interface>>
         entityKey: string
     }
-    class c0156["KnowledgeEntityPlan"] {
+    class c0165["KnowledgeEntityPlan"] {
         <<interface>>
         key: string
         existingId: number
         input: EntityInput
     }
-    class c0157["KnowledgeMemoryReader"] {
+    class c0166["KnowledgeMemoryReader"] {
         <<type_alias>>
-        alias: Type171
+        alias: Type178
     }
-    class c0158["KnowledgeRelationshipPlan"] {
+    class c0167["KnowledgeRelationshipPlan"] {
         <<interface>>
         key: string
         existingId: number
@@ -1689,20 +1774,20 @@ classDiagram
         targetEntityKey: string
         input: EntityRelationshipInput
     }
-    class c0159["KnowledgeWriteCheckpoint"] {
+    class c0168["KnowledgeWriteCheckpoint"] {
         <<type_alias>>
-        alias: Type187
+        alias: Type193
     }
-    class c0160["KnowledgeWriteGuard"] {
+    class c0169["KnowledgeWriteGuard"] {
         <<type_alias>>
-        alias: Type13
+        alias: Type22
     }
-    class c0161["KnowledgeWritePlan"] {
+    class c0170["KnowledgeWritePlan"] {
         <<interface>>
         operationId: string
         projectId: number
         memoryId: number
-        expectedClaim: Type188
+        expectedClaim: Type194
         attachResources: boolean
         existingDocumentIds: number[]
         existingCodeArtifactIds: number[]
@@ -1713,17 +1798,19 @@ classDiagram
         entityMemoryLinks: KnowledgeEntityMemoryLinkPlan[]
         linkedMemoryIds: number[]
     }
-    class c0162["KnowledgeWriteReceipt"] {
+    class c0171["KnowledgeWriteReceipt"] {
         <<interface>>
         key: string
         id: number
+        occurrence: number
     }
-    class c0163["KnowledgeWriteSave"] {
+    class c0172["KnowledgeWriteSave"] {
         <<type_alias>>
-        alias: Type13
+        alias: Type22
     }
-    class c0164["KnowledgeWriteState"] {
+    class c0173["KnowledgeWriteState"] {
         <<interface>>
+        failure: Type195
         instructionId: string
         entities: KnowledgeWriteReceipt[]
         documents: KnowledgeWriteReceipt[]
@@ -1734,68 +1821,70 @@ classDiagram
         attachmentsApplied: boolean
         pendingCreates: string[]
     }
-    class c0165["KnowledgeWriter"] {
+    class c0174["KnowledgeWriter"] {
         <<class>>
-        constructor(Signature112)
+        constructor(Signature122)
         -client: WriteClient
         -readMemory: KnowledgeMemoryReader
-        -assertCanWrite: Type21
-        -currentMemory(plan: KnowledgeWritePlan, signal: AbortSignal) Promise~Memory~
-        -entityInProject(id: number, projectId: number, signal: AbortSignal) Promise~Entity~
-        -documentInProject(id: number, projectId: number, signal: AbortSignal) Promise~Document~
-        -codeArtifactInProject(Signature113)
-        -validateAttachments(Signature114)
-        -validatePlan(plan: KnowledgeWritePlan) void
-        -validateResourceKeys(resources: Type189) void
-        -createOnce(Signature115)
-        -writeEntity(Signature116)
-        -writeEntities(Signature117)
-        -writeDocument(Signature118)
-        -writeDocuments(Signature119)
-        -writeCodeArtifact(Signature120)
-        -writeCodeArtifacts(Signature121)
-        -requestedAttachmentIds(Signature122)
+        -assertCanWrite: Type23
+        -attachmentMemory(plan: KnowledgeWritePlan, signal: AbortSignal) Promise~Memory~
+        -recordCreateFailure(Signature123)
+        -createOnce(Signature124)
+        -writeEntity(Signature125)
+        -writeEntities(Signature126)
+        -writeDocument(Signature127)
+        -writeDocuments(Signature128)
+        -writeCodeArtifact(Signature129)
+        -writeCodeArtifacts(Signature130)
+        -requestedAttachmentIds(Signature131)
         -attachmentIds(memory: Memory, requested: KnowledgeAttachmentIds) KnowledgeAttachmentIds
         -attachmentsDiffer(memory: Memory, ids: KnowledgeAttachmentIds) boolean
-        -ensureMemoryCanReceiveAttachments(memory: Memory) void
-        -attachmentPatch(ids: KnowledgeAttachmentIds) Type192
-        -writeAttachments(Signature123)
-        -writeRelationship(Signature124)
-        -writeRelationships(Signature125)
-        -writeEntityMemoryLink(Signature126)
-        -writeEntityMemoryLinks(Signature127)
-        -writeLinkedMemory(Signature128)
-        -writeLinkedMemories(Signature129)
-        execute(Signature130)
+        -attachmentPatch(ids: KnowledgeAttachmentIds) Type198
+        -writeConnection(Signature132)
+        -writeAttachments(Signature133)
+        -writeRelationship(Signature134)
+        -writeRelationships(Signature135)
+        -writeEntityMemoryLink(Signature136)
+        -writeEntityMemoryLinks(Signature137)
+        -writeLinkedMemory(Signature138)
+        -writeLinkedMemories(Signature139)
+        execute(Signature140)
     }
-    class c0166["WriteClient"] {
+    class c0175["ResourceSlot"] {
         <<type_alias>>
-        alias: Type193
+        alias: Type200
+        occurrence: number
     }
-    class c0167["src/knowledge-write.ts"] {
+    class c0176["WriteClient"] {
+        <<type_alias>>
+        alias: Type201
+    }
+    class c0177["src/knowledge-write.ts"] {
         <<module>>
+        resourceSlots(resources: T[]) ResourceSlot~T~[]
         copyState(value: KnowledgeWriteState) KnowledgeWriteState
         positiveId(value: unknown) value is number
-        stateWithNumber(values: KnowledgeWriteReceipt[], key: string, id: number) void
-        stateId(values: KnowledgeWriteReceipt[], key: string) Type77
-        selectedIds(values: KnowledgeWriteReceipt[], resources: Type189) number[]
-        uniqueIds(values: number[], label: string) number[]
-        sameIds(left: Type12, right: number[]) boolean
+        rejectedCreate(error: unknown) boolean
+        stateWithNumber(Signature141)
+        stateId(values: KnowledgeWriteReceipt[], key: string, occurrence: unknown) Type57
+        selectedIds(values: KnowledgeWriteReceipt[], resources: Type202) number[]
+        uniqueIds(values: number[]) number[]
+        sameIds(left: Type94, right: number[]) boolean
         receipts(value: unknown) KnowledgeWriteReceipt[]
         normalizedState(previous: Partial~KnowledgeWriteState~) KnowledgeWriteState
         hasValue(values: string[], value: string) boolean
         instructionId(plan: KnowledgeWritePlan) string
     }
-    class c0168["DiagnosticLogger"] {
+    class c0178["DiagnosticLogger"] {
         <<interface>>
-        +emit(level: Type45, event: string, data: Type46) void
+        +emit(level: Type52, event: string, data: Type53) void
         +flush() Promise~void~
     }
-    class c0169["FileLogLevel"] {
+    class c0179["FileLogLevel"] {
         <<type_alias>>
-        alias: Type194
+        alias: Type203
     }
-    class c0170["FileLogger"] {
+    class c0180["FileLogger"] {
         <<class>>
         filePath: string
         -level: FileLogLevel
@@ -1810,39 +1899,39 @@ classDiagram
         -fileBytes: unknown
         -fileCount: unknown
         -pendingBytes: unknown
-        constructor(options: Type195) unknown
-        -options: Type195
+        constructor(options: Type204) unknown
+        -options: Type204
         setLevel(level: FileLogLevel) void
-        emit(level: Type45, event: string, data: Type46) void
-        -enqueue(level: Type45, event: string, data: Type46) void
+        emit(level: Type52, event: string, data: Type53) void
+        -enqueue(level: Type52, event: string, data: Type53) void
         -rotate() Promise~void~
         -warn(error: unknown) void
         close() Promise~void~
         flush() Promise~void~
     }
-    class c0171["src/logging.ts"] {
+    class c0181["src/logging.ts"] {
         <<module>>
         processExited(pid: number) boolean
         listLogFiles(directory: string) unknown
-        pruneDirectory(directory: string, current: Type39) Promise~void~
-        limit(value: Type77, fallback: number) number
+        pruneDirectory(directory: string, current: Type46) Promise~void~
+        limit(value: Type57, fallback: number) number
         excludeCredentials(value: unknown) unknown
     }
-    class c0172["src/memory-context.ts"] {
+    class c0182["src/memory-context.ts"] {
         <<module>>
         storedMemoryContext(context: string) string
         replacementMemoryContext(context: string) string
         replacementMemoryInput(input: MemoryInput) MemoryInput
     }
-    class c0173["CompactedMemoryHistory"] {
+    class c0183["CompactedMemoryHistory"] {
         <<interface>>
         summary: string
         retainedMessages: Message[]
     }
-    class c0174["ContextWindowError"] {
+    class c0184["ContextWindowError"] {
         <<class>>
     }
-    class c0175["MemoryHistorySummaryOptions"] {
+    class c0185["MemoryHistorySummaryOptions"] {
         <<interface>>
         model: Model~any~
         compactionSettings: CompactionSettings
@@ -1851,35 +1940,36 @@ classDiagram
         sessionId: string
         complete: SummaryCompletion
     }
-    class c0176["MemoryTaskContext"] {
+    class c0186["MemoryTaskContext"] {
         <<class>>
         -settings: typeof DEFAULT_COMPACTION_SETTINGS
         -contextWindow: number
         -originalHistory: Set~Message~
         -compactedHistory: CompactedMemoryHistory
         -summaryMessage: Message
-        constructor(Signature131)
+        constructor(Signature142)
         -model: Model~any~
         -task: Message
-        getCompactedHistory() Type197
-        prepare(Signature132)
-        prepareCapture(Signature133)
-        -prepareContext(Signature134)
-        -applySummary(Signature135)
+        getCompactedHistory() Type206
+        prepare(Signature143)
+        prepareCapture(Signature144)
+        -prepareContext(Signature145)
+        -applySummary(Signature146)
         -outputAllowance(context: Context) number
     }
-    class c0177["SummaryCompletion"] {
+    class c0187["SummaryCompletion"] {
         <<type_alias>>
-        alias: Type200
+        alias: Type209
     }
-    class c0178["src/model-context.ts"] {
+    class c0188["src/model-context.ts"] {
         <<module>>
-        objectRecord(value: unknown) Type96
+        objectRecord(value: unknown) Type103
         modelEvidence(record: unknown) unknown
         evidenceMessage(record: unknown, label: string, timestamp: number) UserMessage
+        evidencePageContent(page: ModelEvidencePage) Type210
         textTokens(text: string) number
         contextTokens(context: Context) number
-        assertFits(Signature136)
+        assertFits(Signature147)
         validatePositiveSafeInteger(value: unknown, label: string) number
         entriesFor(messages: Message[]) SessionMessageEntry[]
         recentCutIndex(messages: Message[], keepRecentTokens: number) number
@@ -1887,26 +1977,26 @@ classDiagram
         summaryEvidence(message: Message, index: number) UserMessage
         privateContextWindow(model: Model~any~, contextLimitTokens: unknown) number
         compactionSettings(settings: CompactionSettings) typeof DEFAULT_COMPACTION_SETTINGS
-        outputCeiling(Signature137)
-        resolvedOutputAllowance(Signature138)
+        outputCeiling(Signature148)
+        resolvedOutputAllowance(Signature149)
         smallerSummaryBatch(messages: Message[], count: number) number
-        summarizeMemoryHistory(Signature139)
+        summarizeMemoryHistory(Signature150)
     }
-    class c0179["MemoryModelHeaderTransform"] {
+    class c0189["MemoryModelHeaderTransform"] {
         <<type_alias>>
-        alias: Type202
+        alias: Type212
     }
-    class c0180["ModelPickerContext"] {
+    class c0190["ModelPickerContext"] {
         <<interface>>
-        modelRegistry: Type203
-        scopedModels: Type204
+        modelRegistry: Type213
+        scopedModels: Type214
     }
-    class c0181["ModelRegistryPort"] {
+    class c0191["ModelRegistryPort"] {
         <<interface>>
-        +find(provider: string, modelId: string) Type150
-        +complete(Signature140)
+        +find(provider: string, modelId: string) Type156
+        +complete(Signature151)
     }
-    class c0182["PiMemoryModel"] {
+    class c0192["PiMemoryModel"] {
         <<class>>
         version: string
         -classificationTimeoutMs: number
@@ -1915,19 +2005,19 @@ classDiagram
         -logger: DiagnosticLogger
         -compactionSettings: CompactionSettings
         -contextLimitTokens: number
-        constructor(Signature141)
+        constructor(Signature152)
         -registry: ModelRegistryPort
         -selection: ModelSelection
         complete(request: ModelRequest) Promise~unknown~
-        prepareCapture(request: ModelRequest) Type110
-        -emit(level: Type45, event: string, request: ModelRequest, data: Type46) void
+        prepareCapture(request: ModelRequest) Type117
+        -emit(level: Type52, event: string, request: ModelRequest, data: Type53) void
         -completeRequest(request: ModelRequest, preparationOnly: unknown) Promise~unknown~
-        -completeAttempt(Signature142)
-        -executeRead(Signature143)
+        -completeAttempt(Signature153)
+        -executeRead(Signature154)
         -validateSubmission(submission: ModelSubmissionTool, tool: Tool, call: ToolCall) unknown
-        -completeWithSubmission(Signature144)
+        -completeWithSubmission(Signature155)
     }
-    class c0183["PiMemoryModelOptions"] {
+    class c0193["PiMemoryModelOptions"] {
         <<interface>>
         logger: DiagnosticLogger
         classificationTimeoutMs: number
@@ -1937,7 +2027,7 @@ classDiagram
         compactionSettings: CompactionSettings
         contextLimitTokens: number
     }
-    class c0184["RequestDeadline"] {
+    class c0194["RequestDeadline"] {
         <<interface>>
         controller: AbortController
         callerAbort: Promise~never~
@@ -1947,54 +2037,56 @@ classDiagram
         compactionCalls: number
         +cleanup() void
     }
-    class c0185["src/model.ts"] {
+    class c0195["src/model.ts"] {
         <<module>>
         serializeInput(input: unknown) string
-        ensureCompletionFinished(Signature145)
+        ensureCompletionFinished(Signature156)
         modelLabel(model: ModelSelection) string
         isOpenCodeModel(model: Model~any~) boolean
-        openCodeSessionHeaders(model: Model~any~, sessionId: Type76) Type207
+        openCodeSessionHeaders(model: Model~any~, sessionId: Type91) Type217
         requestTimeout(request: ModelRequest, classificationTimeoutMs: number) number
-        requestOptions(Signature146)
+        requestOptions(Signature157)
         textBlock(text: string) TextContent
-        submissionTool(submission: Type209) Tool
+        submissionTool(submission: Type219) Tool
         toolCalls(message: AssistantMessage) ToolCall[]
         rejectionText(error: unknown) string
         sanitizedAssistantForHistory(message: AssistantMessage) AssistantMessage
         errorToolResult(call: ToolCall, error: string) ToolResultMessage
-        appendCallCountCorrection(Signature147)
+        appendCallCountCorrection(Signature158)
         requestDeadline(request: ModelRequest, timeoutMs: number) RequestDeadline
-        throwRequestFailure(error: unknown, request: ModelRequest) never
-        resolveMemoryModel(Signature148)
+        throwRequestFailure(Signature159)
+        resolveMemoryModel(Signature160)
         modelSelectionFromModel(model: Model~any~) ModelSelection
         availableMemoryModels(ctx: ModelPickerContext) Model~any~[]
     }
-    class c0186["src/privacy.ts"] {
+    class c0196["src/privacy.ts"] {
         <<module>>
         sanitizeText(text: string) string
+        diagnosticMessage(error: unknown) string
+        errorMessage(error: unknown) string
         hasSensitiveData(text: string) boolean
         isMemoryOperation(toolName: string) boolean
         sanitizeValue(value: unknown) unknown
     }
-    class c0187["AgentProjectInitInput"] {
+    class c0197["AgentProjectInitInput"] {
         <<interface>>
         name: string
         description: string
         projectId: number
     }
-    class c0188["ProjectInitError"] {
+    class c0198["ProjectInitError"] {
         <<class>>
     }
-    class c0189["src/project-init.ts"] {
+    class c0199["src/project-init.ts"] {
         <<module>>
-        existingMapping(projects: Project[], repoName: string) Type211
+        existingMapping(projects: Project[], repoName: string) Type221
         validateAgentProjectDetails(repoName: string, input: AgentProjectInitInput) ProjectInput
-        promptNewProject(ctx: ExtensionContext, repoName: string) Type212
-        promptExistingProject(Signature149)
-        initialiseProject(Signature150)
-        initialiseProjectForAgent(Signature151)
+        promptNewProject(ctx: ExtensionContext, repoName: string) Type222
+        promptExistingProject(Signature161)
+        initialiseProject(Signature162)
+        initialiseProjectForAgent(Signature163)
     }
-    class c0190["DurableQueueStore"] {
+    class c0200["DurableQueueStore"] {
         <<class>>
         filePath: string
         lockPath: string
@@ -2006,9 +2098,9 @@ classDiagram
         -staleJobMs: number
         -maxAttempts: number
         -retentionMs: number
-        -now: Type40
+        -now: Type47
         -snapshotPrefix: string
-        constructor(options: Type214) unknown
+        constructor(options: Type224) unknown
         -defaultIdentity() QueueIdentity
         -ensureDirectory() Promise~void~
         -snapshotPath(digest: string) string
@@ -2026,46 +2118,49 @@ classDiagram
         -createFileLock(path: string, token: string) Promise~FileLock~
         -releaseFileLock(path: string, token: string) Promise~void~
         -removeAbandonedLock(path: string) Promise~void~
-        -withFileLock(path: string, operation: Type42) Promise~T~
-        -withMutationFileLock(operation: Type42) Promise~T~
-        -mutate(operation: Type215) Promise~T~
+        -withFileLock(path: string, operation: Type49) Promise~T~
+        -withMutationFileLock(operation: Type49) Promise~T~
+        -mutate(operation: Type225) Promise~T~
         -pruneFailedJobs(state: QueueState) boolean
         -prune(state: QueueState) void
         -updateWatermark(state: QueueState, update: WatermarkAdvance) QueueWatermark
         enqueue(snapshot: CaptureSnapshot) Promise~QueueEnqueueResult~
         enqueueSnapshot(snapshot: CaptureSnapshot) Promise~QueueEnqueueResult~
-        advanceWatermark(update: Type216) Promise~QueueWatermark~
+        advanceWatermark(update: Type226) Promise~QueueWatermark~
         getWatermark(sessionId: string, branchId: string) Promise~QueueWatermark~
-        resolveBranchId(Signature152)
-        currentWatermark(context: Type72) Promise~QueueWatermark~
-        completeProjectDiscovery(context: Type217) Promise~void~
+        resolveBranchId(Signature164)
+        currentWatermark(context: Type86) Promise~QueueWatermark~
+        completeProjectDiscovery(context: Type227) Promise~void~
         listPending(identity: QueueIdentity) Promise~QueueJob[]~
         listJobs(identity: QueueIdentity) Promise~QueueJob[]~
         listJobMetadata(identity: QueueIdentity) Promise~QueueJobMetadata[]~
-        getJob(jobId: string) Type218
-        hasClaimableWork(identity: QueueIdentity, excludeBranches: Type219) Promise~boolean~
-        claimNext(identity: QueueIdentity, branch: Type220, onDiscarded: Type221) Type218
-        -matchesBranch(job: QueueJob, branch: Type222) boolean
+        getJob(jobId: string) Type71
+        refreshCaptureHistory(jobId: string) Type228
+        -reusableHistory(snapshot: CaptureSnapshot, watermark: QueueWatermark) Type229
+        hasClaimableWork(identity: QueueIdentity, excludeBranches: Type230) Promise~boolean~
+        claimNext(identity: QueueIdentity, branch: Type231, onDiscarded: Type232) Type71
+        -matchesBranch(job: QueueJob, branch: Type233) boolean
         -runningJobCanBeRecovered(job: QueueJob, currentTime: number) boolean
         -claimJob(job: QueueJob) void
-        releaseProgress(jobId: string) Promise~void~
-        cancel(Signature153)
+        releaseProgress(jobId: string, replenishModelCalls: unknown) Promise~void~
+        cancel(Signature165)
         checkpoint(jobId: string, patch: QueueCheckpoint) Promise~QueueJob~
         checkpoint(jobId: string, candidateId: string, outcome: unknown) Promise~QueueJob~
-        checkpoint(jobId: string, patchOrCandidate: Type223, outcome: unknown) Promise~QueueJob~
-        -compactJobSnapshot(Signature154)
+        checkpoint(jobId: string, patchOrCandidate: Type234, outcome: unknown) Promise~QueueJob~
+        -compactJobSnapshot(Signature166)
         -recordCompletedCapture(state: QueueState, job: StoredQueueJob) Promise~void~
         -applyCheckpointPatch(job: StoredQueueJob, patch: QueueCheckpoint) void
         complete(jobId: string) Promise~QueueJob~
         addConflict(conflict: PendingConflict) Promise~PendingConflict~
-        getConflict(conflictId: string) Type224
-        pendingConflicts(Signature155)
-        listPendingConflicts(Signature156)
-        updateConflict(Signature157)
-        withWorkerLock(identity: QueueIdentity, branch: Type220, operation: Type42) Type173
+        getConflict(conflictId: string) Type235
+        pendingConflicts(Signature167)
+        listPendingConflicts(Signature168)
+        markConflictHandedOff(conflictId: string, entryId: string) Promise~void~
+        updateConflict(Signature169)
+        withWorkerLock(identity: QueueIdentity, branch: Type231, operation: Type49) Type179
         close() Promise~void~
     }
-    class c0191["DurableQueueStoreOptions"] {
+    class c0201["DurableQueueStoreOptions"] {
         <<interface>>
         directory: string
         filePath: string
@@ -2077,14 +2172,20 @@ classDiagram
         staleJobMs: number
         maxAttempts: number
         retentionMs: number
-        now: Type40
+        now: Type47
     }
-    class c0192["FileLock"] {
+    class c0202["FileLock"] {
         <<interface>>
         token: string
         +release() Promise~void~
     }
-    class c0193["PendingConflict"] {
+    class c0203["HistoryCache"] {
+        <<interface>>
+        digest: string
+        throughEntryId: string
+        entryIds: string[]
+    }
+    class c0204["PendingConflict"] {
         <<interface>>
         id: string
         jobId: string
@@ -2104,25 +2205,26 @@ classDiagram
         evidence: string[]
         partial: boolean
         reason: string
-        status: Type225
+        status: Type236
+        handoffEntryId: string
         replacementId: number
         uncertainWrite: string
         supersession: SupersessionReceipt
-        replacement: Type226
+        replacement: Type237
         resolution: unknown
         createdAt: string
         updatedAt: string
     }
-    class c0194["QueueBusyError"] {
+    class c0205["QueueBusyError"] {
         <<class>>
         constructor(path: string) unknown
     }
-    class c0195["QueueCheckpoint"] {
+    class c0206["QueueCheckpoint"] {
         <<interface>>
         status: QueueJobStatus
         callCount: number
         extractedCandidates: unknown[]
-        candidateOutcomes: Type46
+        candidateOutcomes: Type53
         submissionRejections: string[]
         lastError: string
         startedAt: string
@@ -2130,20 +2232,20 @@ classDiagram
         inspectionEntries: EvidenceEntry[]
         compactedConversation: CompactedConversation
     }
-    class c0196["QueueEnqueueResult"] {
+    class c0207["QueueEnqueueResult"] {
         <<interface>>
         queued: boolean
         jobId: string
         reason: string
         historyError: string
     }
-    class c0197["QueueIdentity"] {
+    class c0208["QueueIdentity"] {
         <<interface>>
         instanceId: string
         endpoint: string
         accountId: string
     }
-    class c0198["QueueJob"] {
+    class c0209["QueueJob"] {
         <<interface>>
         id: string
         dedupeKey: string
@@ -2152,8 +2254,9 @@ classDiagram
         status: QueueJobStatus
         attempts: number
         callCount: number
+        resumeAttempt: boolean
         extractedCandidates: unknown[]
-        candidateOutcomes: Type46
+        candidateOutcomes: Type53
         submissionRejections: string[]
         lastError: string
         uncertainWrite: string
@@ -2163,22 +2266,22 @@ classDiagram
         startedAt: string
         ownerPid: number
     }
-    class c0199["QueueJobMetadata"] {
+    class c0210["QueueJobMetadata"] {
         <<interface>>
-        snapshot: Type227
+        snapshot: Type238
     }
-    class c0200["QueueJobStatus"] {
+    class c0211["QueueJobStatus"] {
         <<type_alias>>
-        alias: Type228
+        alias: Type239
     }
-    class c0201["QueueState"] {
+    class c0212["QueueState"] {
         <<interface>>
-        version: Type229
+        version: Type240
         jobs: StoredQueueJob[]
         conflicts: PendingConflict[]
-        watermarks: Type230
+        watermarks: Type241
     }
-    class c0202["QueueWatermark"] {
+    class c0213["QueueWatermark"] {
         <<interface>>
         sessionId: string
         branchId: string
@@ -2190,24 +2293,27 @@ classDiagram
         historyDigest: string
         historyThroughEntryId: string
         historyEntryIds: string[]
+        historyAlternatives: HistoryCache[]
         updatedAt: string
     }
-    class c0203["SnapshotPayload"] {
+    class c0214["SnapshotPayload"] {
         <<type_alias>>
-        alias: Type231
+        alias: Type242
+        historyEntryIds: string[]
     }
-    class c0204["StoredQueueJob"] {
+    class c0215["StoredQueueJob"] {
         <<interface>>
         snapshotDigest: string
         inspectionDigest: string
     }
-    class c0205["SupersessionReceipt"] {
+    class c0216["SupersessionReceipt"] {
         <<interface>>
         oldMemoryId: number
         replacementId: number
-        status: Type7
+        operation: Type243
+        status: Type10
     }
-    class c0206["WatermarkAdvance"] {
+    class c0217["WatermarkAdvance"] {
         <<interface>>
         sessionId: string
         branchId: string
@@ -2216,16 +2322,15 @@ classDiagram
         snapshotId: string
         dedupeKey: string
     }
-    class c0207["src/queue.ts"] {
+    class c0218["src/queue.ts"] {
         <<module>>
         jsonSnapshot(value: T) T
-        nowIso(now: Type40) string
+        nowIso(now: Type47) string
         contextKey(sessionId: string, branchId: string) string
         dedupeKey(snapshot: CaptureSnapshot) string
         jobIdFor(key: string) string
         scrubDiagnostic(value: string) string
-        sanitizeOutcomeMap(value: Type46) Type46
-        outcomeRecord(value: unknown) Type46
+        outcomeRecord(value: unknown) Type53
         interruptedWrite(job: QueueJob) boolean
         releaseCompletedArtifacts(job: StoredQueueJob) void
         normaliseState(value: unknown) QueueState
@@ -2235,22 +2340,24 @@ classDiagram
         conflictIdentityMatches(conflict: PendingConflict, identity: QueueIdentity) boolean
         shouldRetain(timestamp: string, now: number, retentionMs: number) boolean
         diagnosticError(error: unknown) string
-        recordId(value: unknown) Type76
-        orderedSourceEntryIds(snapshot: CaptureSnapshot) Type88
-        summaryCursor(snapshot: CaptureSnapshot) Type232
-        cursorComparison(candidate: Type233, current: Type234) Type77
+        recordId(value: unknown) Type91
+        orderedSourceEntryIds(snapshot: CaptureSnapshot) Type95
+        summaryCursor(snapshot: CaptureSnapshot) Type244
+        cursorComparison(candidate: Type245, current: Type246) Type57
         clearHistoryCache(watermark: QueueWatermark) void
+        historyCaches(watermark: QueueWatermark) HistoryCache[]
+        setHistoryCaches(watermark: QueueWatermark, caches: HistoryCache[]) void
     }
-    class c0208["DeadlineSignal"] {
+    class c0219["DeadlineSignal"] {
         <<interface>>
         signal: AbortSignal
-        finish: Type21
-        pause: Type21
-        resume: Type21
-        expired: Type39
-        diagnostic: Type235
+        finish: Type23
+        pause: Type23
+        resume: Type23
+        expired: Type46
+        diagnostic: Type247
     }
-    class c0209["DeeperRecallRequest"] {
+    class c0220["DeeperRecallRequest"] {
         <<interface>>
         query: string
         context: WorkContext
@@ -2259,7 +2366,7 @@ classDiagram
         deadlineMs: number
         projects: Project[]
     }
-    class c0210["RecallPlan"] {
+    class c0221["RecallPlan"] {
         <<interface>>
         search: boolean
         queries: string[]
@@ -2268,9 +2375,9 @@ classDiagram
         repositorySpecific: boolean
         projectId: number
     }
-    class c0211["RecallRequest"] {
+    class c0222["RecallRequest"] {
         <<interface>>
-        diagnosticContext: Type236
+        diagnosticContext: Type248
         prompt: string
         context: WorkContext
         scope: Scope
@@ -2278,12 +2385,12 @@ classDiagram
         recallPolicy: string
         signal: AbortSignal
         deadlineMs: number
-        authorizeProject: Type237
+        authorizeProject: Type249
         projects: Project[]
         sessionContext: EvidenceEntry[]
-        onPlan: Type238
+        onPlan: Type250
     }
-    class c0212["RecallResult"] {
+    class c0223["RecallResult"] {
         <<interface>>
         text: string
         historicalText: string
@@ -2302,35 +2409,35 @@ classDiagram
         codeArtifactIds: number[]
         fileIds: number[]
     }
-    class c0213["RecallService"] {
+    class c0224["RecallService"] {
         <<class>>
         -defaultDeadlineMs: number
         -failureThreshold: number
         -cooldownMs: number
-        -now: Type239
+        -now: Type251
         -knowledge: KnowledgeReadService
         -concurrency: number
         -failures: unknown
-        -openedAt: Type77
-        constructor(Signature158)
+        -openedAt: Type57
+        constructor(Signature170)
         -client: ForgetfulClient
         -model: MemoryModelClient
         recall(request: RecallRequest) Promise~RecallResult~
-        -recallReadTool(Signature159)
-        -finishFailure(Signature160)
-        -finishReview(Signature161)
+        -recallReadTool(Signature171)
+        -finishFailure(Signature172)
+        -finishReview(Signature173)
         deeper(request: DeeperRecallRequest) Promise~RecallResult~
         -memoryInScope(memory: Memory, scope: Scope, projectId: number) boolean
-        -optionalKnowledge(Signature162)
-        -resultWithKnowledge(Signature163)
+        -optionalKnowledge(Signature174)
+        -resultWithKnowledge(Signature175)
         -plannerInput(request: RecallRequest) unknown
-        -authorizeProjectSelection(Signature164)
-        -requestsDifferentProject(Signature165)
-        -searchMemories(Signature166)
+        -authorizeProjectSelection(Signature176)
+        -requestsDifferentProject(Signature177)
+        -searchMemories(Signature178)
         -searchFailure(error: unknown) unknown
-        -searchRequest(Signature167)
+        -searchRequest(Signature179)
         -queryContext(plan: RecallPlan) string
-        -resolveScope(Signature168)
+        -resolveScope(Signature180)
         -contextProjectResolution(context: WorkContext) ScopeResolution
         -matchResolution(matches: Project[]) ScopeResolution
         -ensureLive(deadline: DeadlineSignal) void
@@ -2339,36 +2446,36 @@ classDiagram
         -recordFailure() void
         -recordSuccess() void
     }
-    class c0214["RecallServiceOptions"] {
+    class c0225["RecallServiceOptions"] {
         <<interface>>
         concurrency: number
         deadlineMs: number
         circuitFailureThreshold: number
         circuitCooldownMs: number
-        now: Type239
+        now: Type251
     }
-    class c0215["ReviewValidationError"] {
+    class c0226["ReviewValidationError"] {
         <<class>>
         constructor(message: string, debug: string) unknown
         debug: string
     }
-    class c0216["ScopeResolution"] {
+    class c0227["ScopeResolution"] {
         <<interface>>
         projectId: number
         project: Project
         reason: string
     }
-    class c0217["SearchOutcome"] {
+    class c0228["SearchOutcome"] {
         <<interface>>
         memories: Memory[]
         failed: boolean
         diagnostic: string
         failure: unknown
     }
-    class c0218["src/recall.ts"] {
+    class c0229["src/recall.ts"] {
         <<module>>
-        isForgetfulResponseError(error: unknown) Type244
-        isObject(value: unknown) Type96
+        isForgetfulResponseError(error: unknown) Type256
+        isObject(value: unknown) Type103
         plannerString(value: unknown, field: string, required: unknown) string
         positiveInteger(value: unknown, field: string) number
         abortError() Error
@@ -2376,36 +2483,46 @@ classDiagram
         failureReason(deadline: DeadlineSignal, callerSignal: AbortSignal) string
         exceptionDiagnostic(stage: string, error: unknown) string
         trim(value: string, max: number) string
-        repositoryIdentity(context: WorkContext) Type76
+        repositoryIdentity(context: WorkContext) Type91
         repoAwareQuery(query: string, context: WorkContext, repositorySpecific: boolean) string
         availableProjects(context: WorkContext, supplied: Project[]) Project[]
-        createDeadlineSignal(callerSignal: Type165, deadlineMs: number) DeadlineSignal
+        createDeadlineSignal(callerSignal: Type170, deadlineMs: number) DeadlineSignal
         raceAbort(promise: Promise~T~, signal: AbortSignal) Promise~T~
         parseQueries(value: unknown, search: boolean) string[]
         parseEntities(value: unknown) string[]
         parsePlan(value: unknown) RecallPlan
-        validateMemory(value: unknown) Type245
-        formatRecall(Signature169)
-        reviewSources(result: Partial~RecallResult~) Type247
+        validateMemory(value: unknown) Type257
+        formatRecall(Signature181)
+        reviewSources(result: Partial~RecallResult~) Type259
         sourceLabels(sources: ReturnType~typeof reviewSources~) string[]
         boundDebugText(value: string, max: number, marker: string) string
         reviewerOutputText(value: unknown) string
-        reviewMismatchDirection(value: unknown) Type76
-        reviewValidationDebug(Signature170)
-        submissionAttemptTrace(rejections: string[], exhausted: unknown, label: Type248) string
-        parseReview(value: unknown, candidates: RecallResult) Type249
-        recallReviewSubmission(Signature171)
+        reviewMismatchDirection(value: unknown) Type91
+        reviewValidationDebug(Signature182)
+        submissionAttemptTrace(rejections: string[], exhausted: unknown, label: Type260) string
+        parseReview(value: unknown, candidates: RecallResult) Type261
+        recallReviewSubmission(Signature183)
         sanitizePolicy(value: string) string
     }
-    class c0219["src/repository.ts"] {
+    class c0230["src/repository.ts"] {
         <<module>>
         repositoryName(value: string) string
     }
-    class c0220["CaptureSnapshotWithStatus"] {
+    class c0231["SetupHelp"] {
+        <<interface>>
+        newInstance: boolean
+        route: Type263
+    }
+    class c0232["src/setup.ts"] {
+        <<module>>
+        promptSetupHelp(ctx: ExtensionContext) Type264
+        buildSetupPrompt(help: SetupHelp, agentDir: string, settingsPath: string) string
+    }
+    class c0233["CaptureSnapshotWithStatus"] {
         <<interface>>
         finalStopReason: string
     }
-    class c0221["MessageRecord"] {
+    class c0234["MessageRecord"] {
         <<interface>>
         role: unknown
         content: unknown
@@ -2415,7 +2532,7 @@ classDiagram
         toolCallId: unknown
         details: unknown
     }
-    class c0222["SnapshotOptions"] {
+    class c0235["SnapshotOptions"] {
         <<interface>>
         session: SnapshotSessionReader
         context: WorkContext
@@ -2424,33 +2541,33 @@ classDiagram
         scope: Scope
         policy: string
         modelVersion: string
-        afterEntryId: Type103
-        baselineEntryId: Type103
+        afterEntryId: Type110
+        baselineEntryId: Type110
         branchId: string
         createdAt: string
         leafEntryId: string
         excludedEvidenceEntryIds: readonly string[]
-        includeToolEvidence: Type251
+        includeToolEvidence: Type265
     }
-    class c0223["SnapshotResult"] {
+    class c0236["SnapshotResult"] {
         <<type_alias>>
-        alias: Type252
+        alias: Type266
         snapshot: CaptureSnapshotWithStatus
-        status: Type253
+        status: Type267
         finalEntryId: string
         reason: string
-        status: Type254
+        status: Type268
     }
-    class c0224["SnapshotSessionReader"] {
+    class c0237["SnapshotSessionReader"] {
         <<interface>>
         +getSessionId() string
-        +getLeafId() Type103
+        +getLeafId() Type110
         +getBranch(fromId: string) SessionEntry[]
     }
-    class c0225["src/snapshot.ts"] {
+    class c0238["src/snapshot.ts"] {
         <<module>>
-        isRecord(value: unknown) Type96
-        asMessage(entry: SessionEntry) Type255
+        isRecord(value: unknown) Type103
+        asMessage(entry: SessionEntry) Type269
         contentText(content: unknown) string
         safeText(text: string) string
         sanitizeConversation(value: unknown) unknown
@@ -2459,48 +2576,49 @@ classDiagram
         conversationForEntry(entry: SessionEntry) unknown
         rootId(branch: SessionEntry[], fallback: string) string
         snapshotId(sessionId: string, branchId: string, finalEntryId: string) string
-        deltaStartIndex(Signature172)
-        toolEvidence(id: string, message: MessageRecord, includeToolEvidence: Type258) Type257
-        evidenceForEntry(entry: SessionEntry, includeToolEvidence: Type259) Type257
-        lastAssistantEntry(entries: SessionEntry[]) Type260
-        collectEvidence(entries: SessionEntry[], includeToolEvidence: Type258) EvidenceEntry[]
+        deltaStartIndex(Signature184)
+        toolEvidence(id: string, message: MessageRecord, includeToolEvidence: Type272) Type271
+        evidenceForEntry(entry: SessionEntry, includeToolEvidence: Type273) Type271
+        lastAssistantEntry(entries: SessionEntry[]) Type274
+        collectEvidence(entries: SessionEntry[], includeToolEvidence: Type272) EvidenceEntry[]
         captureSummaryRecord(history: CaptureHistorySummary) unknown
-        compactCaptureSnapshot(Signature173)
-        reuseCaptureHistory(snapshot: CaptureSnapshot, history: Type261) CaptureSnapshot
+        captureConversation(snapshot: CaptureSnapshot) readonly unknown[]
+        compactCaptureSnapshot(Signature185)
+        reuseCaptureHistory(snapshot: CaptureSnapshot, history: Type275) CaptureSnapshot
         buildCaptureSnapshot(options: SnapshotOptions) SnapshotResult
     }
-    class c0226["SourceInspectionError"] {
+    class c0239["SourceInspectionError"] {
         <<interface>>
         name: string
         message: string
         code: string
     }
-    class c0227["SourceInspectionRequest"] {
+    class c0240["SourceInspectionRequest"] {
         <<type_alias>>
-        alias: Type262
+        alias: Type276
         path: string
         path: never
         url: never
         url: string
     }
-    class c0228["SourceInspectionResult"] {
+    class c0241["SourceInspectionResult"] {
         <<type_alias>>
-        alias: Type263
-        status: Type264
+        alias: Type277
+        status: Type278
         identifier: string
         content: string
         observedAt: string
         contentHash: string
         sanitized: boolean
-        page: Type265
+        page: Type279
         source_repo: string
         source_files: string[]
         source_url: string
         encoding_version: string
-        fileState: Type266
+        fileState: Type280
         provenanceError: SourceInspectionError
         httpStatus: number
-        status: Type267
+        status: Type281
         observedAt: string
         error: SourceInspectionError
         source_url: string
@@ -2508,26 +2626,26 @@ classDiagram
         httpStatusText: string
         body: string
     }
-    class c0229["SourceInspector"] {
+    class c0242["SourceInspector"] {
         <<class>>
-        -root: Type268
+        -root: Type282
         constructor(options: SourceInspectorOptions) unknown
         -options: SourceInspectorOptions
         inspect(input: unknown, signal: AbortSignal) Promise~SourceInspectionResult~
-        -inspectUrl(request: Type269, signal: AbortSignal) Promise~SourceInspectionResult~
-        -getUrl(url: URL, allowLoopback: boolean, signal: AbortSignal) Type270
+        -inspectUrl(request: Type283, signal: AbortSignal) Promise~SourceInspectionResult~
+        -getUrl(url: URL, allowLoopback: boolean, signal: AbortSignal) Type284
         -check(signal: AbortSignal) void
         -readFile(cwd: string, path: string, signal: AbortSignal) Promise~Buffer~
         -provenance(cwd: string, path: string, bytes: Buffer, signal: AbortSignal) unknown
         -git(cwd: string, args: string[], signal: AbortSignal) Promise~string~
     }
-    class c0230["SourceInspectorOptions"] {
+    class c0243["SourceInspectorOptions"] {
         <<interface>>
         cwd: string
         repoName: string
-        canRead: Type39
+        canRead: Type46
     }
-    class c0231["src/source-inspection.ts"] {
+    class c0244["src/source-inspection.ts"] {
         <<module>>
         loopback(host: string) boolean
         validateUrl(url: URL) string
@@ -2536,724 +2654,753 @@ classDiagram
         sourceContent(bytes: Buffer, request: SourceInspectionRequest) unknown
         requireInside(cwd: string, path: string) void
     }
-    c0000 ..> c0121 : defaultExtension() calls createForgetfulExtension()
+    c0000 ..> c0129 : defaultExtension() calls createForgetfulExtension()
     c0003 ..> c0004 : setLabel() calls refresh()
-    c0003 ..> c0040 : dispose() calls stop()
+    c0003 ..> c0047 : dispose() calls stop()
     c0004 --> c0003 : field loader
     c0004 ..> c0003 : 4 relationships (see list)
     c0004 ..> c0004 : 3 relationships (see list)
-    c0004 ..> c0040 : refresh() calls now()
-    c0005 --> c0006 : 2 relationships (see list)
-    c0005 --> c0007 : field decisions
-    c0005 --> c0008 : field preservation
-    c0005 --> c0009 : field previous
-    c0005 --> c0065 : field resources
-    c0005 --> c0069 : field resources
-    c0005 --> c0082 : 2 relationships (see list)
-    c0009 --> c0065 : field codeArtifacts
-    c0009 --> c0069 : field documents
-    c0009 --> c0072 : field entities
-    c0009 --> c0082 : field memory
-    c0010 ..> c0004 : 2 relationships (see list)
-    c0010 ..> c0005 : 9 relationships (see list)
-    c0010 ..> c0006 : type in executeConnection
-    c0010 ..> c0007 : 3 relationships (see list)
-    c0010 ..> c0008 : 2 relationships (see list)
-    c0010 ..> c0009 : type in preparePreviousConnections
-    c0010 ..> c0010 : 13 relationships (see list)
-    c0010 ..> c0065 : type in readAttachmentRecords
-    c0010 ..> c0069 : type in readAttachmentRecords
-    c0010 ..> c0079 : 7 relationships (see list)
-    c0010 ..> c0082 : 6 relationships (see list)
-    c0010 ..> c0123 : 11 relationships (see list)
-    c0010 ..> c0126 : 6 relationships (see list)
-    c0010 ..> c0165 : executeConnection() calls execute()
-    c0010 ..> c0186 : 5 relationships (see list)
-    c0010 ..> c0218 : 2 relationships (see list)
-    c0012 --> c0021 : field candidates
-    c0013 --> c0021 : field kind
-    c0019 --> c0021 : field candidate
-    c0019 --> c0033 : field neighborhood
-    c0019 --> c0077 : field evidenceEntries
-    c0019 --> c0082 : field overlaps
-    c0021 --> c0024 : field codeArtifacts
-    c0021 --> c0030 : field documents
-    c0021 --> c0032 : field entities
-    c0021 --> c0037 : field relationships
-    c0022 --> c0020 : field excludeBranches
-    c0023 --> c0020 : field deferredBranches
-    c0024 --|> c0153 : inherits
-    c0025 --> c0016 : field action
-    c0025 --> c0039 : field reuse
-    c0026 --> c0005 : field linkReview
-    c0026 --> c0016 : field action
-    c0027 --> c0193 : field status
-    c0028 --> c0026 : field candidates
-    c0028 --> c0200 : field status
-    c0029 --> c0027 : field conflicts
-    c0029 --> c0028 : field jobs
-    c0030 --|> c0154 : inherits
-    c0032 --|> c0156 : inherits
-    c0033 --> c0065 : field codeArtifacts
-    c0033 --> c0069 : field documents
-    c0033 --> c0072 : field entities
-    c0033 --> c0074 : field relationships
-    c0034 --> c0042 : field uncertainWrite
-    c0034 --> c0205 : field supersession
-    c0036 --|> c0193 : inherits
-    c0037 --|> c0158 : inherits
-    c0038 --> c0193 : field conflict
-    c0040 ..> c0004 : activity() calls set()
-    c0040 ..> c0005 : 3 relationships (see list)
-    c0040 ..> c0010 : 5 relationships (see list)
-    c0040 --> c0017 : field activityPhase
-    c0040 ..> c0017 : type in activity
-    c0040 ..> c0018 : 2 relationships (see list)
-    c0040 ..> c0019 : type in validateEquivalentCandidate
-    c0040 ..> c0020 : 3 relationships (see list)
-    c0040 ..> c0021 : 32 relationships (see list)
-    c0040 ..> c0022 : 3 relationships (see list)
-    c0040 ..> c0023 : 10 relationships (see list)
-    c0040 ..> c0025 : 9 relationships (see list)
-    c0040 ..> c0029 : type in diagnostics
-    c0040 ..> c0031 : 2 relationships (see list)
-    c0040 ..> c0033 : 3 relationships (see list)
-    c0040 ..> c0035 : 12 relationships (see list)
-    c0040 ..> c0036 : 2 relationships (see list)
-    c0040 ..> c0038 : 6 relationships (see list)
-    c0040 ..> c0040 : 171 relationships (see list)
-    c0040 --> c0041 : field onActivity
-    c0040 ..> c0041 : type in constructor
-    c0040 ..> c0042 : 3 relationships (see list)
-    c0040 ..> c0043 : 3 relationships (see list)
-    c0040 ..> c0044 : 2 relationships (see list)
-    c0040 ..> c0045 : 7 relationships (see list)
-    c0040 ..> c0046 : 6 relationships (see list)
-    c0040 ..> c0048 : 87 relationships (see list)
-    c0040 --> c0063 : field getMode
-    c0040 ..> c0063 : 3 relationships (see list)
-    c0040 ..> c0064 : 7 relationships (see list)
-    c0040 ..> c0072 : 3 relationships (see list)
-    c0040 ..> c0074 : type in neighborhoodRelationships
-    c0040 --> c0079 : field client
-    c0040 ..> c0079 : type in cancellableClient
-    c0040 ..> c0080 : type in cancellableKnowledge
-    c0040 --> c0082 : field readSavedMemory
-    c0040 ..> c0082 : 14 relationships (see list)
-    c0040 ..> c0083 : type in createMemory
-    c0040 --> c0085 : field model
-    c0040 ..> c0087 : type in sourceInspectionTool
-    c0040 ..> c0097 : 4 relationships (see list)
-    c0040 ..> c0123 : 38 relationships (see list)
-    c0040 ..> c0125 : planConflictReplacement() calls ids()
-    c0040 ..> c0126 : 30 relationships (see list)
-    c0040 --> c0165 : field knowledgeWriter
-    c0040 ..> c0165 : 2 relationships (see list)
-    c0040 --> c0168 : field logger
-    c0040 ..> c0170 : 13 relationships (see list)
-    c0040 ..> c0172 : 4 relationships (see list)
-    c0040 ..> c0176 : loadCandidates() calls prepareCapture()
-    c0040 ..> c0186 : 15 relationships (see list)
-    c0040 --> c0190 : field queue
-    c0040 ..> c0190 : 62 relationships (see list)
-    c0040 ..> c0193 : 15 relationships (see list)
-    c0040 --> c0197 : field identity
-    c0040 ..> c0198 : 37 relationships (see list)
-    c0040 ..> c0205 : type in recordSupersession
-    c0040 ..> c0218 : validateRevisionText() calls trim()
-    c0040 ..> c0225 : planConflictReplacement() calls sanitizeCaptureConversation()
-    c0040 ..> c0229 : 2 relationships (see list)
-    c0041 --> c0017 : field onActivity
-    c0041 --> c0063 : field getMode
-    c0041 --> c0079 : field client
-    c0041 --> c0085 : field model
-    c0041 --> c0168 : field logger
-    c0041 --> c0190 : field queue
-    c0042 --|> c0035 : inherits
-    c0043 --> c0077 : field selectedAdditionalEntries
-    c0044 --> c0021 : field candidate
-    c0044 --> c0082 : field oldMemory
-    c0044 --> c0198 : field fakeJob
-    c0046 --> c0077 : field additionalEntries
-    c0048 ..> c0011 : 2 relationships (see list)
-    c0048 ..> c0012 : type in parseCandidates
-    c0048 ..> c0013 : 2 relationships (see list)
-    c0048 ..> c0014 : 2 relationships (see list)
-    c0048 ..> c0015 : 17 relationships (see list)
-    c0048 ..> c0021 : 15 relationships (see list)
-    c0048 ..> c0024 : type in codeArtifactResource
-    c0048 ..> c0025 : 5 relationships (see list)
-    c0048 ..> c0030 : type in documentResource
-    c0048 ..> c0032 : type in entityResource
-    c0048 ..> c0037 : type in relationshipResource
-    c0048 ..> c0043 : type in conflictResolutionEvidence
-    c0048 ..> c0045 : 10 relationships (see list)
-    c0048 ..> c0047 : 2 relationships (see list)
-    c0048 ..> c0048 : 94 relationships (see list)
-    c0048 ..> c0064 : 14 relationships (see list)
-    c0048 ..> c0073 : type in entityClassification
-    c0048 ..> c0077 : 4 relationships (see list)
-    c0048 ..> c0082 : type in captureKnowledgePlan
-    c0048 ..> c0084 : type in memoryInput
-    c0048 ..> c0090 : type in captureCandidateSubmission
-    c0048 ..> c0097 : 3 relationships (see list)
-    c0048 ..> c0126 : sourceEvidence() calls get()
-    c0048 ..> c0161 : type in captureKnowledgePlan
-    c0048 ..> c0172 : 2 relationships (see list)
-    c0048 ..> c0186 : 16 relationships (see list)
-    c0048 ..> c0218 : 7 relationships (see list)
-    c0048 ..> c0225 : snapshotForPersistence() calls sanitizeCaptureSnapshot()
-    c0050 --> c0051 : field instance
-    c0050 --> c0054 : field model
-    c0050 --> c0058 : field prompts
-    c0050 --> c0059 : field scopeSource
-    c0050 --> c0060 : field verbosity
-    c0050 --> c0063 : field captureMode
-    c0050 --> c0094 : field scope
-    c0050 --> c0169 : field logging
-    c0061 ..> c0050 : type in loadForgetfulConfig
-    c0061 ..> c0052 : 2 relationships (see list)
-    c0061 ..> c0053 : type in loadForgetfulConfig
-    c0061 ..> c0054 : 2 relationships (see list)
-    c0061 ..> c0056 : 2 relationships (see list)
-    c0061 ..> c0058 : 2 relationships (see list)
-    c0061 ..> c0059 : type in resolveScope
-    c0061 ..> c0060 : 2 relationships (see list)
-    c0061 ..> c0061 : 29 relationships (see list)
-    c0061 ..> c0063 : type in resolveCaptureMode
-    c0061 ..> c0094 : 2 relationships (see list)
-    c0061 ..> c0151 : 2 relationships (see list)
-    c0061 ..> c0169 : type in isFileLogLevel
-    c0061 ..> c0170 : writeJson() calls close()
-    c0061 ..> c0218 : 3 relationships (see list)
-    c0064 --> c0062 : field historySummary
-    c0064 --> c0063 : field mode
-    c0064 --> c0077 : field entries
-    c0064 --> c0094 : field scope
-    c0064 --> c0097 : field context
-    c0065 --|> c0066 : inherits
-    c0066 --|> c0093 : inherits
-    c0069 --|> c0070 : inherits
-    c0070 --|> c0093 : inherits
+    c0004 ..> c0047 : refresh() calls now()
+    c0007 ..> c0005 : type in initialCorrectionCycle
+    c0007 ..> c0096 : type in captureFailureReport
+    c0007 ..> c0196 : captureFailureReport() calls sanitizeValue()
+    c0008 --> c0009 : 2 relationships (see list)
+    c0008 --> c0010 : field decisions
+    c0008 --> c0011 : field preservation
+    c0008 --> c0012 : field previous
+    c0008 --> c0072 : field resources
+    c0008 --> c0076 : field resources
+    c0008 --> c0089 : 2 relationships (see list)
+    c0012 --> c0072 : field codeArtifacts
+    c0012 --> c0076 : field documents
+    c0012 --> c0079 : field entities
+    c0012 --> c0089 : field memory
+    c0013 ..> c0004 : 2 relationships (see list)
+    c0013 ..> c0006 : authorizedMemory() constructs CaptureSelectionError
+    c0013 ..> c0008 : 8 relationships (see list)
+    c0013 ..> c0009 : type in executeConnection
+    c0013 ..> c0010 : 3 relationships (see list)
+    c0013 ..> c0011 : type in validateLinkReviews
+    c0013 ..> c0012 : type in preparePreviousConnections
+    c0013 ..> c0013 : 10 relationships (see list)
+    c0013 ..> c0072 : type in readAttachmentRecords
+    c0013 ..> c0076 : type in readAttachmentRecords
+    c0013 ..> c0086 : 7 relationships (see list)
+    c0013 ..> c0089 : 6 relationships (see list)
+    c0013 ..> c0104 : 3 relationships (see list)
+    c0013 ..> c0131 : 8 relationships (see list)
+    c0013 ..> c0134 : 6 relationships (see list)
+    c0013 ..> c0174 : executeConnection() calls execute()
+    c0013 ..> c0196 : 5 relationships (see list)
+    c0013 ..> c0229 : validateLinkDecisions() calls trim()
+    c0014 --> c0104 : field scope
+    c0016 --|> c0014 : inherits
+    c0018 ..> c0006 : 3 relationships (see list)
+    c0018 ..> c0014 : 4 relationships (see list)
+    c0018 ..> c0015 : 4 relationships (see list)
+    c0018 ..> c0016 : type in preserveMergeConnections
+    c0018 ..> c0018 : 8 relationships (see list)
+    c0018 ..> c0086 : 5 relationships (see list)
+    c0018 ..> c0089 : type in collectMergeConnections
+    c0018 ..> c0131 : 7 relationships (see list)
+    c0018 ..> c0134 : 2 relationships (see list)
+    c0018 ..> c0174 : preserveMergeConnections() calls execute()
+    c0019 --> c0026 : field candidates
+    c0024 --> c0026 : field candidate
+    c0024 --> c0039 : field neighborhood
+    c0024 --> c0089 : field overlaps
+    c0026 --> c0029 : field codeArtifacts
+    c0026 --> c0035 : field documents
+    c0026 --> c0037 : field entities
+    c0026 --> c0044 : field relationships
+    c0027 --> c0025 : field excludeBranches
+    c0028 --> c0025 : field deferredBranches
+    c0029 --|> c0162 : inherits
+    c0030 --> c0021 : field action
+    c0030 --> c0046 : field reuse
+    c0031 --> c0008 : field linkReview
+    c0031 --> c0021 : field action
+    c0032 --> c0204 : field status
+    c0033 --> c0031 : field candidates
+    c0033 --> c0211 : field status
+    c0034 --> c0032 : field conflicts
+    c0034 --> c0033 : field jobs
+    c0035 --|> c0163 : inherits
+    c0037 --|> c0165 : inherits
+    c0038 --> c0015 : field connections
+    c0038 --> c0026 : field candidate
+    c0038 --> c0089 : field memories
+    c0039 --> c0072 : field codeArtifacts
+    c0039 --> c0076 : field documents
+    c0039 --> c0079 : field entities
+    c0039 --> c0081 : field relationships
+    c0040 --> c0049 : field uncertainWrite
+    c0040 --> c0216 : field supersession
+    c0041 --|> c0100 : inherits
+    c0042 --|> c0204 : inherits
+    c0044 --|> c0167 : inherits
+    c0045 --> c0204 : field conflict
+    c0047 ..> c0004 : activity() calls set()
+    c0047 ..> c0006 : 9 relationships (see list)
+    c0047 ..> c0007 : 13 relationships (see list)
+    c0047 ..> c0008 : 5 relationships (see list)
+    c0047 ..> c0013 : 4 relationships (see list)
+    c0047 ..> c0018 : 6 relationships (see list)
+    c0047 --> c0022 : field activityPhase
+    c0047 ..> c0022 : type in activity
+    c0047 ..> c0023 : 2 relationships (see list)
+    c0047 ..> c0024 : type in prepareOverlapBatch
+    c0047 ..> c0025 : 3 relationships (see list)
+    c0047 ..> c0026 : 42 relationships (see list)
+    c0047 ..> c0027 : 3 relationships (see list)
+    c0047 ..> c0028 : 13 relationships (see list)
+    c0047 ..> c0030 : 13 relationships (see list)
+    c0047 ..> c0034 : type in diagnostics
+    c0047 ..> c0036 : 2 relationships (see list)
+    c0047 ..> c0038 : 3 relationships (see list)
+    c0047 ..> c0039 : 2 relationships (see list)
+    c0047 ..> c0041 : 13 relationships (see list)
+    c0047 ..> c0042 : 2 relationships (see list)
+    c0047 ..> c0043 : ensureModelCallAllowed() constructs CaptureProgress
+    c0047 ..> c0045 : 6 relationships (see list)
+    c0047 ..> c0047 : 227 relationships (see list)
+    c0047 --> c0048 : field onActivity
+    c0047 ..> c0048 : type in constructor
+    c0047 ..> c0049 : 9 relationships (see list)
+    c0047 ..> c0050 : 3 relationships (see list)
+    c0047 ..> c0051 : 2 relationships (see list)
+    c0047 ..> c0052 : 4 relationships (see list)
+    c0047 ..> c0053 : resolveDestination() constructs MissingCaptureDestination
+    c0047 ..> c0054 : 6 relationships (see list)
+    c0047 ..> c0055 : 107 relationships (see list)
+    c0047 --> c0070 : field getMode
+    c0047 ..> c0070 : 3 relationships (see list)
+    c0047 ..> c0071 : 7 relationships (see list)
+    c0047 ..> c0079 : 4 relationships (see list)
+    c0047 ..> c0081 : type in neighborhoodRelationships
+    c0047 --> c0086 : field client
+    c0047 ..> c0086 : type in cancellableClient
+    c0047 ..> c0087 : type in cancellableKnowledge
+    c0047 --> c0089 : field readSavedMemory
+    c0047 ..> c0089 : 15 relationships (see list)
+    c0047 ..> c0090 : type in createMemory
+    c0047 --> c0092 : field model
+    c0047 ..> c0094 : evidenceReadTool() constructs ModelEvidencePage
+    c0047 ..> c0095 : sourceInspectionTool() constructs ModelReadErrorResult
+    c0047 ..> c0096 : 2 relationships (see list)
+    c0047 ..> c0107 : 4 relationships (see list)
+    c0047 ..> c0131 : 35 relationships (see list)
+    c0047 ..> c0134 : 32 relationships (see list)
+    c0047 --> c0174 : field knowledgeWriter
+    c0047 ..> c0174 : 2 relationships (see list)
+    c0047 --> c0178 : field logger
+    c0047 ..> c0180 : 14 relationships (see list)
+    c0047 ..> c0182 : 4 relationships (see list)
+    c0047 ..> c0186 : loadCandidates() calls prepareCapture()
+    c0047 ..> c0196 : 23 relationships (see list)
+    c0047 --> c0200 : field queue
+    c0047 ..> c0200 : 70 relationships (see list)
+    c0047 ..> c0204 : 13 relationships (see list)
+    c0047 --> c0208 : field identity
+    c0047 ..> c0209 : 57 relationships (see list)
+    c0047 ..> c0216 : type in recordSupersession
+    c0047 ..> c0229 : 3 relationships (see list)
+    c0047 ..> c0238 : 8 relationships (see list)
+    c0047 ..> c0242 : 2 relationships (see list)
+    c0048 --> c0022 : field onActivity
+    c0048 --> c0070 : field getMode
+    c0048 --> c0086 : field client
+    c0048 --> c0092 : field model
+    c0048 --> c0178 : field logger
+    c0048 --> c0200 : field queue
+    c0049 --|> c0041 : inherits
+    c0050 --> c0084 : field selectedAdditionalEntries
+    c0051 --> c0026 : field candidate
+    c0051 --> c0089 : field oldMemory
+    c0051 --> c0209 : field fakeJob
+    c0053 --|> c0006 : inherits
+    c0053 ..> c0026 : type in constructor
+    c0054 --> c0084 : field additionalEntries
+    c0055 ..> c0019 : type in parseCandidates
+    c0055 ..> c0020 : 3 relationships (see list)
+    c0055 ..> c0026 : 7 relationships (see list)
+    c0055 ..> c0030 : 6 relationships (see list)
+    c0055 ..> c0038 : type in reusableMergeComposition
+    c0055 ..> c0050 : type in conflictResolutionEvidence
+    c0055 ..> c0052 : 11 relationships (see list)
+    c0055 ..> c0055 : 36 relationships (see list)
+    c0055 ..> c0071 : 8 relationships (see list)
+    c0055 ..> c0084 : 3 relationships (see list)
+    c0055 ..> c0089 : type in captureKnowledgePlan
+    c0055 ..> c0091 : type in memoryInput
+    c0055 ..> c0099 : type in captureCandidateSubmission
+    c0055 ..> c0107 : 4 relationships (see list)
+    c0055 ..> c0134 : 2 relationships (see list)
+    c0055 ..> c0170 : type in captureKnowledgePlan
+    c0055 ..> c0196 : 10 relationships (see list)
+    c0055 ..> c0229 : 7 relationships (see list)
+    c0055 ..> c0238 : snapshotForPersistence() calls sanitizeCaptureSnapshot()
+    c0055 ..> c0242 : errorMessage() calls inspect()
+    c0057 --> c0058 : field instance
+    c0057 --> c0061 : field model
+    c0057 --> c0065 : field prompts
+    c0057 --> c0066 : field scopeSource
+    c0057 --> c0067 : field verbosity
+    c0057 --> c0070 : field captureMode
+    c0057 --> c0104 : field scope
+    c0057 --> c0179 : field logging
+    c0068 ..> c0047 : resolveLogDirectory() calls resolve()
+    c0068 ..> c0057 : type in loadForgetfulConfig
+    c0068 ..> c0059 : 2 relationships (see list)
+    c0068 ..> c0060 : type in loadForgetfulConfig
+    c0068 ..> c0061 : 2 relationships (see list)
+    c0068 ..> c0063 : 2 relationships (see list)
+    c0068 ..> c0065 : 2 relationships (see list)
+    c0068 ..> c0066 : type in resolveScope
+    c0068 ..> c0067 : 2 relationships (see list)
+    c0068 ..> c0068 : 31 relationships (see list)
+    c0068 ..> c0070 : type in resolveCaptureMode
+    c0068 ..> c0104 : 2 relationships (see list)
+    c0068 ..> c0160 : 2 relationships (see list)
+    c0068 ..> c0179 : type in isFileLogLevel
+    c0068 ..> c0180 : writeJson() calls close()
+    c0068 ..> c0229 : 4 relationships (see list)
+    c0071 --> c0069 : field historySummary
+    c0071 --> c0070 : field mode
+    c0071 --> c0084 : field entries
+    c0071 --> c0104 : field scope
+    c0071 --> c0107 : field context
     c0072 --|> c0073 : inherits
-    c0073 --> c0076 : field entity_type
-    c0073 --|> c0093 : inherits
-    c0074 --|> c0075 : inherits
-    c0075 --|> c0093 : inherits
-    c0079 --> c0080 : field knowledge
-    c0079 ..> c0082 : 2 relationships (see list)
-    c0079 ..> c0083 : type in create
-    c0079 ..> c0084 : type in create
-    c0079 ..> c0086 : type in queryMemory
-    c0079 ..> c0091 : 3 relationships (see list)
-    c0079 ..> c0092 : type in createProject
-    c0079 ..> c0095 : 2 relationships (see list)
-    c0080 ..> c0065 : 3 relationships (see list)
-    c0080 ..> c0066 : 2 relationships (see list)
-    c0080 ..> c0067 : type in listCodeArtifacts
-    c0080 ..> c0069 : 3 relationships (see list)
-    c0080 ..> c0070 : 2 relationships (see list)
-    c0080 ..> c0071 : type in listDocuments
-    c0080 ..> c0072 : 4 relationships (see list)
-    c0080 ..> c0073 : 2 relationships (see list)
-    c0080 ..> c0074 : 2 relationships (see list)
-    c0080 ..> c0075 : type in createRelationship
-    c0080 ..> c0078 : type in listFiles
-    c0080 ..> c0082 : type in updateMemory
-    c0080 ..> c0084 : type in updateMemory
-    c0080 ..> c0096 : type in getFile
-    c0081 --> c0082 : field memory
-    c0082 --|> c0084 : inherits
-    c0085 ..> c0088 : 2 relationships (see list)
-    c0086 --> c0081 : field linked_memories
-    c0086 --> c0082 : field primary_memories
-    c0088 --> c0068 : field onConversationCompacted
-    c0088 --> c0087 : field readTools
-    c0088 --> c0090 : field submission
-    c0096 --|> c0078 : inherits
-    c0097 --> c0091 : field project
-    c0098 ..> c0098 : buildEncodePrompt() calls bundledSkillPaths()
-    c0098 ..> c0151 : buildEncodePrompt() calls readFile()
-    c0098 ..> c0218 : buildEncodePrompt() calls trim()
-    c0102 --> c0099 : field outcome
-    c0102 --> c0103 : field state
-    c0104 ..> c0022 : type in checkpoint
-    c0104 ..> c0023 : type in checkpoint
-    c0104 ..> c0064 : type in enqueue
-    c0104 ..> c0077 : type in resolveConflict
-    c0107 --> c0091 : field projects
-    c0107 --|> c0097 : inherits
-    c0108 --> c0050 : 2 relationships (see list)
-    c0108 --> c0079 : 4 relationships (see list)
-    c0108 --> c0104 : 2 relationships (see list)
-    c0108 --> c0107 : field resolveWorkContext
-    c0108 --> c0116 : 2 relationships (see list)
-    c0108 --> c0182 : 2 relationships (see list)
-    c0109 --> c0053 : field config
-    c0109 --> c0108 : field dependencies
-    c0109 --> c0111 : field policies
-    c0112 --> c0050 : field config
-    c0112 --> c0079 : field client
-    c0112 --> c0107 : field context
-    c0112 --> c0116 : field recall
-    c0112 --> c0170 : field logger
-    c0112 --> c0182 : field model
-    c0113 --> c0094 : field scope
-    c0115 --> c0118 : field runtime
-    c0115 --> c0212 : 2 relationships (see list)
-    c0116 ..> c0077 : type in recall
-    c0116 ..> c0209 : type in deeper
-    c0116 ..> c0211 : type in recall
-    c0116 ..> c0212 : 2 relationships (see list)
-    c0117 --> c0094 : field scope
-    c0118 --> c0004 : field activity
-    c0118 --> c0020 : field captureDeferrals
-    c0118 --> c0023 : 2 relationships (see list)
-    c0118 --> c0050 : field config
-    c0118 --> c0079 : field client
-    c0118 --> c0103 : field pendingCaptureJobs
-    c0118 --> c0104 : field capture
-    c0118 --> c0107 : field context
-    c0118 --> c0113 : field lastRecall
-    c0118 --> c0116 : field recall
-    c0118 --> c0170 : field logger
-    c0118 --> c0182 : field model
-    c0118 --> c0190 : field queue
-    c0120 --> c0100 : field automaticRecalls
-    c0120 --> c0110 : field pendingQueuedRecall
-    c0120 --> c0115 : field recallJobs
-    c0120 --> c0118 : 2 relationships (see list)
-    c0121 ..> c0004 : 3 relationships (see list)
-    c0121 ..> c0023 : 2 relationships (see list)
-    c0121 ..> c0040 : 6 relationships (see list)
-    c0121 ..> c0050 : 5 relationships (see list)
-    c0121 ..> c0054 : type in parseSelection
-    c0121 ..> c0060 : type in log
-    c0121 ..> c0077 : 2 relationships (see list)
-    c0121 ..> c0098 : createForgetfulExtension() calls bundledSkillPaths()
-    c0121 ..> c0099 : 3 relationships (see list)
-    c0121 ..> c0101 : type in boundedWait
-    c0121 ..> c0102 : 3 relationships (see list)
-    c0121 ..> c0104 : type in readCaptureOutcome
-    c0121 ..> c0106 : type in collectDiagnosticParts
-    c0121 ..> c0107 : 3 relationships (see list)
-    c0121 ..> c0109 : type in createForgetfulExtension
-    c0121 ..> c0111 : type in policyText
-    c0121 ..> c0113 : type in recallActivitySummary
-    c0121 ..> c0118 : 4 relationships (see list)
-    c0121 ..> c0119 : type in promptSetupAuthentication
-    c0121 ..> c0121 : 34 relationships (see list)
-    c0121 ..> c0122 : createForgetfulExtension() calls registerForegroundTool()
-    c0121 ..> c0126 : 5 relationships (see list)
-    c0121 ..> c0185 : 3 relationships (see list)
-    c0121 ..> c0186 : 15 relationships (see list)
-    c0121 ..> c0212 : 5 relationships (see list)
-    c0121 ..> c0218 : 9 relationships (see list)
-    c0121 ..> c0219 : qualifiedRepository() calls repositoryName()
-    c0123 ..> c0065 : 2 relationships (see list)
-    c0123 ..> c0066 : 2 relationships (see list)
-    c0123 ..> c0067 : type in listCodeArtifacts
-    c0123 ..> c0069 : 2 relationships (see list)
-    c0123 ..> c0070 : 2 relationships (see list)
-    c0123 ..> c0071 : type in listDocuments
-    c0123 ..> c0072 : 3 relationships (see list)
-    c0123 ..> c0073 : 2 relationships (see list)
-    c0123 ..> c0074 : type in getRelationships
-    c0123 ..> c0075 : type in createRelationship
-    c0123 ..> c0078 : type in listFiles
-    c0123 ..|> c0080 : implements
-    c0123 --> c0082 : field parseMemory
-    c0123 ..> c0082 : type in constructor
-    c0123 ..> c0084 : type in updateMemory
-    c0123 ..> c0096 : type in getFile
-    c0123 --> c0124 : field request
-    c0123 ..> c0124 : type in constructor
-    c0123 ..> c0125 : 56 relationships (see list)
-    c0123 ..> c0126 : 21 relationships (see list)
-    c0123 ..> c0130 : 5 relationships (see list)
-    c0123 ..> c0132 : 2 relationships (see list)
-    c0123 ..> c0218 : searchEntities() calls trim()
-    c0125 ..> c0065 : type in artifact
-    c0125 ..> c0066 : type in resourceBody
-    c0125 ..> c0067 : type in summary
-    c0125 ..> c0069 : type in document
-    c0125 ..> c0070 : type in resourceBody
-    c0125 ..> c0071 : type in summary
-    c0125 ..> c0072 : type in entity
-    c0125 ..> c0073 : type in entityBody
-    c0125 ..> c0074 : type in relationship
-    c0125 ..> c0075 : type in relationshipBody
-    c0125 ..> c0078 : type in fileSummary
-    c0125 ..> c0093 : type in provenance
-    c0125 ..> c0125 : 41 relationships (see list)
-    c0125 ..> c0130 : 8 relationships (see list)
-    c0125 ..> c0218 : text() calls trim()
-    c0126 ..> c0004 : 2 relationships (see list)
-    c0126 ..> c0040 : readResponse() calls read()
-    c0126 ..|> c0079 : implements
-    c0126 ..> c0082 : 2 relationships (see list)
-    c0126 ..> c0083 : type in create
-    c0126 ..> c0084 : 2 relationships (see list)
-    c0126 ..> c0086 : type in queryMemory
-    c0126 ..> c0091 : 3 relationships (see list)
-    c0126 ..> c0092 : type in createProject
-    c0126 ..> c0095 : 2 relationships (see list)
-    c0126 ..> c0125 : createBody() calls memoryMetadata()
-    c0126 ..> c0126 : 22 relationships (see list)
-    c0126 ..> c0127 : type in constructor
-    c0126 ..> c0129 : throwResponseError() constructs ForgetfulHttpError
-    c0126 ..> c0130 : 5 relationships (see list)
-    c0126 ..> c0131 : request() constructs ForgetfulTimeoutError
-    c0126 ..> c0132 : 21 relationships (see list)
-    c0126 ..> c0190 : readResponse() calls cancel()
-    c0126 ..> c0218 : supersede() calls trim()
-    c0126 ..> c0219 : 2 relationships (see list)
-    c0132 ..> c0004 : uniqueMemories() calls set()
-    c0132 ..> c0081 : type in parseLinkedMemories
-    c0132 ..> c0082 : 3 relationships (see list)
-    c0132 ..> c0086 : 2 relationships (see list)
-    c0132 ..> c0091 : type in parseProject
-    c0132 ..> c0095 : 3 relationships (see list)
-    c0132 ..> c0125 : parseMemory() calls memoryMetadata()
-    c0132 ..> c0128 : 2 relationships (see list)
-    c0132 ..> c0130 : 12 relationships (see list)
-    c0132 ..> c0132 : 24 relationships (see list)
-    c0132 ..> c0218 : projectText() calls trim()
-    c0133 --> c0065 : field artifacts
-    c0133 --> c0069 : field documents
-    c0133 --> c0078 : field files
-    c0134 --> c0082 : field memories
-    c0134 --> c0094 : field scope
-    c0136 ..> c0004 : 3 relationships (see list)
-    c0136 ..> c0065 : type in appendArtifactLines
-    c0136 ..> c0069 : type in appendDocumentLines
-    c0136 ..> c0072 : 9 relationships (see list)
-    c0136 ..> c0074 : 3 relationships (see list)
-    c0136 ..> c0078 : type in appendFileLines
-    c0136 --> c0080 : field client
-    c0136 ..> c0080 : type in constructor
-    c0136 ..> c0123 : 8 relationships (see list)
-    c0136 ..> c0126 : formatRelationships() calls get()
-    c0136 ..> c0133 : 2 relationships (see list)
-    c0136 ..> c0134 : 8 relationships (see list)
-    c0136 ..> c0135 : 3 relationships (see list)
-    c0136 ..> c0136 : 17 relationships (see list)
-    c0136 ..> c0137 : type in constructor
-    c0136 ..> c0138 : 4 relationships (see list)
-    c0136 --> c0139 : field readMemory
-    c0136 ..> c0139 : type in constructor
-    c0136 ..> c0140 : 4 relationships (see list)
-    c0136 ..> c0141 : 21 relationships (see list)
-    c0136 ..> c0218 : findEntities() calls trim()
-    c0137 --> c0139 : field readMemory
-    c0138 --> c0072 : field entity
-    c0140 --> c0072 : 2 relationships (see list)
-    c0140 --> c0074 : field relationship
-    c0141 ..> c0072 : 2 relationships (see list)
-    c0141 ..> c0074 : type in validRelationship
-    c0141 ..> c0082 : type in validMemory
-    c0141 ..> c0094 : 2 relationships (see list)
-    c0141 ..> c0141 : 5 relationships (see list)
-    c0141 ..> c0186 : clean() calls sanitizeText()
-    c0141 ..> c0218 : validRelationship() calls trim()
-    c0142 --> c0079 : field client
-    c0142 --> c0080 : field knowledge
-    c0142 --> c0143 : field request
-    c0142 --> c0144 : field context
-    c0144 --> c0094 : field scope
-    c0145 --> c0096 : field file
-    c0145 --> c0149 : field content
-    c0145 --> c0150 : field content
-    c0146 --> c0079 : field client
-    c0146 --> c0080 : field knowledge
-    c0146 --> c0144 : field context
-    c0146 --> c0147 : field request
-    c0151 ..> c0065 : type in page
-    c0151 ..> c0069 : type in page
-    c0151 ..> c0072 : 4 relationships (see list)
-    c0151 ..> c0076 : type in isEntityType
-    c0151 ..> c0079 : 7 relationships (see list)
-    c0151 ..> c0080 : 9 relationships (see list)
-    c0151 ..> c0082 : 4 relationships (see list)
-    c0151 ..> c0093 : type in updateProvenance
-    c0151 ..> c0096 : type in fileContent
-    c0151 ..> c0123 : 28 relationships (see list)
-    c0151 ..> c0126 : 10 relationships (see list)
-    c0151 ..> c0142 : 15 relationships (see list)
-    c0151 ..> c0143 : 2 relationships (see list)
-    c0151 ..> c0144 : 13 relationships (see list)
-    c0151 ..> c0145 : 29 relationships (see list)
-    c0151 ..> c0146 : 9 relationships (see list)
-    c0151 ..> c0147 : 2 relationships (see list)
-    c0151 ..> c0148 : type in resolveWriteProject
-    c0151 ..> c0149 : type in fileContent
-    c0151 ..> c0150 : type in fileContent
-    c0151 ..> c0151 : 184 relationships (see list)
-    c0151 ..> c0172 : replacementMemory() calls replacementMemoryContext()
-    c0151 ..> c0186 : containsSensitiveData() calls hasSensitiveData()
-    c0151 ..> c0218 : 2 relationships (see list)
-    c0153 --> c0066 : field input
-    c0154 --> c0070 : field input
-    c0156 --> c0073 : field input
-    c0158 --> c0075 : field input
-    c0161 --> c0153 : field codeArtifacts
-    c0161 --> c0154 : field documents
-    c0161 --> c0155 : field entityMemoryLinks
-    c0161 --> c0156 : field entities
-    c0161 --> c0158 : field relationships
-    c0164 --> c0162 : 4 relationships (see list)
-    c0165 ..> c0065 : 2 relationships (see list)
-    c0165 ..> c0069 : 2 relationships (see list)
-    c0165 ..> c0072 : 2 relationships (see list)
-    c0165 ..> c0074 : type in writeRelationship
-    c0165 ..> c0082 : 4 relationships (see list)
-    c0165 ..> c0123 : 11 relationships (see list)
-    c0165 ..> c0126 : createOnce() calls create()
-    c0165 ..> c0136 : 2 relationships (see list)
-    c0165 ..> c0152 : 4 relationships (see list)
-    c0165 ..> c0153 : type in writeCodeArtifact
-    c0165 ..> c0154 : type in writeDocument
-    c0165 ..> c0155 : type in writeEntityMemoryLink
-    c0165 ..> c0156 : type in writeEntity
-    c0165 --> c0157 : field readMemory
-    c0165 ..> c0157 : type in constructor
-    c0165 ..> c0158 : type in writeRelationship
-    c0165 ..> c0159 : type in execute
-    c0165 ..> c0160 : 15 relationships (see list)
-    c0165 ..> c0161 : 18 relationships (see list)
-    c0165 ..> c0163 : 14 relationships (see list)
-    c0165 ..> c0164 : 16 relationships (see list)
-    c0165 ..> c0165 : 40 relationships (see list)
-    c0165 --> c0166 : field client
-    c0165 ..> c0166 : type in constructor
-    c0165 ..> c0167 : 31 relationships (see list)
-    c0165 ..> c0218 : validatePlan() calls trim()
-    c0167 ..> c0161 : type in instructionId
-    c0167 ..> c0162 : 4 relationships (see list)
-    c0167 ..> c0164 : 2 relationships (see list)
-    c0167 ..> c0167 : 6 relationships (see list)
-    c0170 ..> c0040 : flush() calls resolve()
-    c0170 ..|> c0168 : implements
-    c0170 --> c0169 : 2 relationships (see list)
-    c0170 ..> c0169 : 2 relationships (see list)
-    c0170 ..> c0170 : 6 relationships (see list)
-    c0170 ..> c0171 : 3 relationships (see list)
-    c0170 ..> c0186 : enqueue() calls sanitizeValue()
-    c0171 ..> c0171 : 2 relationships (see list)
-    c0172 ..> c0084 : type in replacementMemoryInput
-    c0172 ..> c0172 : 2 relationships (see list)
-    c0172 ..> c0186 : storedMemoryContext() calls sanitizeText()
-    c0172 ..> c0218 : replacementMemoryContext() calls trim()
-    c0175 --> c0177 : field complete
-    c0176 ..> c0040 : applySummary() calls now()
-    c0176 --> c0173 : field compactedHistory
-    c0176 ..> c0173 : 5 relationships (see list)
-    c0176 ..> c0176 : 6 relationships (see list)
-    c0176 ..> c0177 : 3 relationships (see list)
-    c0176 ..> c0178 : 9 relationships (see list)
-    c0176 ..> c0218 : applySummary() calls trim()
-    c0178 ..> c0040 : summarizeMemoryHistory() calls now()
-    c0178 ..> c0174 : 2 relationships (see list)
-    c0178 ..> c0175 : type in summarizeMemoryHistory
-    c0178 ..> c0178 : 17 relationships (see list)
-    c0178 ..> c0182 : summarizeMemoryHistory() calls complete()
-    c0178 ..> c0186 : 2 relationships (see list)
-    c0180 --> c0181 : field modelRegistry
-    c0182 ..> c0040 : 6 relationships (see list)
-    c0182 ..> c0049 : completeWithSubmission() calls mapConcurrent()
-    c0182 --> c0054 : field selection
-    c0182 ..> c0054 : type in constructor
-    c0182 ..> c0061 : completeRequest() calls isRecallConcurrency()
-    c0182 ..|> c0085 : implements
-    c0182 ..> c0087 : type in executeRead
-    c0182 ..> c0088 : 7 relationships (see list)
-    c0182 ..> c0089 : completeWithSubmission() constructs ModelSubmissionError
-    c0182 ..> c0090 : type in validateSubmission
-    c0182 ..> c0165 : executeRead() calls execute()
-    c0182 --> c0168 : field logger
-    c0182 ..> c0170 : 5 relationships (see list)
-    c0182 ..> c0176 : 3 relationships (see list)
-    c0182 ..> c0178 : completeRequest() calls evidenceMessage()
-    c0182 --> c0179 : field transformHeaders
-    c0182 --> c0181 : field registry
-    c0182 ..> c0181 : type in constructor
-    c0182 ..> c0182 : 7 relationships (see list)
-    c0182 ..> c0183 : type in constructor
-    c0182 ..> c0184 : 3 relationships (see list)
-    c0182 ..> c0185 : 24 relationships (see list)
-    c0182 ..> c0186 : 2 relationships (see list)
-    c0183 --> c0168 : field logger
-    c0183 --> c0179 : field transformHeaders
-    c0185 ..> c0040 : 2 relationships (see list)
-    c0185 ..> c0054 : 3 relationships (see list)
-    c0185 ..> c0087 : type in submissionTool
-    c0185 ..> c0088 : 4 relationships (see list)
-    c0185 ..> c0090 : type in submissionTool
-    c0185 ..> c0179 : type in requestOptions
-    c0185 ..> c0180 : type in availableMemoryModels
-    c0185 ..> c0181 : type in resolveMemoryModel
-    c0185 ..> c0182 : 3 relationships (see list)
-    c0185 ..> c0183 : type in resolveMemoryModel
-    c0185 ..> c0184 : type in requestDeadline
-    c0185 ..> c0185 : 7 relationships (see list)
-    c0185 ..> c0186 : 8 relationships (see list)
-    c0186 ..> c0186 : 2 relationships (see list)
-    c0189 ..> c0079 : 3 relationships (see list)
-    c0189 ..> c0091 : 4 relationships (see list)
-    c0189 ..> c0092 : 2 relationships (see list)
-    c0189 ..> c0121 : promptExistingProject() calls notify()
-    c0189 ..> c0126 : 7 relationships (see list)
-    c0189 ..> c0186 : 2 relationships (see list)
-    c0189 ..> c0187 : 2 relationships (see list)
-    c0189 ..> c0188 : 6 relationships (see list)
-    c0189 ..> c0189 : 5 relationships (see list)
-    c0189 ..> c0218 : 3 relationships (see list)
-    c0190 ..> c0004 : mutate() calls set()
-    c0190 ..> c0064 : 3 relationships (see list)
-    c0190 ..> c0068 : type in compactJobSnapshot
-    c0190 ..> c0077 : type in appendInspections
-    c0190 ..> c0091 : type in completeProjectDiscovery
-    c0190 ..> c0097 : 2 relationships (see list)
-    c0190 ..> c0126 : 2 relationships (see list)
-    c0190 ..> c0151 : 4 relationships (see list)
-    c0190 ..> c0186 : 4 relationships (see list)
-    c0190 ..> c0190 : 87 relationships (see list)
-    c0190 ..> c0191 : type in constructor
-    c0190 ..> c0192 : 2 relationships (see list)
-    c0190 ..> c0193 : 5 relationships (see list)
-    c0190 ..> c0194 : 3 relationships (see list)
-    c0190 ..> c0195 : 2 relationships (see list)
-    c0190 ..> c0196 : 2 relationships (see list)
-    c0190 ..> c0197 : 9 relationships (see list)
-    c0190 ..> c0198 : 10 relationships (see list)
-    c0190 ..> c0199 : type in listJobMetadata
-    c0190 ..> c0201 : 9 relationships (see list)
-    c0190 ..> c0202 : 4 relationships (see list)
-    c0190 ..> c0203 : 2 relationships (see list)
-    c0190 ..> c0204 : 6 relationships (see list)
-    c0190 ..> c0206 : 2 relationships (see list)
-    c0190 ..> c0207 : 56 relationships (see list)
-    c0190 ..> c0225 : 4 relationships (see list)
-    c0193 --> c0077 : field replacement
-    c0193 --> c0084 : field replacement
-    c0193 --> c0097 : field context
-    c0193 --> c0197 : field binding
-    c0193 --> c0205 : field supersession
-    c0195 --> c0068 : field compactedConversation
-    c0195 --> c0077 : field inspectionEntries
-    c0195 --> c0200 : field status
-    c0195 --> c0205 : field supersession
-    c0198 --> c0064 : field snapshot
-    c0198 --> c0197 : field binding
-    c0198 --> c0200 : field status
-    c0198 --> c0205 : field supersession
-    c0199 --> c0064 : field snapshot
-    c0201 --> c0193 : field conflicts
-    c0201 --> c0202 : field watermarks
-    c0201 --> c0204 : field jobs
-    c0204 --|> c0198 : inherits
-    c0207 ..> c0064 : 3 relationships (see list)
-    c0207 ..> c0077 : type in validateInspectionEntry
-    c0207 ..> c0126 : releaseCompletedArtifacts() calls get()
-    c0207 ..> c0186 : 2 relationships (see list)
-    c0207 ..> c0190 : nowIso() calls now()
-    c0207 ..> c0193 : type in conflictIdentityMatches
-    c0207 ..> c0197 : 2 relationships (see list)
-    c0207 ..> c0198 : 2 relationships (see list)
-    c0207 ..> c0201 : type in normaliseState
-    c0207 ..> c0202 : type in clearHistoryCache
-    c0207 ..> c0204 : type in releaseCompletedArtifacts
-    c0207 ..> c0207 : 5 relationships (see list)
-    c0209 --> c0091 : field projects
-    c0209 --> c0094 : field scope
-    c0209 --> c0097 : field context
-    c0211 --> c0077 : field sessionContext
-    c0211 --> c0088 : field diagnosticContext
-    c0211 --> c0091 : field projects
-    c0211 --> c0094 : field scope
-    c0211 --> c0097 : field context
-    c0211 --> c0210 : field onPlan
-    c0212 --> c0094 : field scope
-    c0213 ..> c0049 : searchMemories() calls mapConcurrent()
-    c0213 ..> c0061 : 3 relationships (see list)
-    c0213 --> c0079 : field client
-    c0213 ..> c0079 : type in constructor
-    c0213 ..> c0082 : 2 relationships (see list)
-    c0213 --> c0085 : field model
-    c0213 ..> c0085 : type in constructor
-    c0213 ..> c0087 : type in recallReadTool
-    c0213 ..> c0091 : 2 relationships (see list)
-    c0213 ..> c0094 : 7 relationships (see list)
-    c0213 ..> c0095 : type in searchRequest
-    c0213 ..> c0097 : 3 relationships (see list)
-    c0213 ..> c0126 : 3 relationships (see list)
-    c0213 ..> c0135 : 2 relationships (see list)
-    c0213 --> c0136 : field knowledge
-    c0213 ..> c0136 : 2 relationships (see list)
-    c0213 ..> c0151 : recallReadTool() calls executeKnowledgeRead()
-    c0213 ..> c0182 : recall() calls complete()
-    c0213 ..> c0186 : 7 relationships (see list)
-    c0213 ..> c0208 : 4 relationships (see list)
-    c0213 ..> c0209 : type in deeper
-    c0213 ..> c0210 : 5 relationships (see list)
-    c0213 ..> c0211 : 7 relationships (see list)
-    c0213 ..> c0212 : 7 relationships (see list)
-    c0213 ..> c0213 : 34 relationships (see list)
-    c0213 ..> c0214 : type in constructor
-    c0213 ..> c0215 : finishReview() constructs ReviewValidationError
-    c0213 ..> c0216 : 6 relationships (see list)
-    c0213 ..> c0217 : type in searchMemories
-    c0213 ..> c0218 : 35 relationships (see list)
-    c0216 --> c0091 : field project
-    c0217 --> c0082 : field memories
-    c0218 ..> c0004 : availableProjects() calls set()
-    c0218 ..> c0082 : 2 relationships (see list)
-    c0218 ..> c0090 : type in recallReviewSubmission
-    c0218 ..> c0091 : type in availableProjects
-    c0218 ..> c0097 : 3 relationships (see list)
-    c0218 ..> c0135 : type in formatRecall
-    c0218 ..> c0186 : 11 relationships (see list)
+    c0073 --|> c0103 : inherits
+    c0076 --|> c0077 : inherits
+    c0077 --|> c0103 : inherits
+    c0079 --|> c0080 : inherits
+    c0080 --> c0083 : field entity_type
+    c0080 --|> c0103 : inherits
+    c0081 --|> c0082 : inherits
+    c0082 --|> c0103 : inherits
+    c0086 --> c0087 : field knowledge
+    c0086 ..> c0089 : 2 relationships (see list)
+    c0086 ..> c0090 : type in create
+    c0086 ..> c0091 : type in create
+    c0086 ..> c0093 : type in queryMemory
+    c0086 ..> c0101 : 3 relationships (see list)
+    c0086 ..> c0102 : type in createProject
+    c0086 ..> c0105 : 2 relationships (see list)
+    c0087 ..> c0072 : 3 relationships (see list)
+    c0087 ..> c0073 : 2 relationships (see list)
+    c0087 ..> c0074 : type in listCodeArtifacts
+    c0087 ..> c0076 : 3 relationships (see list)
+    c0087 ..> c0077 : 2 relationships (see list)
+    c0087 ..> c0078 : type in listDocuments
+    c0087 ..> c0079 : 4 relationships (see list)
+    c0087 ..> c0080 : 2 relationships (see list)
+    c0087 ..> c0081 : 2 relationships (see list)
+    c0087 ..> c0082 : type in createRelationship
+    c0087 ..> c0085 : type in listFiles
+    c0087 ..> c0089 : type in updateMemory
+    c0087 ..> c0091 : type in updateMemory
+    c0087 ..> c0106 : type in getFile
+    c0088 --> c0089 : field memory
+    c0089 --|> c0091 : inherits
+    c0092 ..> c0097 : 2 relationships (see list)
+    c0093 --> c0088 : field linked_memories
+    c0093 --> c0089 : field primary_memories
+    c0097 --> c0075 : field onConversationCompacted
+    c0097 --> c0096 : field readTools
+    c0097 --> c0099 : field submission
+    c0106 --|> c0085 : inherits
+    c0107 --> c0101 : field project
+    c0111 --> c0108 : field outcome
+    c0111 --> c0112 : field state
+    c0113 ..> c0027 : type in checkpoint
+    c0113 ..> c0028 : type in checkpoint
+    c0113 ..> c0071 : type in enqueue
+    c0113 ..> c0084 : type in resolveConflict
+    c0116 --> c0101 : field projects
+    c0116 --|> c0107 : inherits
+    c0117 --> c0057 : 2 relationships (see list)
+    c0117 --> c0086 : 4 relationships (see list)
+    c0117 --> c0113 : 2 relationships (see list)
+    c0117 --> c0116 : field resolveWorkContext
+    c0117 --> c0125 : 2 relationships (see list)
+    c0117 --> c0192 : 2 relationships (see list)
+    c0118 --> c0060 : field config
+    c0118 --> c0117 : field dependencies
+    c0118 --> c0120 : field policies
+    c0121 --> c0057 : field config
+    c0121 --> c0086 : field client
+    c0121 --> c0116 : field context
+    c0121 --> c0125 : field recall
+    c0121 --> c0180 : field logger
+    c0121 --> c0192 : field model
+    c0122 --> c0104 : field scope
+    c0124 --> c0126 : field runtime
+    c0124 --> c0223 : 2 relationships (see list)
+    c0125 ..> c0084 : type in recall
+    c0125 ..> c0220 : type in deeper
+    c0125 ..> c0222 : type in recall
+    c0125 ..> c0223 : 2 relationships (see list)
+    c0126 --> c0004 : field activity
+    c0126 --> c0025 : field captureDeferrals
+    c0126 --> c0028 : field recoveryResult
+    c0126 --> c0057 : field config
+    c0126 --> c0086 : field client
+    c0126 --> c0112 : field pendingCaptureJobs
+    c0126 --> c0113 : field capture
+    c0126 --> c0116 : field context
+    c0126 --> c0122 : field lastRecall
+    c0126 --> c0125 : field recall
+    c0126 --> c0180 : field logger
+    c0126 --> c0192 : field model
+    c0126 --> c0200 : field queue
+    c0128 --> c0109 : field automaticRecalls
+    c0128 --> c0119 : field pendingQueuedRecall
+    c0128 --> c0124 : field recallJobs
+    c0128 --> c0126 : 2 relationships (see list)
+    c0129 ..> c0004 : 3 relationships (see list)
+    c0129 ..> c0028 : 2 relationships (see list)
+    c0129 ..> c0047 : 5 relationships (see list)
+    c0129 ..> c0057 : 5 relationships (see list)
+    c0129 ..> c0061 : type in parseSelection
+    c0129 ..> c0067 : type in log
+    c0129 ..> c0084 : type in recallContextEntries
+    c0129 ..> c0108 : 3 relationships (see list)
+    c0129 ..> c0110 : type in boundedWait
+    c0129 ..> c0111 : 3 relationships (see list)
+    c0129 ..> c0113 : type in readCaptureOutcome
+    c0129 ..> c0115 : type in collectDiagnosticParts
+    c0129 ..> c0116 : 3 relationships (see list)
+    c0129 ..> c0118 : type in createForgetfulExtension
+    c0129 ..> c0120 : type in policyText
+    c0129 ..> c0122 : type in recallActivitySummary
+    c0129 ..> c0126 : 3 relationships (see list)
+    c0129 ..> c0127 : type in promptSetupAuthentication
+    c0129 ..> c0129 : 34 relationships (see list)
+    c0129 ..> c0130 : createForgetfulExtension() calls registerForegroundTool()
+    c0129 ..> c0134 : 4 relationships (see list)
+    c0129 ..> c0195 : 3 relationships (see list)
+    c0129 ..> c0196 : 13 relationships (see list)
+    c0129 ..> c0223 : 5 relationships (see list)
+    c0129 ..> c0229 : 8 relationships (see list)
+    c0129 ..> c0230 : qualifiedRepository() calls repositoryName()
+    c0131 ..> c0072 : 2 relationships (see list)
+    c0131 ..> c0073 : 2 relationships (see list)
+    c0131 ..> c0074 : type in listCodeArtifacts
+    c0131 ..> c0076 : 2 relationships (see list)
+    c0131 ..> c0077 : 2 relationships (see list)
+    c0131 ..> c0078 : type in listDocuments
+    c0131 ..> c0079 : 3 relationships (see list)
+    c0131 ..> c0080 : 2 relationships (see list)
+    c0131 ..> c0081 : type in getRelationships
+    c0131 ..> c0082 : type in createRelationship
+    c0131 ..> c0085 : type in listFiles
+    c0131 ..|> c0087 : implements
+    c0131 --> c0089 : field parseMemory
+    c0131 ..> c0089 : type in constructor
+    c0131 ..> c0091 : type in updateMemory
+    c0131 ..> c0106 : type in getFile
+    c0131 --> c0132 : field request
+    c0131 ..> c0132 : type in constructor
+    c0131 ..> c0133 : 45 relationships (see list)
+    c0131 ..> c0134 : 21 relationships (see list)
+    c0131 ..> c0138 : 4 relationships (see list)
+    c0131 ..> c0140 : 2 relationships (see list)
+    c0133 ..> c0072 : type in artifact
+    c0133 ..> c0073 : type in resourceBody
+    c0133 ..> c0074 : type in summary
+    c0133 ..> c0076 : type in document
+    c0133 ..> c0077 : type in resourceBody
+    c0133 ..> c0078 : type in summary
+    c0133 ..> c0079 : type in entity
+    c0133 ..> c0080 : type in entityBody
+    c0133 ..> c0081 : type in relationship
+    c0133 ..> c0082 : type in relationshipBody
+    c0133 ..> c0085 : type in fileSummary
+    c0133 ..> c0103 : type in provenance
+    c0133 ..> c0133 : 40 relationships (see list)
+    c0133 ..> c0138 : 8 relationships (see list)
+    c0133 ..> c0229 : text() calls trim()
+    c0134 ..> c0004 : 2 relationships (see list)
+    c0134 ..> c0047 : readResponse() calls read()
+    c0134 ..|> c0086 : implements
+    c0134 ..> c0089 : 2 relationships (see list)
+    c0134 ..> c0090 : type in create
+    c0134 ..> c0091 : type in create
+    c0134 ..> c0093 : type in queryMemory
+    c0134 ..> c0101 : 3 relationships (see list)
+    c0134 ..> c0102 : type in createProject
+    c0134 ..> c0105 : 2 relationships (see list)
+    c0134 ..> c0133 : 3 relationships (see list)
+    c0134 ..> c0134 : 19 relationships (see list)
+    c0134 ..> c0135 : type in constructor
+    c0134 ..> c0137 : throwResponseError() constructs ForgetfulHttpError
+    c0134 ..> c0138 : 5 relationships (see list)
+    c0134 ..> c0139 : request() constructs ForgetfulTimeoutError
+    c0134 ..> c0140 : 22 relationships (see list)
+    c0134 ..> c0200 : readResponse() calls cancel()
+    c0134 ..> c0230 : 2 relationships (see list)
+    c0140 ..> c0004 : uniqueMemories() calls set()
+    c0140 ..> c0088 : type in parseLinkedMemories
+    c0140 ..> c0089 : 3 relationships (see list)
+    c0140 ..> c0093 : 2 relationships (see list)
+    c0140 ..> c0101 : type in parseProject
+    c0140 ..> c0105 : type in searchBody
+    c0140 ..> c0133 : parseMemory() calls memoryMetadata()
+    c0140 ..> c0136 : 2 relationships (see list)
+    c0140 ..> c0138 : 12 relationships (see list)
+    c0140 ..> c0140 : 23 relationships (see list)
+    c0140 ..> c0229 : projectText() calls trim()
+    c0141 --> c0072 : field artifacts
+    c0141 --> c0076 : field documents
+    c0141 --> c0085 : field files
+    c0142 --|> c0143 : inherits
+    c0142 --> c0144 : field failures
+    c0143 --> c0089 : field memories
+    c0143 --> c0104 : field scope
+    c0145 ..> c0004 : 3 relationships (see list)
+    c0145 ..> c0072 : type in appendArtifactLines
+    c0145 ..> c0076 : type in appendDocumentLines
+    c0145 ..> c0079 : 9 relationships (see list)
+    c0145 ..> c0081 : 3 relationships (see list)
+    c0145 ..> c0085 : type in appendFileLines
+    c0145 --> c0087 : field client
+    c0145 ..> c0087 : type in constructor
+    c0145 ..> c0131 : 8 relationships (see list)
+    c0145 ..> c0134 : formatRelationships() calls get()
+    c0145 ..> c0141 : 2 relationships (see list)
+    c0145 ..> c0142 : 8 relationships (see list)
+    c0145 ..> c0143 : 2 relationships (see list)
+    c0145 ..> c0144 : 3 relationships (see list)
+    c0145 ..> c0145 : 17 relationships (see list)
+    c0145 ..> c0146 : type in constructor
+    c0145 ..> c0147 : 4 relationships (see list)
+    c0145 --> c0148 : field readMemory
+    c0145 ..> c0148 : type in constructor
+    c0145 ..> c0149 : 4 relationships (see list)
+    c0145 ..> c0150 : 22 relationships (see list)
+    c0145 ..> c0196 : expand() calls errorMessage()
+    c0145 ..> c0229 : findEntities() calls trim()
+    c0146 --> c0148 : field readMemory
+    c0147 --> c0079 : field entity
+    c0149 --> c0079 : 2 relationships (see list)
+    c0149 --> c0081 : field relationship
+    c0150 ..> c0079 : 2 relationships (see list)
+    c0150 ..> c0081 : type in validRelationship
+    c0150 ..> c0089 : type in validMemory
+    c0150 ..> c0104 : 2 relationships (see list)
+    c0150 ..> c0142 : type in safeCall
+    c0150 ..> c0150 : 5 relationships (see list)
+    c0150 ..> c0196 : 3 relationships (see list)
+    c0150 ..> c0229 : validRelationship() calls trim()
+    c0151 --> c0086 : field client
+    c0151 --> c0087 : field knowledge
+    c0151 --> c0152 : field request
+    c0151 --> c0153 : field context
+    c0153 --> c0104 : field scope
+    c0154 --> c0106 : field file
+    c0154 --> c0158 : field content
+    c0154 --> c0159 : field content
+    c0155 --> c0086 : field client
+    c0155 --> c0087 : field knowledge
+    c0155 --> c0153 : field context
+    c0155 --> c0156 : field request
+    c0160 ..> c0072 : type in page
+    c0160 ..> c0076 : type in page
+    c0160 ..> c0079 : 4 relationships (see list)
+    c0160 ..> c0083 : type in isEntityType
+    c0160 ..> c0086 : 7 relationships (see list)
+    c0160 ..> c0087 : 9 relationships (see list)
+    c0160 ..> c0089 : 4 relationships (see list)
+    c0160 ..> c0103 : type in updateProvenance
+    c0160 ..> c0106 : type in fileContent
+    c0160 ..> c0131 : 28 relationships (see list)
+    c0160 ..> c0134 : 10 relationships (see list)
+    c0160 ..> c0151 : 15 relationships (see list)
+    c0160 ..> c0152 : 2 relationships (see list)
+    c0160 ..> c0153 : 13 relationships (see list)
+    c0160 ..> c0154 : 29 relationships (see list)
+    c0160 ..> c0155 : 9 relationships (see list)
+    c0160 ..> c0156 : 2 relationships (see list)
+    c0160 ..> c0157 : type in resolveWriteProject
+    c0160 ..> c0158 : type in fileContent
+    c0160 ..> c0159 : type in fileContent
+    c0160 ..> c0160 : 176 relationships (see list)
+    c0160 ..> c0182 : replacementMemory() calls replacementMemoryContext()
+    c0160 ..> c0196 : containsSensitiveData() calls hasSensitiveData()
+    c0160 ..> c0229 : 2 relationships (see list)
+    c0162 --> c0073 : field input
+    c0163 --> c0077 : field input
+    c0165 --> c0080 : field input
+    c0167 --> c0082 : field input
+    c0170 --> c0162 : field codeArtifacts
+    c0170 --> c0163 : field documents
+    c0170 --> c0164 : field entityMemoryLinks
+    c0170 --> c0165 : field entities
+    c0170 --> c0167 : field relationships
+    c0173 --> c0171 : 4 relationships (see list)
+    c0174 ..> c0072 : type in writeCodeArtifact
+    c0174 ..> c0076 : type in writeDocument
+    c0174 ..> c0079 : type in writeEntity
+    c0174 ..> c0081 : type in writeRelationship
+    c0174 ..> c0089 : 3 relationships (see list)
+    c0174 ..> c0131 : 10 relationships (see list)
+    c0174 ..> c0134 : createOnce() calls create()
+    c0174 ..> c0145 : attachmentMemory() calls readMemory()
+    c0174 ..> c0161 : 4 relationships (see list)
+    c0174 ..> c0162 : type in writeCodeArtifact
+    c0174 ..> c0163 : type in writeDocument
+    c0174 ..> c0164 : type in writeEntityMemoryLink
+    c0174 ..> c0165 : type in writeEntity
+    c0174 --> c0166 : field readMemory
+    c0174 ..> c0166 : type in constructor
+    c0174 ..> c0167 : type in writeRelationship
+    c0174 ..> c0168 : type in execute
+    c0174 ..> c0169 : 16 relationships (see list)
+    c0174 ..> c0170 : 18 relationships (see list)
+    c0174 ..> c0172 : 16 relationships (see list)
+    c0174 ..> c0173 : 18 relationships (see list)
+    c0174 ..> c0174 : 27 relationships (see list)
+    c0174 ..> c0175 : 4 relationships (see list)
+    c0174 --> c0176 : field client
+    c0174 ..> c0176 : type in constructor
+    c0174 ..> c0177 : 30 relationships (see list)
+    c0174 ..> c0196 : 2 relationships (see list)
+    c0174 ..> c0242 : 2 relationships (see list)
+    c0177 ..> c0004 : resourceSlots() calls set()
+    c0177 ..> c0134 : resourceSlots() calls get()
+    c0177 ..> c0170 : type in instructionId
+    c0177 ..> c0171 : 4 relationships (see list)
+    c0177 ..> c0173 : 2 relationships (see list)
+    c0177 ..> c0175 : type in resourceSlots
+    c0177 ..> c0177 : 6 relationships (see list)
+    c0180 ..> c0047 : flush() calls resolve()
+    c0180 ..|> c0178 : implements
+    c0180 --> c0179 : 2 relationships (see list)
+    c0180 ..> c0179 : 2 relationships (see list)
+    c0180 ..> c0180 : 6 relationships (see list)
+    c0180 ..> c0181 : 3 relationships (see list)
+    c0180 ..> c0196 : enqueue() calls sanitizeValue()
+    c0181 ..> c0181 : 2 relationships (see list)
+    c0182 ..> c0091 : type in replacementMemoryInput
+    c0182 ..> c0182 : replacementMemoryInput() calls replacementMemoryContext()
+    c0182 ..> c0196 : storedMemoryContext() calls sanitizeText()
+    c0185 --> c0187 : field complete
+    c0186 ..> c0047 : applySummary() calls now()
+    c0186 --> c0183 : field compactedHistory
+    c0186 ..> c0183 : 5 relationships (see list)
+    c0186 ..> c0186 : 6 relationships (see list)
+    c0186 ..> c0187 : 3 relationships (see list)
+    c0186 ..> c0188 : 9 relationships (see list)
+    c0186 ..> c0229 : applySummary() calls trim()
+    c0188 ..> c0047 : summarizeMemoryHistory() calls now()
+    c0188 ..> c0094 : type in evidencePageContent
+    c0188 ..> c0184 : 2 relationships (see list)
+    c0188 ..> c0185 : type in summarizeMemoryHistory
+    c0188 ..> c0188 : 18 relationships (see list)
+    c0188 ..> c0192 : summarizeMemoryHistory() calls complete()
+    c0188 ..> c0196 : 2 relationships (see list)
+    c0190 --> c0191 : field modelRegistry
+    c0192 ..> c0047 : 6 relationships (see list)
+    c0192 ..> c0056 : completeWithSubmission() calls mapConcurrent()
+    c0192 --> c0061 : field selection
+    c0192 ..> c0061 : type in constructor
+    c0192 ..> c0068 : completeRequest() calls isRecallConcurrency()
+    c0192 ..|> c0092 : implements
+    c0192 ..> c0096 : type in executeRead
+    c0192 ..> c0097 : 7 relationships (see list)
+    c0192 ..> c0098 : completeWithSubmission() constructs ModelSubmissionError
+    c0192 ..> c0099 : type in validateSubmission
+    c0192 ..> c0174 : executeRead() calls execute()
+    c0192 --> c0178 : field logger
+    c0192 ..> c0180 : 5 relationships (see list)
+    c0192 ..> c0186 : 3 relationships (see list)
+    c0192 ..> c0188 : 2 relationships (see list)
+    c0192 --> c0189 : field transformHeaders
+    c0192 --> c0191 : field registry
+    c0192 ..> c0191 : type in constructor
+    c0192 ..> c0192 : 7 relationships (see list)
+    c0192 ..> c0193 : type in constructor
+    c0192 ..> c0194 : 3 relationships (see list)
+    c0192 ..> c0195 : 24 relationships (see list)
+    c0192 ..> c0196 : 2 relationships (see list)
+    c0193 --> c0178 : field logger
+    c0193 --> c0189 : field transformHeaders
+    c0195 ..> c0047 : 2 relationships (see list)
+    c0195 ..> c0061 : 3 relationships (see list)
+    c0195 ..> c0096 : type in submissionTool
+    c0195 ..> c0097 : 4 relationships (see list)
+    c0195 ..> c0099 : type in submissionTool
+    c0195 ..> c0189 : type in requestOptions
+    c0195 ..> c0190 : type in availableMemoryModels
+    c0195 ..> c0191 : type in resolveMemoryModel
+    c0195 ..> c0192 : 3 relationships (see list)
+    c0195 ..> c0193 : type in resolveMemoryModel
+    c0195 ..> c0194 : type in requestDeadline
+    c0195 ..> c0195 : 7 relationships (see list)
+    c0195 ..> c0196 : 8 relationships (see list)
+    c0196 ..> c0196 : 4 relationships (see list)
+    c0196 ..> c0242 : diagnosticMessage() calls inspect()
+    c0199 ..> c0086 : 3 relationships (see list)
+    c0199 ..> c0101 : 4 relationships (see list)
+    c0199 ..> c0102 : 2 relationships (see list)
+    c0199 ..> c0129 : promptExistingProject() calls notify()
+    c0199 ..> c0134 : 7 relationships (see list)
+    c0199 ..> c0196 : 2 relationships (see list)
+    c0199 ..> c0197 : 2 relationships (see list)
+    c0199 ..> c0198 : 6 relationships (see list)
+    c0199 ..> c0199 : 5 relationships (see list)
+    c0199 ..> c0229 : 3 relationships (see list)
+    c0200 ..> c0004 : mutate() calls set()
+    c0200 ..> c0071 : 4 relationships (see list)
+    c0200 ..> c0075 : type in compactJobSnapshot
+    c0200 ..> c0084 : type in appendInspections
+    c0200 ..> c0101 : type in completeProjectDiscovery
+    c0200 ..> c0107 : 2 relationships (see list)
+    c0200 ..> c0134 : 2 relationships (see list)
+    c0200 ..> c0160 : 4 relationships (see list)
+    c0200 ..> c0196 : 2 relationships (see list)
+    c0200 ..> c0200 : 97 relationships (see list)
+    c0200 ..> c0201 : type in constructor
+    c0200 ..> c0202 : 2 relationships (see list)
+    c0200 ..> c0204 : 5 relationships (see list)
+    c0200 ..> c0205 : 3 relationships (see list)
+    c0200 ..> c0206 : 2 relationships (see list)
+    c0200 ..> c0207 : 2 relationships (see list)
+    c0200 ..> c0208 : 9 relationships (see list)
+    c0200 ..> c0209 : 11 relationships (see list)
+    c0200 ..> c0210 : type in listJobMetadata
+    c0200 ..> c0212 : 9 relationships (see list)
+    c0200 ..> c0213 : 5 relationships (see list)
+    c0200 ..> c0214 : 3 relationships (see list)
+    c0200 ..> c0215 : 6 relationships (see list)
+    c0200 ..> c0217 : 2 relationships (see list)
+    c0200 ..> c0218 : 70 relationships (see list)
+    c0200 ..> c0229 : reusableHistory() calls trim()
+    c0200 ..> c0238 : 5 relationships (see list)
+    c0204 --> c0084 : field replacement
+    c0204 --> c0091 : field replacement
+    c0204 --> c0107 : field context
+    c0204 --> c0208 : field binding
+    c0204 --> c0216 : field supersession
+    c0206 --> c0075 : field compactedConversation
+    c0206 --> c0084 : field inspectionEntries
+    c0206 --> c0211 : field status
+    c0206 --> c0216 : field supersession
+    c0209 --> c0071 : field snapshot
+    c0209 --> c0208 : field binding
+    c0209 --> c0211 : field status
+    c0209 --> c0216 : field supersession
+    c0210 --> c0071 : field snapshot
+    c0212 --> c0204 : field conflicts
+    c0212 --> c0213 : field watermarks
+    c0212 --> c0215 : field jobs
+    c0213 --> c0203 : field historyAlternatives
+    c0215 --|> c0209 : inherits
+    c0218 ..> c0071 : 3 relationships (see list)
+    c0218 ..> c0084 : type in validateInspectionEntry
+    c0218 ..> c0134 : releaseCompletedArtifacts() calls get()
+    c0218 ..> c0196 : scrubDiagnostic() calls sanitizeText()
+    c0218 ..> c0200 : nowIso() calls now()
+    c0218 ..> c0203 : 2 relationships (see list)
+    c0218 ..> c0204 : type in conflictIdentityMatches
     c0218 ..> c0208 : 2 relationships (see list)
-    c0218 ..> c0210 : type in parsePlan
-    c0218 ..> c0212 : 4 relationships (see list)
-    c0218 ..> c0213 : createDeadlineSignal() calls now()
-    c0218 ..> c0218 : 26 relationships (see list)
-    c0219 ..> c0218 : repositoryName() calls trim()
-    c0220 --|> c0064 : inherits
-    c0222 --> c0063 : field mode
-    c0222 --> c0094 : field scope
-    c0222 --> c0097 : field context
-    c0222 --> c0224 : field session
-    c0223 --> c0220 : field snapshot
-    c0225 ..> c0062 : 2 relationships (see list)
-    c0225 ..> c0064 : 3 relationships (see list)
-    c0225 ..> c0068 : type in compactCaptureSnapshot
-    c0225 ..> c0077 : 3 relationships (see list)
-    c0225 ..> c0186 : 9 relationships (see list)
-    c0225 ..> c0218 : 2 relationships (see list)
-    c0225 ..> c0221 : 3 relationships (see list)
-    c0225 ..> c0222 : 3 relationships (see list)
-    c0225 ..> c0223 : type in buildCaptureSnapshot
-    c0225 ..> c0225 : 25 relationships (see list)
-    c0228 --> c0226 : 2 relationships (see list)
-    c0229 ..> c0004 : readFile() calls close()
-    c0229 ..> c0040 : 3 relationships (see list)
-    c0229 ..> c0126 : getUrl() calls get()
-    c0229 ..> c0151 : readFile() calls readFile()
-    c0229 ..> c0165 : git() calls execute()
-    c0229 ..> c0186 : 3 relationships (see list)
-    c0229 ..> c0218 : provenance() calls trim()
-    c0229 ..> c0227 : type in inspectUrl
-    c0229 ..> c0228 : 2 relationships (see list)
-    c0229 ..> c0229 : 10 relationships (see list)
-    c0229 --> c0230 : field options
-    c0229 ..> c0230 : type in constructor
-    c0229 ..> c0231 : 11 relationships (see list)
-    c0231 ..> c0186 : 4 relationships (see list)
-    c0231 ..> c0226 : type in errorDetails
-    c0231 ..> c0227 : type in sourceContent
-    c0231 ..> c0229 : validateAddress() calls check()
-    c0231 ..> c0231 : validateAddress() calls loopback()
+    c0218 ..> c0209 : 2 relationships (see list)
+    c0218 ..> c0212 : type in normaliseState
+    c0218 ..> c0213 : 3 relationships (see list)
+    c0218 ..> c0215 : type in releaseCompletedArtifacts
+    c0218 ..> c0218 : 6 relationships (see list)
+    c0220 --> c0101 : field projects
+    c0220 --> c0104 : field scope
+    c0220 --> c0107 : field context
+    c0222 --> c0084 : field sessionContext
+    c0222 --> c0097 : field diagnosticContext
+    c0222 --> c0101 : field projects
+    c0222 --> c0104 : field scope
+    c0222 --> c0107 : field context
+    c0222 --> c0221 : field onPlan
+    c0223 --> c0104 : field scope
+    c0224 ..> c0056 : searchMemories() calls mapConcurrent()
+    c0224 ..> c0068 : 3 relationships (see list)
+    c0224 --> c0086 : field client
+    c0224 ..> c0086 : type in constructor
+    c0224 ..> c0089 : 2 relationships (see list)
+    c0224 --> c0092 : field model
+    c0224 ..> c0092 : type in constructor
+    c0224 ..> c0096 : type in recallReadTool
+    c0224 ..> c0101 : 2 relationships (see list)
+    c0224 ..> c0104 : 7 relationships (see list)
+    c0224 ..> c0105 : type in searchRequest
+    c0224 ..> c0107 : 3 relationships (see list)
+    c0224 ..> c0134 : 3 relationships (see list)
+    c0224 ..> c0144 : 2 relationships (see list)
+    c0224 --> c0145 : field knowledge
+    c0224 ..> c0145 : 2 relationships (see list)
+    c0224 ..> c0160 : recallReadTool() calls executeKnowledgeRead()
+    c0224 ..> c0192 : recall() calls complete()
+    c0224 ..> c0196 : 9 relationships (see list)
+    c0224 ..> c0219 : 4 relationships (see list)
+    c0224 ..> c0220 : type in deeper
+    c0224 ..> c0221 : 5 relationships (see list)
+    c0224 ..> c0222 : 7 relationships (see list)
+    c0224 ..> c0223 : 7 relationships (see list)
+    c0224 ..> c0224 : 34 relationships (see list)
+    c0224 ..> c0225 : type in constructor
+    c0224 ..> c0226 : finishReview() constructs ReviewValidationError
+    c0224 ..> c0227 : 6 relationships (see list)
+    c0224 ..> c0228 : type in searchMemories
+    c0224 ..> c0229 : 35 relationships (see list)
+    c0227 --> c0101 : field project
+    c0228 --> c0089 : field memories
+    c0229 ..> c0004 : availableProjects() calls set()
+    c0229 ..> c0089 : 2 relationships (see list)
+    c0229 ..> c0099 : type in recallReviewSubmission
+    c0229 ..> c0101 : type in availableProjects
+    c0229 ..> c0107 : 3 relationships (see list)
+    c0229 ..> c0144 : type in formatRecall
+    c0229 ..> c0196 : 11 relationships (see list)
+    c0229 ..> c0219 : 2 relationships (see list)
+    c0229 ..> c0221 : type in parsePlan
+    c0229 ..> c0223 : 4 relationships (see list)
+    c0229 ..> c0224 : createDeadlineSignal() calls now()
+    c0229 ..> c0229 : 26 relationships (see list)
+    c0230 ..> c0229 : repositoryName() calls trim()
+    c0232 ..> c0231 : 2 relationships (see list)
+    c0233 --|> c0071 : inherits
+    c0235 --> c0070 : field mode
+    c0235 --> c0104 : field scope
+    c0235 --> c0107 : field context
+    c0235 --> c0237 : field session
+    c0236 --> c0233 : field snapshot
+    c0238 ..> c0069 : 2 relationships (see list)
+    c0238 ..> c0071 : 4 relationships (see list)
+    c0238 ..> c0075 : type in compactCaptureSnapshot
+    c0238 ..> c0084 : 3 relationships (see list)
+    c0238 ..> c0196 : 9 relationships (see list)
+    c0238 ..> c0229 : 2 relationships (see list)
+    c0238 ..> c0234 : 3 relationships (see list)
+    c0238 ..> c0235 : 3 relationships (see list)
+    c0238 ..> c0236 : type in buildCaptureSnapshot
+    c0238 ..> c0238 : 27 relationships (see list)
+    c0241 --> c0239 : 2 relationships (see list)
+    c0242 ..> c0004 : readFile() calls close()
+    c0242 ..> c0047 : 3 relationships (see list)
+    c0242 ..> c0134 : getUrl() calls get()
+    c0242 ..> c0160 : readFile() calls readFile()
+    c0242 ..> c0174 : git() calls execute()
+    c0242 ..> c0196 : 3 relationships (see list)
+    c0242 ..> c0229 : provenance() calls trim()
+    c0242 ..> c0240 : type in inspectUrl
+    c0242 ..> c0241 : 2 relationships (see list)
+    c0242 ..> c0242 : 10 relationships (see list)
+    c0242 --> c0243 : field options
+    c0242 ..> c0243 : type in constructor
+    c0242 ..> c0244 : 11 relationships (see list)
+    c0244 ..> c0196 : 4 relationships (see list)
+    c0244 ..> c0239 : type in errorDetails
+    c0244 ..> c0240 : type in sourceContent
+    c0244 ..> c0242 : validateAddress() calls check()
+    c0244 ..> c0244 : validateAddress() calls loopback()
 ```
 
 ## Source index
@@ -3261,239 +3408,252 @@ classDiagram
 - c0000: `index.ts` — `index.ts`:1
 - c0003: `ActivityLoader` — `src/activity.ts`:6
 - c0004: `ForgetfulActivity` — `src/activity.ts`:35
-- c0005: `CaptureLinkReview` — `src/capture-links.ts`:37
-- c0006: `ConnectionResult` — `src/capture-links.ts`:55
-- c0007: `LinkDecision` — `src/capture-links.ts`:9
-- c0008: `PreservationDecision` — `src/capture-links.ts`:19
-- c0009: `PreviousConnections` — `src/capture-links.ts`:27
-- c0010: `src/capture-links.ts` — `src/capture-links.ts`:1
-- c0011: `CandidateDestination` — `src/capture.ts`:906
-- c0012: `CandidateExtraction` — `src/capture.ts`:1374
-- c0013: `CandidateFields` — `src/capture.ts`:773
-- c0014: `CandidateLists` — `src/capture.ts`:781
-- c0015: `CandidateValidation` — `src/capture.ts`:787
-- c0016: `CaptureAction` — `src/capture.ts`:70
-- c0017: `CaptureActivityPhase` — `src/capture.ts`:151
-- c0018: `CaptureAdvanceInput` — `src/capture.ts`:295
-- c0019: `CaptureBatchInput` — `src/capture.ts`:126
-- c0020: `CaptureBranch` — `src/capture.ts`:177
-- c0021: `CaptureCandidate` — `src/capture.ts`:72
-- c0022: `CaptureCheckpointOptions` — `src/capture.ts`:182
-- c0023: `CaptureCheckpointResult` — `src/capture.ts`:188
-- c0024: `CaptureCodeArtifactResource` — `src/capture.ts`:103
-- c0025: `CaptureDecision` — `src/capture.ts`:134
-- c0026: `CaptureDiagnosticCandidate` — `src/capture.ts`:201
-- c0027: `CaptureDiagnosticConflict` — `src/capture.ts`:228
-- c0028: `CaptureDiagnosticJob` — `src/capture.ts`:216
-- c0029: `CaptureDiagnostics` — `src/capture.ts`:239
-- c0030: `CaptureDocumentResource` — `src/capture.ts`:99
-- c0031: `CaptureEnqueueResult` — `src/capture.ts`:244
-- c0032: `CaptureEntityResource` — `src/capture.ts`:95
-- c0033: `CaptureNeighborhood` — `src/capture.ts`:118
-- c0034: `CaptureOperation` — `src/capture.ts`:327
-- c0035: `CapturePause` — `src/capture.ts`:303
-- c0036: `CapturePendingConflict` — `src/capture.ts`:290
-- c0037: `CaptureRelationshipResource` — `src/capture.ts`:107
-- c0038: `CaptureResolveResult` — `src/capture.ts`:284
-- c0039: `CaptureResourceReuse` — `src/capture.ts`:111
-- c0040: `CaptureService` — `src/capture.ts`:1766
-- c0041: `CaptureServiceOptions` — `src/capture.ts`:153
-- c0042: `CaptureUncertainWrite` — `src/capture.ts`:317
-- c0043: `ConflictResolutionEvidence` — `src/capture.ts`:250
-- c0044: `ConflictResolutionTarget` — `src/capture.ts`:267
-- c0045: `InvalidCaptureOutput` — `src/capture.ts`:310
-- c0046: `ResolveConflictInput` — `src/capture.ts`:273
-- c0047: `RichResources` — `src/capture.ts`:1214
-- c0048: `src/capture.ts` — `src/capture.ts`:1
-- c0049: `src/concurrency.ts` — `src/concurrency.ts`:1
-- c0050: `ForgetfulConfig` — `src/config.ts`:77
-- c0051: `ForgetfulInstanceConfig` — `src/config.ts`:64
-- c0052: `JsonReadResult` — `src/config.ts`:129
-- c0053: `LoadConfigOptions` — `src/config.ts`:97
-- c0054: `ModelSelection` — `src/config.ts`:59
-- c0055: `PersistedProjectSettings` — `src/config.ts`:125
-- c0056: `PersistedUserSettings` — `src/config.ts`:108
-- c0057: `PromptName` — `src/config.ts`:39
-- c0058: `PromptOverlays` — `src/config.ts`:71
-- c0059: `ScopeSource` — `src/config.ts`:38
-- c0060: `Verbosity` — `src/config.ts`:44
-- c0061: `src/config.ts` — `src/config.ts`:1
-- c0062: `CaptureHistorySummary` — `src/contracts.ts`:292
-- c0063: `CaptureMode` — `src/contracts.ts`:2
-- c0064: `CaptureSnapshot` — `src/contracts.ts`:303
-- c0065: `CodeArtifact` — `src/contracts.ts`:93
-- c0066: `CodeArtifactInput` — `src/contracts.ts`:84
-- c0067: `CodeArtifactSummary` — `src/contracts.ts`:98
-- c0068: `CompactedConversation` — `src/contracts.ts`:297
-- c0069: `Document` — `src/contracts.ts`:77
-- c0070: `DocumentInput` — `src/contracts.ts`:68
-- c0071: `DocumentSummary` — `src/contracts.ts`:82
-- c0072: `Entity` — `src/contracts.ts`:53
-- c0073: `EntityInput` — `src/contracts.ts`:43
-- c0074: `EntityRelationship` — `src/contracts.ts`:64
-- c0075: `EntityRelationshipInput` — `src/contracts.ts`:58
-- c0076: `EntityType` — `src/contracts.ts`:41
-- c0077: `EvidenceEntry` — `src/contracts.ts`:282
-- c0078: `FileSummary` — `src/contracts.ts`:100
-- c0079: `ForgetfulClient` — `src/contracts.ts`:187
-- c0080: `KnowledgeClient` — `src/contracts.ts`:115
-- c0081: `LinkedMemory` — `src/contracts.ts`:155
-- c0082: `Memory` — `src/contracts.ts`:145
-- c0083: `MemoryCreateResult` — `src/contracts.ts`:181
-- c0084: `MemoryInput` — `src/contracts.ts`:17
-- c0085: `MemoryModelClient` — `src/contracts.ts`:266
-- c0086: `MemorySearchResult` — `src/contracts.ts`:161
-- c0087: `ModelReadTool` — `src/contracts.ts`:239
-- c0088: `ModelRequest` — `src/contracts.ts`:210
-- c0089: `ModelSubmissionError` — `src/contracts.ts`:255
-- c0090: `ModelSubmissionTool` — `src/contracts.ts`:246
-- c0091: `Project` — `src/contracts.ts`:4
-- c0092: `ProjectInput` — `src/contracts.ts`:11
-- c0093: `Provenance` — `src/contracts.ts`:34
-- c0094: `Scope` — `src/contracts.ts`:1
-- c0095: `SearchRequest` — `src/contracts.ts`:170
-- c0096: `StoredFile` — `src/contracts.ts`:110
-- c0097: `WorkContext` — `src/contracts.ts`:272
-- c0098: `src/encode.ts` — `src/encode.ts`:1
-- c0099: `AutomaticCaptureJobOutcome` — `src/extension.ts`:1131
-- c0100: `AutomaticRecall` — `src/extension.ts`:443
-- c0101: `BoundedWaitOutcome` — `src/extension.ts`:145
-- c0102: `CaptureFeedbackItem` — `src/extension.ts`:1238
-- c0103: `CaptureFeedbackState` — `src/extension.ts`:1110
-- c0104: `CaptureServicePort` — `src/extension.ts`:296
-- c0105: `DiagnosticCandidate` — `src/extension.ts`:967
-- c0106: `DiagnosticParts` — `src/extension.ts`:980
-- c0107: `ExtensionWorkContext` — `src/extension.ts`:330
-- c0108: `ForgetfulExtensionDependencies` — `src/extension.ts`:334
-- c0109: `ForgetfulExtensionOptions` — `src/extension.ts`:359
-- c0110: `PendingQueuedRecall` — `src/extension.ts`:399
-- c0111: `PolicyName` — `src/extension.ts`:281
-- c0112: `PreparedRuntime` — `src/extension.ts`:456
-- c0113: `RecallActivity` — `src/extension.ts`:401
-- c0114: `RecallContextMessage` — `src/extension.ts`:374
-- c0115: `RecallJob` — `src/extension.ts`:381
-- c0116: `RecallServicePort` — `src/extension.ts`:289
-- c0117: `RecallToolDetails` — `src/extension.ts`:283
-- c0118: `Runtime` — `src/extension.ts`:407
-- c0119: `SetupAuthentication` — `src/extension.ts`:231
-- c0120: `State` — `src/extension.ts`:445
-- c0121: `src/extension.ts` — `src/extension.ts`:1
-- c0122: `src/foreground-tools.ts` — `src/foreground-tools.ts`:1
-- c0123: `ApiKnowledgeClient` — `src/http-knowledge.ts`:192
-- c0124: `KnowledgeRequest` — `src/http-knowledge.ts`:9
-- c0125: `src/http-knowledge.ts` — `src/http-knowledge.ts`:1
-- c0126: `ApiForgetfulClient` — `src/http.ts`:441
-- c0127: `ApiForgetfulClientOptions` — `src/http.ts`:25
-- c0128: `ForgetfulAbortError` — `src/http.ts`:59
-- c0129: `ForgetfulHttpError` — `src/http.ts`:33
-- c0130: `ForgetfulSchemaError` — `src/http.ts`:45
-- c0131: `ForgetfulTimeoutError` — `src/http.ts`:52
-- c0132: `src/http.ts` — `src/http.ts`:1
-- c0133: `Attachments` — `src/knowledge-read.ts`:45
-- c0134: `KnowledgeExpansionRequest` — `src/knowledge-read.ts`:19
-- c0135: `KnowledgeExpansionResult` — `src/knowledge-read.ts`:27
-- c0136: `KnowledgeReadService` — `src/knowledge-read.ts`:143
-- c0137: `KnowledgeReadServiceOptions` — `src/knowledge-read.ts`:57
-- c0138: `LinkedMemoryExpansion` — `src/knowledge-read.ts`:43
-- c0139: `MemoryReader` — `src/knowledge-read.ts`:52
-- c0140: `RelationshipExpansion` — `src/knowledge-read.ts`:37
-- c0141: `src/knowledge-read.ts` — `src/knowledge-read.ts`:1
-- c0142: `KnowledgeReadContext` — `src/knowledge-tools.ts`:676
-- c0143: `KnowledgeReadRequest` — `src/knowledge-tools.ts`:185
-- c0144: `KnowledgeToolContext` — `src/knowledge-tools.ts`:23
-- c0145: `KnowledgeToolResult` — `src/knowledge-tools.ts`:33
-- c0146: `KnowledgeWriteContext` — `src/knowledge-tools.ts`:1318
-- c0147: `KnowledgeWriteRequest` — `src/knowledge-tools.ts`:186
-- c0148: `ResolvedWriteProject` — `src/knowledge-tools.ts`:491
-- c0149: `ToolImage` — `src/knowledge-tools.ts`:32
-- c0150: `ToolText` — `src/knowledge-tools.ts`:31
-- c0151: `src/knowledge-tools.ts` — `src/knowledge-tools.ts`:1
-- c0152: `KnowledgeAttachmentIds` — `src/knowledge-write.ts`:110
-- c0153: `KnowledgeCodeArtifactPlan` — `src/knowledge-write.ts`:43
-- c0154: `KnowledgeDocumentPlan` — `src/knowledge-write.ts`:37
-- c0155: `KnowledgeEntityMemoryLinkPlan` — `src/knowledge-write.ts`:57
-- c0156: `KnowledgeEntityPlan` — `src/knowledge-write.ts`:31
-- c0157: `KnowledgeMemoryReader` — `src/knowledge-write.ts`:103
-- c0158: `KnowledgeRelationshipPlan` — `src/knowledge-write.ts`:49
-- c0159: `KnowledgeWriteCheckpoint` — `src/knowledge-write.ts`:97
-- c0160: `KnowledgeWriteGuard` — `src/knowledge-write.ts`:101
-- c0161: `KnowledgeWritePlan` — `src/knowledge-write.ts`:61
-- c0162: `KnowledgeWriteReceipt` — `src/knowledge-write.ts`:78
-- c0163: `KnowledgeWriteSave` — `src/knowledge-write.ts`:108
-- c0164: `KnowledgeWriteState` — `src/knowledge-write.ts`:83
-- c0165: `KnowledgeWriter` — `src/knowledge-write.ts`:238
-- c0166: `WriteClient` — `src/knowledge-write.ts`:16
-- c0167: `src/knowledge-write.ts` — `src/knowledge-write.ts`:1
-- c0168: `DiagnosticLogger` — `src/logging.ts`:83
-- c0169: `FileLogLevel` — `src/logging.ts`:81
-- c0170: `FileLogger` — `src/logging.ts`:97
-- c0171: `src/logging.ts` — `src/logging.ts`:1
-- c0172: `src/memory-context.ts` — `src/memory-context.ts`:1
-- c0173: `CompactedMemoryHistory` — `src/model-context.ts`:224
-- c0174: `ContextWindowError` — `src/model-context.ts`:28
-- c0175: `MemoryHistorySummaryOptions` — `src/model-context.ts`:360
-- c0176: `MemoryTaskContext` — `src/model-context.ts`:231
-- c0177: `SummaryCompletion` — `src/model-context.ts`:23
-- c0178: `src/model-context.ts` — `src/model-context.ts`:1
-- c0179: `MemoryModelHeaderTransform` — `src/model.ts`:42
-- c0180: `ModelPickerContext` — `src/model.ts`:46
-- c0181: `ModelRegistryPort` — `src/model.ts`:33
-- c0182: `PiMemoryModel` — `src/model.ts`:304
-- c0183: `PiMemoryModelOptions` — `src/model.ts`:56
-- c0184: `RequestDeadline` — `src/model.ts`:237
-- c0185: `src/model.ts` — `src/model.ts`:1
-- c0186: `src/privacy.ts` — `src/privacy.ts`:1
-- c0187: `AgentProjectInitInput` — `src/project-init.ts`:8
-- c0188: `ProjectInitError` — `src/project-init.ts`:6
-- c0189: `src/project-init.ts` — `src/project-init.ts`:1
-- c0190: `DurableQueueStore` — `src/queue.ts`:475
-- c0191: `DurableQueueStoreOptions` — `src/queue.ts`:180
-- c0192: `FileLock` — `src/queue.ts`:209
-- c0193: `PendingConflict` — `src/queue.ts`:92
-- c0194: `QueueBusyError` — `src/queue.ts`:214
-- c0195: `QueueCheckpoint` — `src/queue.ts`:166
-- c0196: `QueueEnqueueResult` — `src/queue.ts`:150
-- c0197: `QueueIdentity` — `src/queue.ts`:36
-- c0198: `QueueJob` — `src/queue.ts`:61
-- c0199: `QueueJobMetadata` — `src/queue.ts`:88
-- c0200: `QueueJobStatus` — `src/queue.ts`:29
-- c0201: `QueueState` — `src/queue.ts`:202
-- c0202: `QueueWatermark` — `src/queue.ts`:42
-- c0203: `SnapshotPayload` — `src/queue.ts`:199
-- c0204: `StoredQueueJob` — `src/queue.ts`:194
-- c0205: `SupersessionReceipt` — `src/queue.ts`:82
-- c0206: `WatermarkAdvance` — `src/queue.ts`:157
-- c0207: `src/queue.ts` — `src/queue.ts`:1
-- c0208: `DeadlineSignal` — `src/recall.ts`:203
-- c0209: `DeeperRecallRequest` — `src/recall.ts`:150
-- c0210: `RecallPlan` — `src/recall.ts`:185
-- c0211: `RecallRequest` — `src/recall.ts`:133
-- c0212: `RecallResult` — `src/recall.ts`:159
-- c0213: `RecallService` — `src/recall.ts`:670
-- c0214: `RecallServiceOptions` — `src/recall.ts`:195
-- c0215: `ReviewValidationError` — `src/recall.ts`:608
-- c0216: `ScopeResolution` — `src/recall.ts`:212
-- c0217: `SearchOutcome` — `src/recall.ts`:218
-- c0218: `src/recall.ts` — `src/recall.ts`:1
-- c0219: `src/repository.ts` — `src/repository.ts`:1
-- c0220: `CaptureSnapshotWithStatus` — `src/snapshot.ts`:39
-- c0221: `MessageRecord` — `src/snapshot.ts`:47
-- c0222: `SnapshotOptions` — `src/snapshot.ts`:20
-- c0223: `SnapshotResult` — `src/snapshot.ts`:43
-- c0224: `SnapshotSessionReader` — `src/snapshot.ts`:14
-- c0225: `src/snapshot.ts` — `src/snapshot.ts`:1
-- c0226: `SourceInspectionError` — `src/source-inspection.ts`:37
-- c0227: `SourceInspectionRequest` — `src/source-inspection.ts`:33
-- c0228: `SourceInspectionResult` — `src/source-inspection.ts`:43
-- c0229: `SourceInspector` — `src/source-inspection.ts`:149
-- c0230: `SourceInspectorOptions` — `src/source-inspection.ts`:15
-- c0231: `src/source-inspection.ts` — `src/source-inspection.ts`:1
+- c0005: `CaptureCorrectionCycle` — `src/capture-feedback.ts`:6
+- c0006: `CaptureSelectionError` — `src/capture-feedback.ts`:15
+- c0007: `src/capture-feedback.ts` — `src/capture-feedback.ts`:1
+- c0008: `CaptureLinkReview` — `src/capture-links.ts`:43
+- c0009: `ConnectionResult` — `src/capture-links.ts`:61
+- c0010: `LinkDecision` — `src/capture-links.ts`:15
+- c0011: `PreservationDecision` — `src/capture-links.ts`:25
+- c0012: `PreviousConnections` — `src/capture-links.ts`:33
+- c0013: `src/capture-links.ts` — `src/capture-links.ts`:1
+- c0014: `MergeAccess` — `src/capture-merge.ts`:41
+- c0015: `MergeConnections` — `src/capture-merge.ts`:5
+- c0016: `MergeExecution` — `src/capture-merge.ts`:47
+- c0017: `MergeWriteUncertain` — `src/capture-merge.ts`:16
+- c0018: `src/capture-merge.ts` — `src/capture-merge.ts`:1
+- c0019: `CandidateExtraction` — `src/capture.ts`:737
+- c0020: `CandidateValidation` — `src/capture.ts`:663
+- c0021: `CaptureAction` — `src/capture.ts`:76
+- c0022: `CaptureActivityPhase` — `src/capture.ts`:174
+- c0023: `CaptureAdvanceInput` — `src/capture.ts`:320
+- c0024: `CaptureBatchInput` — `src/capture.ts`:135
+- c0025: `CaptureBranch` — `src/capture.ts`:201
+- c0026: `CaptureCandidate` — `src/capture.ts`:78
+- c0027: `CaptureCheckpointOptions` — `src/capture.ts`:206
+- c0028: `CaptureCheckpointResult` — `src/capture.ts`:212
+- c0029: `CaptureCodeArtifactResource` — `src/capture.ts`:112
+- c0030: `CaptureDecision` — `src/capture.ts`:142
+- c0031: `CaptureDiagnosticCandidate` — `src/capture.ts`:225
+- c0032: `CaptureDiagnosticConflict` — `src/capture.ts`:253
+- c0033: `CaptureDiagnosticJob` — `src/capture.ts`:241
+- c0034: `CaptureDiagnostics` — `src/capture.ts`:264
+- c0035: `CaptureDocumentResource` — `src/capture.ts`:108
+- c0036: `CaptureEnqueueResult` — `src/capture.ts`:269
+- c0037: `CaptureEntityResource` — `src/capture.ts`:104
+- c0038: `CaptureMergePlan` — `src/capture.ts`:159
+- c0039: `CaptureNeighborhood` — `src/capture.ts`:127
+- c0040: `CaptureOperation` — `src/capture.ts`:362
+- c0041: `CapturePause` — `src/capture.ts`:328
+- c0042: `CapturePendingConflict` — `src/capture.ts`:315
+- c0043: `CaptureProgress` — `src/capture.ts`:352
+- c0044: `CaptureRelationshipResource` — `src/capture.ts`:116
+- c0045: `CaptureResolveResult` — `src/capture.ts`:309
+- c0046: `CaptureResourceReuse` — `src/capture.ts`:120
+- c0047: `CaptureService` — `src/capture.ts`:1141
+- c0048: `CaptureServiceOptions` — `src/capture.ts`:176
+- c0049: `CaptureUncertainWrite` — `src/capture.ts`:350
+- c0050: `ConflictResolutionEvidence` — `src/capture.ts`:275
+- c0051: `ConflictResolutionTarget` — `src/capture.ts`:292
+- c0052: `InvalidCaptureOutput` — `src/capture.ts`:335
+- c0053: `MissingCaptureDestination` — `src/capture.ts`:342
+- c0054: `ResolveConflictInput` — `src/capture.ts`:298
+- c0055: `src/capture.ts` — `src/capture.ts`:1
+- c0056: `src/concurrency.ts` — `src/concurrency.ts`:1
+- c0057: `ForgetfulConfig` — `src/config.ts`:92
+- c0058: `ForgetfulInstanceConfig` — `src/config.ts`:79
+- c0059: `JsonReadResult` — `src/config.ts`:147
+- c0060: `LoadConfigOptions` — `src/config.ts`:114
+- c0061: `ModelSelection` — `src/config.ts`:74
+- c0062: `PersistedProjectSettings` — `src/config.ts`:143
+- c0063: `PersistedUserSettings` — `src/config.ts`:125
+- c0064: `PromptName` — `src/config.ts`:40
+- c0065: `PromptOverlays` — `src/config.ts`:86
+- c0066: `ScopeSource` — `src/config.ts`:39
+- c0067: `Verbosity` — `src/config.ts`:59
+- c0068: `src/config.ts` — `src/config.ts`:1
+- c0069: `CaptureHistorySummary` — `src/contracts.ts`:315
+- c0070: `CaptureMode` — `src/contracts.ts`:2
+- c0071: `CaptureSnapshot` — `src/contracts.ts`:326
+- c0072: `CodeArtifact` — `src/contracts.ts`:93
+- c0073: `CodeArtifactInput` — `src/contracts.ts`:84
+- c0074: `CodeArtifactSummary` — `src/contracts.ts`:98
+- c0075: `CompactedConversation` — `src/contracts.ts`:320
+- c0076: `Document` — `src/contracts.ts`:77
+- c0077: `DocumentInput` — `src/contracts.ts`:68
+- c0078: `DocumentSummary` — `src/contracts.ts`:82
+- c0079: `Entity` — `src/contracts.ts`:53
+- c0080: `EntityInput` — `src/contracts.ts`:43
+- c0081: `EntityRelationship` — `src/contracts.ts`:64
+- c0082: `EntityRelationshipInput` — `src/contracts.ts`:58
+- c0083: `EntityType` — `src/contracts.ts`:41
+- c0084: `EvidenceEntry` — `src/contracts.ts`:305
+- c0085: `FileSummary` — `src/contracts.ts`:100
+- c0086: `ForgetfulClient` — `src/contracts.ts`:189
+- c0087: `KnowledgeClient` — `src/contracts.ts`:115
+- c0088: `LinkedMemory` — `src/contracts.ts`:157
+- c0089: `Memory` — `src/contracts.ts`:145
+- c0090: `MemoryCreateResult` — `src/contracts.ts`:183
+- c0091: `MemoryInput` — `src/contracts.ts`:17
+- c0092: `MemoryModelClient` — `src/contracts.ts`:289
+- c0093: `MemorySearchResult` — `src/contracts.ts`:163
+- c0094: `ModelEvidencePage` — `src/contracts.ts`:245
+- c0095: `ModelReadErrorResult` — `src/contracts.ts`:255
+- c0096: `ModelReadTool` — `src/contracts.ts`:259
+- c0097: `ModelRequest` — `src/contracts.ts`:215
+- c0098: `ModelSubmissionError` — `src/contracts.ts`:278
+- c0099: `ModelSubmissionTool` — `src/contracts.ts`:269
+- c0100: `ModelTaskPause` — `src/contracts.ts`:267
+- c0101: `Project` — `src/contracts.ts`:4
+- c0102: `ProjectInput` — `src/contracts.ts`:11
+- c0103: `Provenance` — `src/contracts.ts`:34
+- c0104: `Scope` — `src/contracts.ts`:1
+- c0105: `SearchRequest` — `src/contracts.ts`:172
+- c0106: `StoredFile` — `src/contracts.ts`:110
+- c0107: `WorkContext` — `src/contracts.ts`:295
+- c0108: `AutomaticCaptureJobOutcome` — `src/extension.ts`:1046
+- c0109: `AutomaticRecall` — `src/extension.ts`:429
+- c0110: `BoundedWaitOutcome` — `src/extension.ts`:140
+- c0111: `CaptureFeedbackItem` — `src/extension.ts`:1156
+- c0112: `CaptureFeedbackState` — `src/extension.ts`:1025
+- c0113: `CaptureServicePort` — `src/extension.ts`:285
+- c0114: `DiagnosticCandidate` — `src/extension.ts`:882
+- c0115: `DiagnosticParts` — `src/extension.ts`:895
+- c0116: `ExtensionWorkContext` — `src/extension.ts`:319
+- c0117: `ForgetfulExtensionDependencies` — `src/extension.ts`:323
+- c0118: `ForgetfulExtensionOptions` — `src/extension.ts`:348
+- c0119: `PendingQueuedRecall` — `src/extension.ts`:388
+- c0120: `PolicyName` — `src/extension.ts`:276
+- c0121: `PreparedRuntime` — `src/extension.ts`:442
+- c0122: `RecallActivity` — `src/extension.ts`:390
+- c0123: `RecallContextMessage` — `src/extension.ts`:363
+- c0124: `RecallJob` — `src/extension.ts`:370
+- c0125: `RecallServicePort` — `src/extension.ts`:278
+- c0126: `Runtime` — `src/extension.ts`:396
+- c0127: `SetupAuthentication` — `src/extension.ts`:226
+- c0128: `State` — `src/extension.ts`:431
+- c0129: `src/extension.ts` — `src/extension.ts`:1
+- c0130: `src/foreground-tools.ts` — `src/foreground-tools.ts`:1
+- c0131: `ApiKnowledgeClient` — `src/http-knowledge.ts`:199
+- c0132: `KnowledgeRequest` — `src/http-knowledge.ts`:9
+- c0133: `src/http-knowledge.ts` — `src/http-knowledge.ts`:1
+- c0134: `ApiForgetfulClient` — `src/http.ts`:394
+- c0135: `ApiForgetfulClientOptions` — `src/http.ts`:25
+- c0136: `ForgetfulAbortError` — `src/http.ts`:59
+- c0137: `ForgetfulHttpError` — `src/http.ts`:33
+- c0138: `ForgetfulSchemaError` — `src/http.ts`:45
+- c0139: `ForgetfulTimeoutError` — `src/http.ts`:52
+- c0140: `src/http.ts` — `src/http.ts`:1
+- c0141: `Attachments` — `src/knowledge-read.ts`:51
+- c0142: `ExpansionContext` — `src/knowledge-read.ts`:39
+- c0143: `KnowledgeExpansionRequest` — `src/knowledge-read.ts`:19
+- c0144: `KnowledgeExpansionResult` — `src/knowledge-read.ts`:27
+- c0145: `KnowledgeReadService` — `src/knowledge-read.ts`:155
+- c0146: `KnowledgeReadServiceOptions` — `src/knowledge-read.ts`:63
+- c0147: `LinkedMemoryExpansion` — `src/knowledge-read.ts`:49
+- c0148: `MemoryReader` — `src/knowledge-read.ts`:58
+- c0149: `RelationshipExpansion` — `src/knowledge-read.ts`:43
+- c0150: `src/knowledge-read.ts` — `src/knowledge-read.ts`:1
+- c0151: `KnowledgeReadContext` — `src/knowledge-tools.ts`:630
+- c0152: `KnowledgeReadRequest` — `src/knowledge-tools.ts`:169
+- c0153: `KnowledgeToolContext` — `src/knowledge-tools.ts`:23
+- c0154: `KnowledgeToolResult` — `src/knowledge-tools.ts`:33
+- c0155: `KnowledgeWriteContext` — `src/knowledge-tools.ts`:1272
+- c0156: `KnowledgeWriteRequest` — `src/knowledge-tools.ts`:170
+- c0157: `ResolvedWriteProject` — `src/knowledge-tools.ts`:445
+- c0158: `ToolImage` — `src/knowledge-tools.ts`:32
+- c0159: `ToolText` — `src/knowledge-tools.ts`:31
+- c0160: `src/knowledge-tools.ts` — `src/knowledge-tools.ts`:1
+- c0161: `KnowledgeAttachmentIds` — `src/knowledge-write.ts`:128
+- c0162: `KnowledgeCodeArtifactPlan` — `src/knowledge-write.ts`:44
+- c0163: `KnowledgeDocumentPlan` — `src/knowledge-write.ts`:38
+- c0164: `KnowledgeEntityMemoryLinkPlan` — `src/knowledge-write.ts`:58
+- c0165: `KnowledgeEntityPlan` — `src/knowledge-write.ts`:32
+- c0166: `KnowledgeMemoryReader` — `src/knowledge-write.ts`:108
+- c0167: `KnowledgeRelationshipPlan` — `src/knowledge-write.ts`:50
+- c0168: `KnowledgeWriteCheckpoint` — `src/knowledge-write.ts`:102
+- c0169: `KnowledgeWriteGuard` — `src/knowledge-write.ts`:106
+- c0170: `KnowledgeWritePlan` — `src/knowledge-write.ts`:62
+- c0171: `KnowledgeWriteReceipt` — `src/knowledge-write.ts`:79
+- c0172: `KnowledgeWriteSave` — `src/knowledge-write.ts`:113
+- c0173: `KnowledgeWriteState` — `src/knowledge-write.ts`:86
+- c0174: `KnowledgeWriter` — `src/knowledge-write.ts`:264
+- c0175: `ResourceSlot` — `src/knowledge-write.ts`:115
+- c0176: `WriteClient` — `src/knowledge-write.ts`:18
+- c0177: `src/knowledge-write.ts` — `src/knowledge-write.ts`:1
+- c0178: `DiagnosticLogger` — `src/logging.ts`:83
+- c0179: `FileLogLevel` — `src/logging.ts`:81
+- c0180: `FileLogger` — `src/logging.ts`:97
+- c0181: `src/logging.ts` — `src/logging.ts`:1
+- c0182: `src/memory-context.ts` — `src/memory-context.ts`:1
+- c0183: `CompactedMemoryHistory` — `src/model-context.ts`:241
+- c0184: `ContextWindowError` — `src/model-context.ts`:30
+- c0185: `MemoryHistorySummaryOptions` — `src/model-context.ts`:377
+- c0186: `MemoryTaskContext` — `src/model-context.ts`:248
+- c0187: `SummaryCompletion` — `src/model-context.ts`:25
+- c0188: `src/model-context.ts` — `src/model-context.ts`:1
+- c0189: `MemoryModelHeaderTransform` — `src/model.ts`:45
+- c0190: `ModelPickerContext` — `src/model.ts`:49
+- c0191: `ModelRegistryPort` — `src/model.ts`:36
+- c0192: `PiMemoryModel` — `src/model.ts`:319
+- c0193: `PiMemoryModelOptions` — `src/model.ts`:59
+- c0194: `RequestDeadline` — `src/model.ts`:240
+- c0195: `src/model.ts` — `src/model.ts`:1
+- c0196: `src/privacy.ts` — `src/privacy.ts`:1
+- c0197: `AgentProjectInitInput` — `src/project-init.ts`:8
+- c0198: `ProjectInitError` — `src/project-init.ts`:6
+- c0199: `src/project-init.ts` — `src/project-init.ts`:1
+- c0200: `DurableQueueStore` — `src/queue.ts`:511
+- c0201: `DurableQueueStoreOptions` — `src/queue.ts`:193
+- c0202: `FileLock` — `src/queue.ts`:225
+- c0203: `HistoryCache` — `src/queue.ts`:42
+- c0204: `PendingConflict` — `src/queue.ts`:103
+- c0205: `QueueBusyError` — `src/queue.ts`:230
+- c0206: `QueueCheckpoint` — `src/queue.ts`:179
+- c0207: `QueueEnqueueResult` — `src/queue.ts`:163
+- c0208: `QueueIdentity` — `src/queue.ts`:36
+- c0209: `QueueJob` — `src/queue.ts`:69
+- c0210: `QueueJobMetadata` — `src/queue.ts`:99
+- c0211: `QueueJobStatus` — `src/queue.ts`:29
+- c0212: `QueueState` — `src/queue.ts`:218
+- c0213: `QueueWatermark` — `src/queue.ts`:48
+- c0214: `SnapshotPayload` — `src/queue.ts`:212
+- c0215: `StoredQueueJob` — `src/queue.ts`:207
+- c0216: `SupersessionReceipt` — `src/queue.ts`:92
+- c0217: `WatermarkAdvance` — `src/queue.ts`:170
+- c0218: `src/queue.ts` — `src/queue.ts`:1
+- c0219: `DeadlineSignal` — `src/recall.ts`:206
+- c0220: `DeeperRecallRequest` — `src/recall.ts`:153
+- c0221: `RecallPlan` — `src/recall.ts`:188
+- c0222: `RecallRequest` — `src/recall.ts`:136
+- c0223: `RecallResult` — `src/recall.ts`:162
+- c0224: `RecallService` — `src/recall.ts`:673
+- c0225: `RecallServiceOptions` — `src/recall.ts`:198
+- c0226: `ReviewValidationError` — `src/recall.ts`:611
+- c0227: `ScopeResolution` — `src/recall.ts`:215
+- c0228: `SearchOutcome` — `src/recall.ts`:221
+- c0229: `src/recall.ts` — `src/recall.ts`:1
+- c0230: `src/repository.ts` — `src/repository.ts`:1
+- c0231: `SetupHelp` — `src/setup.ts`:3
+- c0232: `src/setup.ts` — `src/setup.ts`:1
+- c0233: `CaptureSnapshotWithStatus` — `src/snapshot.ts`:39
+- c0234: `MessageRecord` — `src/snapshot.ts`:47
+- c0235: `SnapshotOptions` — `src/snapshot.ts`:20
+- c0236: `SnapshotResult` — `src/snapshot.ts`:43
+- c0237: `SnapshotSessionReader` — `src/snapshot.ts`:14
+- c0238: `src/snapshot.ts` — `src/snapshot.ts`:1
+- c0239: `SourceInspectionError` — `src/source-inspection.ts`:37
+- c0240: `SourceInspectionRequest` — `src/source-inspection.ts`:33
+- c0241: `SourceInspectionResult` — `src/source-inspection.ts`:43
+- c0242: `SourceInspector` — `src/source-inspection.ts`:149
+- c0243: `SourceInspectorOptions` — `src/source-inspection.ts`:15
+- c0244: `src/source-inspection.ts` — `src/source-inspection.ts`:1
 
 ## Relationships
 
-- c0000 ..> c0121: `defaultExtension() calls createForgetfulExtension()`
+- c0000 ..> c0129: `defaultExtension() calls createForgetfulExtension()`
 - c0003 ..> c0004: `setLabel() calls refresh()`
-- c0003 ..> c0040: `dispose() calls stop()`
+- c0003 ..> c0047: `dispose() calls stop()`
 - c0004 --> c0003: `field loader`
 - c0004 ..> c0003: `close() calls dispose()`
 - c0004 ..> c0003: `refresh() calls dispose()`
@@ -3502,3284 +3662,3426 @@ classDiagram
 - c0004 ..> c0004: `constructor() calls refresh()`
 - c0004 ..> c0004: `notice() calls refresh()`
 - c0004 ..> c0004: `set() calls refresh()`
-- c0004 ..> c0040: `refresh() calls now()`
-- c0005 --> c0006: `field executionResults`
-- c0005 --> c0006: `field previousResults`
-- c0005 --> c0007: `field decisions`
-- c0005 --> c0008: `field preservation`
-- c0005 --> c0009: `field previous`
-- c0005 --> c0065: `field resources`
-- c0005 --> c0069: `field resources`
-- c0005 --> c0082: `field memories`
-- c0005 --> c0082: `field memory`
-- c0009 --> c0065: `field codeArtifacts`
-- c0009 --> c0069: `field documents`
-- c0009 --> c0072: `field entities`
-- c0009 --> c0082: `field memory`
-- c0010 ..> c0004: `validateLinkDecisions() calls set()`
-- c0010 ..> c0004: `validateLinkReviews() calls set()`
-- c0010 ..> c0005: `type in applyLinkReview`
-- c0010 ..> c0005: `type in executeConnection`
-- c0010 ..> c0005: `type in finishLinkExecution`
-- c0010 ..> c0005: `type in prepareLinkReview`
-- c0010 ..> c0005: `type in preserveConnections`
-- c0010 ..> c0005: `type in readSelectedMemory`
-- c0010 ..> c0005: `type in validateLinkDecisions`
-- c0010 ..> c0005: `type in validateLinkReviews`
-- c0010 ..> c0005: `type in validatePreservation`
-- c0010 ..> c0006: `type in executeConnection`
-- c0010 ..> c0007: `type in validateLinkDecisions`
-- c0010 ..> c0007: `type in validateLinkReviews`
-- c0010 ..> c0007: `type in wantsEdge`
-- c0010 ..> c0008: `type in validateLinkReviews`
-- c0010 ..> c0008: `type in validatePreservation`
-- c0010 ..> c0009: `type in preparePreviousConnections`
-- c0010 ..> c0010: `applyLinkReview() calls authorizedMemory()`
-- c0010 ..> c0010: `applyLinkReview() calls executeConnection()`
-- c0010 ..> c0010: `applyLinkReview() calls finishLinkExecution()`
-- c0010 ..> c0010: `authorizedMemory() calls exclusiveMemory()`
-- c0010 ..> c0010: `executeConnection() calls operationError()`
-- c0010 ..> c0010: `prepareLinkReview() calls exclusiveMemory()`
-- c0010 ..> c0010: `prepareLinkReview() calls readAttachmentRecords()`
-- c0010 ..> c0010: `prepareLinkReview() calls readSelectedMemory()`
-- c0010 ..> c0010: `preserveConnections() calls authorizedMemory()`
-- c0010 ..> c0010: `preserveConnections() calls executeConnection()`
-- c0010 ..> c0010: `validateLinkDecisions() calls wantsEdge()`
-- c0010 ..> c0010: `validateLinkReviews() calls validateLinkDecisions()`
-- c0010 ..> c0010: `validateLinkReviews() calls validatePreservation()`
-- c0010 ..> c0065: `type in readAttachmentRecords`
-- c0010 ..> c0069: `type in readAttachmentRecords`
-- c0010 ..> c0079: `type in applyLinkReview`
-- c0010 ..> c0079: `type in authorizedMemory`
-- c0010 ..> c0079: `type in prepareLinkReview`
-- c0010 ..> c0079: `type in preparePreviousConnections`
-- c0010 ..> c0079: `type in preserveConnections`
-- c0010 ..> c0079: `type in readAttachmentRecords`
-- c0010 ..> c0079: `type in readSelectedMemory`
-- c0010 ..> c0082: `type in authorizedMemory`
-- c0010 ..> c0082: `type in exclusiveMemory`
-- c0010 ..> c0082: `type in prepareLinkReview`
-- c0010 ..> c0082: `type in preparePreviousConnections`
-- c0010 ..> c0082: `type in readAttachmentRecords`
-- c0010 ..> c0082: `type in readSelectedMemory`
-- c0010 ..> c0123: `applyLinkReview() calls linkMemories()`
-- c0010 ..> c0123: `preparePreviousConnections() calls getCodeArtifact()`
-- c0010 ..> c0123: `preparePreviousConnections() calls getDocument()`
-- c0010 ..> c0123: `preparePreviousConnections() calls getEntity()`
-- c0010 ..> c0123: `preserveConnections() calls getCodeArtifact()`
-- c0010 ..> c0123: `preserveConnections() calls getDocument()`
-- c0010 ..> c0123: `preserveConnections() calls getEntity()`
-- c0010 ..> c0123: `preserveConnections() calls linkEntityMemory()`
-- c0010 ..> c0123: `preserveConnections() calls updateMemory()`
-- c0010 ..> c0123: `readAttachmentRecords() calls getCodeArtifact()`
-- c0010 ..> c0123: `readAttachmentRecords() calls getDocument()`
-- c0010 ..> c0126: `authorizedMemory() calls get()`
-- c0010 ..> c0126: `prepareLinkReview() calls get()`
-- c0010 ..> c0126: `preparePreviousConnections() calls get()`
-- c0010 ..> c0126: `preparePreviousConnections() calls getMemoryEntityIds()`
-- c0010 ..> c0126: `readSelectedMemory() calls get()`
-- c0010 ..> c0126: `validateLinkDecisions() calls get()`
-- c0010 ..> c0165: `executeConnection() calls execute()`
-- c0010 ..> c0186: `prepareLinkReview() calls hasSensitiveData()`
-- c0010 ..> c0186: `preparePreviousConnections() calls hasSensitiveData()`
-- c0010 ..> c0186: `readAttachmentRecords() calls hasSensitiveData()`
-- c0010 ..> c0186: `validateLinkDecisions() calls hasSensitiveData()`
-- c0010 ..> c0186: `validatePreservation() calls hasSensitiveData()`
-- c0010 ..> c0218: `validateLinkDecisions() calls trim()`
-- c0010 ..> c0218: `validatePreservation() calls trim()`
-- c0012 --> c0021: `field candidates`
-- c0013 --> c0021: `field kind`
-- c0019 --> c0021: `field candidate`
-- c0019 --> c0033: `field neighborhood`
-- c0019 --> c0077: `field evidenceEntries`
-- c0019 --> c0082: `field overlaps`
-- c0021 --> c0024: `field codeArtifacts`
-- c0021 --> c0030: `field documents`
-- c0021 --> c0032: `field entities`
-- c0021 --> c0037: `field relationships`
-- c0022 --> c0020: `field excludeBranches`
-- c0023 --> c0020: `field deferredBranches`
-- c0024 --|> c0153: `inherits`
-- c0025 --> c0016: `field action`
-- c0025 --> c0039: `field reuse`
-- c0026 --> c0005: `field linkReview`
-- c0026 --> c0016: `field action`
-- c0027 --> c0193: `field status`
-- c0028 --> c0026: `field candidates`
-- c0028 --> c0200: `field status`
-- c0029 --> c0027: `field conflicts`
-- c0029 --> c0028: `field jobs`
-- c0030 --|> c0154: `inherits`
-- c0032 --|> c0156: `inherits`
-- c0033 --> c0065: `field codeArtifacts`
-- c0033 --> c0069: `field documents`
-- c0033 --> c0072: `field entities`
-- c0033 --> c0074: `field relationships`
-- c0034 --> c0042: `field uncertainWrite`
-- c0034 --> c0205: `field supersession`
-- c0036 --|> c0193: `inherits`
-- c0037 --|> c0158: `inherits`
-- c0038 --> c0193: `field conflict`
-- c0040 ..> c0004: `activity() calls set()`
-- c0040 ..> c0005: `type in planLinkReviews`
-- c0040 ..> c0005: `type in prepareLinkReviews`
-- c0040 ..> c0005: `type in refreshLinkReview`
-- c0040 ..> c0010: `executeLinkReview() calls applyLinkReview()`
-- c0040 ..> c0010: `executeLinkReview() calls preserveConnections()`
-- c0040 ..> c0010: `planLinkReviews() calls validateLinkReviews()`
-- c0040 ..> c0010: `refreshLinkReview() calls prepareLinkReview()`
-- c0040 ..> c0010: `refreshLinkReview() calls preparePreviousConnections()`
-- c0040 --> c0017: `field activityPhase`
-- c0040 ..> c0017: `type in activity`
-- c0040 ..> c0018: `type in advance`
-- c0040 ..> c0018: `type in advanceWatermark`
-- c0040 ..> c0019: `type in validateEquivalentCandidate`
-- c0040 ..> c0020: `type in checkpointBranch`
-- c0040 ..> c0020: `type in checkpointBranches`
-- c0040 ..> c0020: `type in runBranchWorker`
-- c0040 ..> c0021: `type in addConflict`
-- c0040 ..> c0021: `type in applyDecision`
-- c0040 ..> c0021: `type in createMemory`
-- c0040 ..> c0021: `type in decideOverlap`
-- c0040 ..> c0021: `type in decideOverlapBatch`
-- c0040 ..> c0021: `type in destinationProjects`
-- c0040 ..> c0021: `type in executeLinkReview`
-- c0040 ..> c0021: `type in existingNeighborhood`
-- c0040 ..> c0021: `type in finishSupersession`
-- c0040 ..> c0021: `type in loadCandidates`
-- c0040 ..> c0021: `type in loadOverlaps`
-- c0040 ..> c0021: `type in neighborhoodEntities`
-- c0040 ..> c0021: `type in planConflictReplacement`
-- c0040 ..> c0021: `type in planLinkReviews`
-- c0040 ..> c0021: `type in prepareDestination`
-- c0040 ..> c0021: `type in prepareLinkReviews`
-- c0040 ..> c0021: `type in processCandidate`
-- c0040 ..> c0021: `type in processCandidates`
-- c0040 ..> c0021: `type in processKnowledgeCheckpoint`
-- c0040 ..> c0021: `type in processReplacementCheckpoint`
-- c0040 ..> c0021: `type in recordCandidateFailure`
-- c0040 ..> c0021: `type in recordEscalation`
-- c0040 ..> c0021: `type in refreshLinkReview`
-- c0040 ..> c0021: `type in resolveDestination`
-- c0040 ..> c0021: `type in reviewExecutionFailure`
-- c0040 ..> c0021: `type in reviewLinks`
-- c0040 ..> c0021: `type in supersedeCandidate`
-- c0040 ..> c0021: `type in validateDecision`
-- c0040 ..> c0021: `type in validateDecisionResources`
-- c0040 ..> c0021: `type in validateEquivalentCandidate`
-- c0040 ..> c0021: `type in validateRevisionText`
-- c0040 ..> c0021: `type in writeKnowledge`
-- c0040 ..> c0022: `type in checkpoint`
-- c0040 ..> c0022: `type in checkpointBranches`
-- c0040 ..> c0022: `type in processPending`
-- c0040 ..> c0023: `type in appendCheckpointResult`
-- c0040 ..> c0023: `type in checkpoint`
-- c0040 ..> c0023: `type in checkpointBranch`
-- c0040 ..> c0023: `type in processBranchJob`
-- c0040 ..> c0023: `type in processCandidates`
-- c0040 ..> c0023: `type in processJob`
-- c0040 ..> c0023: `type in processPending`
-- c0040 ..> c0023: `type in recordBranchFailure`
-- c0040 ..> c0023: `type in recordCandidateFailure`
-- c0040 ..> c0023: `type in runBranchWorker`
-- c0040 ..> c0025: `type in addConflict`
-- c0040 ..> c0025: `type in applyDecision`
-- c0040 ..> c0025: `type in decideOverlap`
-- c0040 ..> c0025: `type in finishSupersession`
-- c0040 ..> c0025: `type in recordEscalation`
-- c0040 ..> c0025: `type in supersedeCandidate`
-- c0040 ..> c0025: `type in validateDecision`
-- c0040 ..> c0025: `type in validateDecisionResources`
-- c0040 ..> c0025: `type in validateEquivalentCandidate`
-- c0040 ..> c0029: `type in diagnostics`
-- c0040 ..> c0031: `type in enqueue`
-- c0040 ..> c0031: `type in enqueueSnapshot`
-- c0040 ..> c0033: `type in existingNeighborhood`
-- c0040 ..> c0033: `type in validateDecision`
-- c0040 ..> c0033: `type in validateDecisionResources`
-- c0040 ..> c0035: `assertWriteAllowedNow() constructs CapturePause`
-- c0040 ..> c0035: `decideOverlap() constructs CapturePause`
-- c0040 ..> c0035: `ensureModelCallAllowed() constructs CapturePause`
-- c0040 ..> c0035: `ensureWriteAllowed() constructs CapturePause`
-- c0040 ..> c0035: `loadOverlaps() constructs CapturePause`
-- c0040 ..> c0035: `neighborhoodEntities() constructs CapturePause`
-- c0040 ..> c0035: `neighborhoodEntity() constructs CapturePause`
-- c0040 ..> c0035: `neighborhoodRelationships() constructs CapturePause`
-- c0040 ..> c0035: `processCandidate() constructs CapturePause`
-- c0040 ..> c0035: `processJob() constructs CapturePause`
-- c0040 ..> c0035: `sourceInspectionTool() constructs CapturePause`
-- c0040 ..> c0035: `stop() constructs CapturePause`
-- c0040 ..> c0036: `type in pendingConflicts`
-- c0040 ..> c0036: `type in verifyConflictOrigin`
-- c0040 ..> c0038: `type in applyConflictResolution`
-- c0040 ..> c0038: `type in markConflictResolved`
-- c0040 ..> c0038: `type in rejectConflict`
-- c0040 ..> c0038: `type in resolve`
-- c0040 ..> c0038: `type in resolveConflict`
-- c0040 ..> c0038: `type in resolveConflictOwned`
-- c0040 ..> c0040: `activity() calls publishActivity()`
-- c0040 ..> c0040: `advanceWatermark() calls advance()`
-- c0040 ..> c0040: `applyConflictResolution() calls applySupersession()`
-- c0040 ..> c0040: `applyConflictResolution() calls createResolutionReplacement()`
-- c0040 ..> c0040: `applyConflictResolution() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `applyConflictResolution() calls executeResolutionLinks()`
-- c0040 ..> c0040: `applyConflictResolution() calls failConflictResolution()`
-- c0040 ..> c0040: `applyConflictResolution() calls markConflictResolved()`
-- c0040 ..> c0040: `applyConflictResolution() calls planConflictReplacement()`
-- c0040 ..> c0040: `applyConflictResolution() calls updateResolutionReplacement()`
-- c0040 ..> c0040: `applyConflictResolution() calls validateConflictMemory()`
-- c0040 ..> c0040: `applyDecision() calls checkpointOutcome()`
-- c0040 ..> c0040: `applyDecision() calls createMemory()`
-- c0040 ..> c0040: `applyDecision() calls equivalentMemory()`
-- c0040 ..> c0040: `applyDecision() calls recordEscalation()`
-- c0040 ..> c0040: `applyDecision() calls supersedeCandidate()`
-- c0040 ..> c0040: `applyDecision() calls writeKnowledge()`
-- c0040 ..> c0040: `applySupersession() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `applySupersession() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `applySupersession() calls readSavedMemory()`
-- c0040 ..> c0040: `applySupersession() calls recordSupersession()`
-- c0040 ..> c0040: `assertWriteAllowedNow() calls canWriteNow()`
-- c0040 ..> c0040: `cancellableClient() calls read()`
-- c0040 ..> c0040: `cancellableKnowledge() calls read()`
-- c0040 ..> c0040: `checkpoint() calls appendCheckpointResult()`
-- c0040 ..> c0040: `checkpoint() calls checkpointBranch()`
-- c0040 ..> c0040: `checkpoint() calls checkpointBranches()`
-- c0040 ..> c0040: `checkpoint() calls enabled()`
-- c0040 ..> c0040: `checkpointBranch() calls runBranchWorker()`
-- c0040 ..> c0040: `checkpointOutcome() calls correlation()`
-- c0040 ..> c0040: `constructor() calls activity()`
-- c0040 ..> c0040: `constructor() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `constructor() calls cancellableClient()`
-- c0040 ..> c0040: `constructor() calls read()`
-- c0040 ..> c0040: `createMemory() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `createMemory() calls checkpointOutcome()`
-- c0040 ..> c0040: `createMemory() calls correlation()`
-- c0040 ..> c0040: `createMemory() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `createResolutionReplacement() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `createResolutionReplacement() calls authorizeResolutionAttachments()`
-- c0040 ..> c0040: `createResolutionReplacement() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `createResolutionReplacement() calls validateConflictMemory()`
-- c0040 ..> c0040: `decideOverlap() calls checkpointOutcome()`
-- c0040 ..> c0040: `decideOverlap() calls correlation()`
-- c0040 ..> c0040: `decideOverlap() calls enabled()`
-- c0040 ..> c0040: `decideOverlap() calls ensureModelCallAllowed()`
-- c0040 ..> c0040: `decideOverlap() calls existingNeighborhood()`
-- c0040 ..> c0040: `decideOverlap() calls policyFor()`
-- c0040 ..> c0040: `decideOverlap() calls validateDecision()`
-- c0040 ..> c0040: `decideOverlapBatch() calls correlation()`
-- c0040 ..> c0040: `decideOverlapBatch() calls ensureModelCallAllowed()`
-- c0040 ..> c0040: `decideOverlapBatch() calls existingNeighborhood()`
-- c0040 ..> c0040: `decideOverlapBatch() calls loadOverlaps()`
-- c0040 ..> c0040: `decideOverlapBatch() calls policyFor()`
-- c0040 ..> c0040: `decideOverlapBatch() calls prepareDestination()`
-- c0040 ..> c0040: `destinationProjects() calls resolveDestination()`
-- c0040 ..> c0040: `enabled() calls getMode()`
-- c0040 ..> c0040: `enabled() calls isEnabled()`
-- c0040 ..> c0040: `enqueueSnapshot() calls getMode()`
-- c0040 ..> c0040: `enqueueSnapshot() calls isEnabled()`
-- c0040 ..> c0040: `ensureModelCallAllowed() calls enabled()`
-- c0040 ..> c0040: `ensureWriteAllowed() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `ensureWriteAllowed() calls enabled()`
-- c0040 ..> c0040: `ensureWriteAllowed() calls getMode()`
-- c0040 ..> c0040: `equivalentMemory() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `executeLinkReview() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `executeLinkReview() calls checkpointOutcome()`
-- c0040 ..> c0040: `executeLinkReview() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `executeLinkReview() calls finishSupersession()`
-- c0040 ..> c0040: `executeResolutionLinks() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `executeResolutionLinks() calls authorizeResolutionMemory()`
-- c0040 ..> c0040: `executeResolutionLinks() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `executeResolutionLinks() calls linkResolutionEntity()`
-- c0040 ..> c0040: `existingNeighborhood() calls neighborhoodEntities()`
-- c0040 ..> c0040: `existingNeighborhood() calls neighborhoodRelationships()`
-- c0040 ..> c0040: `finishSupersession() calls applySupersession()`
-- c0040 ..> c0040: `finishSupersession() calls checkpointOutcome()`
-- c0040 ..> c0040: `linkResolutionEntity() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `linkResolutionEntity() calls authorizeResolutionMemory()`
-- c0040 ..> c0040: `linkResolutionEntity() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `loadCandidates() calls correlation()`
-- c0040 ..> c0040: `loadCandidates() calls ensureModelCallAllowed()`
-- c0040 ..> c0040: `loadCandidates() calls policyFor()`
-- c0040 ..> c0040: `loadCandidates() calls sourceInspectionTool()`
-- c0040 ..> c0040: `loadOverlaps() calls checkpointOutcome()`
-- c0040 ..> c0040: `loadOverlaps() calls enabled()`
-- c0040 ..> c0040: `mutate() calls activity()`
-- c0040 ..> c0040: `mutate() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `neighborhoodEntities() calls enabled()`
-- c0040 ..> c0040: `neighborhoodEntities() calls neighborhoodEntity()`
-- c0040 ..> c0040: `neighborhoodEntity() calls enabled()`
-- c0040 ..> c0040: `neighborhoodRelationships() calls enabled()`
-- c0040 ..> c0040: `ownedConflict() calls verifyConflictOrigin()`
-- c0040 ..> c0040: `pendingConflicts() calls verifyConflictOrigin()`
-- c0040 ..> c0040: `planConflictReplacement() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `planConflictReplacement() calls readSavedMemory()`
-- c0040 ..> c0040: `planConflictReplacement() calls revisionResources()`
-- c0040 ..> c0040: `planLinkReviews() calls correlation()`
-- c0040 ..> c0040: `planLinkReviews() calls ensureModelCallAllowed()`
-- c0040 ..> c0040: `planLinkReviews() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `prepareDestination() calls checkpointOutcome()`
-- c0040 ..> c0040: `prepareDestination() calls destinationProjects()`
-- c0040 ..> c0040: `prepareLinkReviews() calls checkpointOutcome()`
-- c0040 ..> c0040: `prepareLinkReviews() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `prepareLinkReviews() calls refreshLinkReview()`
-- c0040 ..> c0040: `processBranchJob() calls correlation()`
-- c0040 ..> c0040: `processBranchJob() calls processJob()`
-- c0040 ..> c0040: `processBranchJob() calls recordBranchFailure()`
-- c0040 ..> c0040: `processCandidate() calls applyDecision()`
-- c0040 ..> c0040: `processCandidate() calls checkpointOutcome()`
-- c0040 ..> c0040: `processCandidate() calls decideOverlap()`
-- c0040 ..> c0040: `processCandidate() calls enabled()`
-- c0040 ..> c0040: `processCandidate() calls getMode()`
-- c0040 ..> c0040: `processCandidate() calls loadOverlaps()`
-- c0040 ..> c0040: `processCandidate() calls prepareDestination()`
-- c0040 ..> c0040: `processCandidate() calls processKnowledgeCheckpoint()`
-- c0040 ..> c0040: `processCandidate() calls processReplacementCheckpoint()`
-- c0040 ..> c0040: `processCandidates() calls processCandidate()`
-- c0040 ..> c0040: `processCandidates() calls recordCandidateFailure()`
-- c0040 ..> c0040: `processCandidates() calls reviewExecutionFailure()`
-- c0040 ..> c0040: `processJob() calls decideOverlapBatch()`
-- c0040 ..> c0040: `processJob() calls enabled()`
-- c0040 ..> c0040: `processJob() calls getMode()`
-- c0040 ..> c0040: `processJob() calls loadCandidates()`
-- c0040 ..> c0040: `processJob() calls processCandidates()`
-- c0040 ..> c0040: `processJob() calls reviewLinks()`
-- c0040 ..> c0040: `processKnowledgeCheckpoint() calls finishSupersession()`
-- c0040 ..> c0040: `processKnowledgeCheckpoint() calls writeKnowledge()`
-- c0040 ..> c0040: `processReplacementCheckpoint() calls finishSupersession()`
-- c0040 ..> c0040: `processReplacementCheckpoint() calls writeKnowledge()`
-- c0040 ..> c0040: `publishActivity() calls onActivity()`
-- c0040 ..> c0040: `read() calls activity()`
-- c0040 ..> c0040: `read() calls readSignal()`
-- c0040 ..> c0040: `recordBranchFailure() calls correlation()`
-- c0040 ..> c0040: `recordCandidateFailure() calls checkpointOutcome()`
-- c0040 ..> c0040: `recordCandidateFailure() calls correlation()`
-- c0040 ..> c0040: `recordEscalation() calls checkpointOutcome()`
-- c0040 ..> c0040: `refreshLinkReview() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `resolve() calls resolveConflict()`
-- c0040 ..> c0040: `resolveConflict() calls resolveConflictOwned()`
-- c0040 ..> c0040: `resolveConflictOwned() calls applyConflictResolution()`
-- c0040 ..> c0040: `resolveConflictOwned() calls enabled()`
-- c0040 ..> c0040: `resolveConflictOwned() calls ownedConflict()`
-- c0040 ..> c0040: `resolveConflictOwned() calls rejectConflict()`
-- c0040 ..> c0040: `resolveConflictOwned() calls resolutionTarget()`
-- c0040 ..> c0040: `resolveConflictOwned() calls validateResolutionEvidence()`
-- c0040 ..> c0040: `reviewExecutionFailure() calls checkpointOutcome()`
-- c0040 ..> c0040: `reviewExecutionFailure() calls correlation()`
-- c0040 ..> c0040: `reviewExecutionFailure() calls ensureModelCallAllowed()`
-- c0040 ..> c0040: `reviewLinks() calls executeLinkReview()`
-- c0040 ..> c0040: `reviewLinks() calls planLinkReviews()`
-- c0040 ..> c0040: `reviewLinks() calls prepareLinkReviews()`
-- c0040 ..> c0040: `revisionResources() calls read()`
-- c0040 ..> c0040: `runBranchWorker() calls enabled()`
-- c0040 ..> c0040: `runBranchWorker() calls processBranchJob()`
-- c0040 ..> c0040: `sourceInspectionTool() calls canReadNow()`
-- c0040 ..> c0040: `sourceInspectionTool() calls enabled()`
-- c0040 ..> c0040: `supersedeCandidate() calls checkpointOutcome()`
-- c0040 ..> c0040: `supersedeCandidate() calls createMemory()`
-- c0040 ..> c0040: `supersedeCandidate() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `supersedeCandidate() calls finishSupersession()`
-- c0040 ..> c0040: `supersedeCandidate() calls writeKnowledge()`
-- c0040 ..> c0040: `updateResolutionReplacement() calls assertWriteAllowedNow()`
-- c0040 ..> c0040: `updateResolutionReplacement() calls authorizeResolutionAttachments()`
-- c0040 ..> c0040: `updateResolutionReplacement() calls authorizeResolutionMemory()`
-- c0040 ..> c0040: `updateResolutionReplacement() calls ensureWriteAllowed()`
-- c0040 ..> c0040: `updateResolutionReplacement() calls validateConflictMemory()`
-- c0040 ..> c0040: `validateDecision() calls validateDecisionResources()`
-- c0040 ..> c0040: `validateResolutionEvidence() calls selectResolutionEvidence()`
-- c0040 ..> c0040: `writeKnowledge() calls checkpointOutcome()`
-- c0040 ..> c0040: `writeKnowledge() calls ensureWriteAllowed()`
-- c0040 --> c0041: `field onActivity`
-- c0040 ..> c0041: `type in constructor`
-- c0040 ..> c0042: `applySupersession() constructs CaptureUncertainWrite`
-- c0040 ..> c0042: `mutate() constructs CaptureUncertainWrite`
-- c0040 ..> c0042: `processJob() constructs CaptureUncertainWrite`
-- c0040 ..> c0043: `type in applyConflictResolution`
-- c0040 ..> c0043: `type in planConflictReplacement`
-- c0040 ..> c0043: `type in validateResolutionEvidence`
-- c0040 ..> c0044: `type in applyConflictResolution`
-- c0040 ..> c0044: `type in resolutionTarget`
-- c0040 ..> c0045: `destinationProjects() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `processKnowledgeCheckpoint() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `processReplacementCheckpoint() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `supersedeCandidate() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `validateDecision() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `validateDecisionResources() constructs InvalidCaptureOutput`
-- c0040 ..> c0045: `validateRevisionText() constructs InvalidCaptureOutput`
-- c0040 ..> c0046: `type in rejectConflict`
-- c0040 ..> c0046: `type in resolve`
-- c0040 ..> c0046: `type in resolveConflict`
-- c0040 ..> c0046: `type in resolveConflictOwned`
-- c0040 ..> c0046: `type in selectResolutionEvidence`
-- c0040 ..> c0046: `type in validateResolutionEvidence`
-- c0040 ..> c0048: `addConflict() calls clone()`
-- c0040 ..> c0048: `addConflict() calls sourceEvidence()`
-- c0040 ..> c0048: `applyConflictResolution() calls blockedSave()`
-- c0040 ..> c0048: `applyConflictResolution() calls conflictResolutionEvidence()`
-- c0040 ..> c0048: `applyDecision() calls firstConflictId()`
-- c0040 ..> c0048: `checkpointBranch() calls scrubError()`
-- c0040 ..> c0048: `checkpointOutcome() calls clone()`
-- c0040 ..> c0048: `checkpointOutcome() calls record()`
-- c0040 ..> c0048: `createMemory() calls memoryInput()`
-- c0040 ..> c0048: `createMemory() calls projectId()`
-- c0040 ..> c0048: `createMemory() calls record()`
-- c0040 ..> c0048: `createResolutionReplacement() calls projectId()`
-- c0040 ..> c0048: `decideOverlap() calls appendSubmissionRejection()`
-- c0040 ..> c0048: `decideOverlap() calls boundedSubmissionRejections()`
-- c0040 ..> c0048: `decideOverlap() calls captureConversation()`
-- c0040 ..> c0048: `decideOverlap() calls captureWorkMetadata()`
-- c0040 ..> c0048: `decideOverlap() calls decisionConflictIds()`
-- c0040 ..> c0048: `decideOverlap() calls overlapCandidate()`
-- c0040 ..> c0048: `decideOverlap() calls parseDecision()`
-- c0040 ..> c0048: `decideOverlap() calls sourceEvidence()`
-- c0040 ..> c0048: `decideOverlapBatch() calls appendSubmissionRejection()`
-- c0040 ..> c0048: `decideOverlapBatch() calls boundedSubmissionRejections()`
-- c0040 ..> c0048: `decideOverlapBatch() calls captureConversation()`
-- c0040 ..> c0048: `decideOverlapBatch() calls captureWorkMetadata()`
-- c0040 ..> c0048: `decideOverlapBatch() calls isFinalOutcome()`
-- c0040 ..> c0048: `decideOverlapBatch() calls overlapCandidate()`
-- c0040 ..> c0048: `decideOverlapBatch() calls record()`
-- c0040 ..> c0048: `decideOverlapBatch() calls scrubError()`
-- c0040 ..> c0048: `decideOverlapBatch() calls sourceEvidence()`
-- c0040 ..> c0048: `diagnostics() calls boundedSubmissionRejections()`
-- c0040 ..> c0048: `diagnostics() calls projectId()`
-- c0040 ..> c0048: `diagnostics() calls record()`
-- c0040 ..> c0048: `diagnostics() calls scrubError()`
-- c0040 ..> c0048: `diagnostics() calls stringValue()`
-- c0040 ..> c0048: `diagnostics() calls strings()`
-- c0040 ..> c0048: `enqueue() calls scrubError()`
-- c0040 ..> c0048: `enqueueSnapshot() calls snapshotForPersistence()`
-- c0040 ..> c0048: `equivalentMemory() calls projectId()`
-- c0040 ..> c0048: `equivalentMemory() calls record()`
-- c0040 ..> c0048: `executeLinkReview() calls record()`
-- c0040 ..> c0048: `finishSupersession() calls record()`
-- c0040 ..> c0048: `loadCandidates() calls appendSubmissionRejection()`
-- c0040 ..> c0048: `loadCandidates() calls boundedSubmissionRejections()`
-- c0040 ..> c0048: `loadCandidates() calls captureCandidateSubmission()`
-- c0040 ..> c0048: `loadCandidates() calls captureConversation()`
-- c0040 ..> c0048: `loadCandidates() calls captureWorkMetadata()`
-- c0040 ..> c0048: `loadCandidates() calls parseCandidates()`
-- c0040 ..> c0048: `loadCandidates() calls record()`
-- c0040 ..> c0048: `loadCandidates() calls strings()`
-- c0040 ..> c0048: `loadOverlaps() calls record()`
-- c0040 ..> c0048: `planConflictReplacement() calls captureConversation()`
-- c0040 ..> c0048: `planLinkReviews() calls appendSubmissionRejection()`
-- c0040 ..> c0048: `planLinkReviews() calls boundedSubmissionRejections()`
-- c0040 ..> c0048: `planLinkReviews() calls captureConversation()`
-- c0040 ..> c0048: `planLinkReviews() calls captureWorkMetadata()`
-- c0040 ..> c0048: `planLinkReviews() calls record()`
-- c0040 ..> c0048: `planLinkReviews() calls sourceEvidence()`
-- c0040 ..> c0048: `prepareLinkReviews() calls record()`
-- c0040 ..> c0048: `processCandidate() calls isFinalOutcome()`
-- c0040 ..> c0048: `processCandidate() calls record()`
-- c0040 ..> c0048: `processCandidates() calls isFinalOutcome()`
-- c0040 ..> c0048: `processJob() calls isFinalOutcome()`
-- c0040 ..> c0048: `processKnowledgeCheckpoint() calls projectId()`
-- c0040 ..> c0048: `processKnowledgeCheckpoint() calls record()`
-- c0040 ..> c0048: `processKnowledgeCheckpoint() calls stringValue()`
-- c0040 ..> c0048: `processReplacementCheckpoint() calls projectId()`
-- c0040 ..> c0048: `processReplacementCheckpoint() calls record()`
-- c0040 ..> c0048: `processReplacementCheckpoint() calls stringValue()`
-- c0040 ..> c0048: `recordBranchFailure() calls scrubError()`
-- c0040 ..> c0048: `recordCandidateFailure() calls record()`
-- c0040 ..> c0048: `recordCandidateFailure() calls scrubError()`
-- c0040 ..> c0048: `refreshLinkReview() calls projectId()`
-- c0040 ..> c0048: `refreshLinkReview() calls record()`
-- c0040 ..> c0048: `resolutionTarget() calls record()`
-- c0040 ..> c0048: `resolveDestination() calls currentProjectId()`
-- c0040 ..> c0048: `resolveDestination() calls projectId()`
-- c0040 ..> c0048: `reviewExecutionFailure() calls captureConversation()`
-- c0040 ..> c0048: `reviewExecutionFailure() calls captureWorkMetadata()`
-- c0040 ..> c0048: `reviewExecutionFailure() calls record()`
-- c0040 ..> c0048: `supersedeCandidate() calls firstConflictId()`
-- c0040 ..> c0048: `validateDecision() calls decisionConflictIds()`
-- c0040 ..> c0048: `validateEquivalentCandidate() calls record()`
-- c0040 ..> c0048: `validateResolutionEvidence() calls stringValue()`
-- c0040 ..> c0048: `validateResolutionEvidence() calls trustedAdditionalEntries()`
-- c0040 ..> c0048: `verifyConflictOrigin() calls record()`
-- c0040 ..> c0048: `writeKnowledge() calls captureKnowledgePlan()`
-- c0040 ..> c0048: `writeKnowledge() calls record()`
-- c0040 --> c0063: `field getMode`
-- c0040 ..> c0063: `type in enabled`
-- c0040 ..> c0063: `type in ensureWriteAllowed`
-- c0040 ..> c0063: `type in refreshLinkReview`
-- c0040 ..> c0064: `type in advance`
-- c0040 ..> c0064: `type in advanceWatermark`
-- c0040 ..> c0064: `type in checkpoint`
-- c0040 ..> c0064: `type in checkpointBranches`
-- c0040 ..> c0064: `type in enqueue`
-- c0040 ..> c0064: `type in enqueueSnapshot`
-- c0040 ..> c0064: `type in policyFor`
-- c0040 ..> c0072: `type in neighborhoodEntities`
-- c0040 ..> c0072: `type in neighborhoodEntity`
-- c0040 ..> c0072: `type in neighborhoodRelationships`
-- c0040 ..> c0074: `type in neighborhoodRelationships`
-- c0040 --> c0079: `field client`
-- c0040 ..> c0079: `type in cancellableClient`
-- c0040 ..> c0080: `type in cancellableKnowledge`
-- c0040 --> c0082: `field readSavedMemory`
-- c0040 ..> c0082: `type in addConflict`
-- c0040 ..> c0082: `type in applyDecision`
-- c0040 ..> c0082: `type in applySupersession`
-- c0040 ..> c0082: `type in decideOverlap`
-- c0040 ..> c0082: `type in equivalentMemory`
-- c0040 ..> c0082: `type in finishSupersession`
-- c0040 ..> c0082: `type in loadOverlaps`
-- c0040 ..> c0082: `type in planConflictReplacement`
-- c0040 ..> c0082: `type in recordEscalation`
-- c0040 ..> c0082: `type in revisionResources`
-- c0040 ..> c0082: `type in supersedeCandidate`
-- c0040 ..> c0082: `type in validateConflictMemory`
-- c0040 ..> c0082: `type in validateDecision`
-- c0040 ..> c0082: `type in writeKnowledge`
-- c0040 ..> c0083: `type in createMemory`
-- c0040 --> c0085: `field model`
-- c0040 ..> c0087: `type in sourceInspectionTool`
-- c0040 ..> c0097: `type in destinationProjects`
-- c0040 ..> c0097: `type in planConflictReplacement`
-- c0040 ..> c0097: `type in resolveDestination`
-- c0040 ..> c0097: `type in watermark`
-- c0040 ..> c0123: `authorizeResolutionAttachments() calls getCodeArtifact()`
-- c0040 ..> c0123: `authorizeResolutionAttachments() calls getDocument()`
-- c0040 ..> c0123: `authorizeResolutionAttachments() calls getFile()`
-- c0040 ..> c0123: `cancellableKnowledge() calls createCodeArtifact()`
-- c0040 ..> c0123: `cancellableKnowledge() calls createDocument()`
-- c0040 ..> c0123: `cancellableKnowledge() calls createEntity()`
-- c0040 ..> c0123: `cancellableKnowledge() calls createRelationship()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getCodeArtifact()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getDocument()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getEntity()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getEntityMemories()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getFile()`
-- c0040 ..> c0123: `cancellableKnowledge() calls getRelationships()`
-- c0040 ..> c0123: `cancellableKnowledge() calls linkEntityMemory()`
-- c0040 ..> c0123: `cancellableKnowledge() calls linkMemories()`
-- c0040 ..> c0123: `cancellableKnowledge() calls listCodeArtifacts()`
-- c0040 ..> c0123: `cancellableKnowledge() calls listDocuments()`
-- c0040 ..> c0123: `cancellableKnowledge() calls listFiles()`
-- c0040 ..> c0123: `cancellableKnowledge() calls searchEntities()`
-- c0040 ..> c0123: `cancellableKnowledge() calls updateCodeArtifact()`
-- c0040 ..> c0123: `cancellableKnowledge() calls updateDocument()`
-- c0040 ..> c0123: `cancellableKnowledge() calls updateEntity()`
-- c0040 ..> c0123: `cancellableKnowledge() calls updateMemory()`
-- c0040 ..> c0123: `executeResolutionLinks() calls linkMemories()`
-- c0040 ..> c0123: `existingNeighborhood() calls getCodeArtifact()`
-- c0040 ..> c0123: `existingNeighborhood() calls getDocument()`
-- c0040 ..> c0123: `existingNeighborhood() calls listCodeArtifacts()`
-- c0040 ..> c0123: `existingNeighborhood() calls listDocuments()`
-- c0040 ..> c0123: `linkResolutionEntity() calls getEntity()`
-- c0040 ..> c0123: `linkResolutionEntity() calls linkEntityMemory()`
-- c0040 ..> c0123: `neighborhoodEntities() calls searchEntities()`
-- c0040 ..> c0123: `neighborhoodEntity() calls getEntity()`
-- c0040 ..> c0123: `neighborhoodRelationships() calls getRelationships()`
-- c0040 ..> c0123: `revisionResources() calls getCodeArtifact()`
-- c0040 ..> c0123: `revisionResources() calls getDocument()`
-- c0040 ..> c0123: `revisionResources() calls getEntity()`
-- c0040 ..> c0123: `revisionResources() calls getFile()`
-- c0040 ..> c0123: `updateResolutionReplacement() calls updateMemory()`
-- c0040 ..> c0125: `planConflictReplacement() calls ids()`
-- c0040 ..> c0126: `applyConflictResolution() calls get()`
-- c0040 ..> c0126: `applySupersession() calls get()`
-- c0040 ..> c0126: `applySupersession() calls supersede()`
-- c0040 ..> c0126: `authorizeResolutionMemory() calls get()`
-- c0040 ..> c0126: `cancellableClient() calls create()`
-- c0040 ..> c0126: `cancellableClient() calls createProject()`
-- c0040 ..> c0126: `cancellableClient() calls get()`
-- c0040 ..> c0126: `cancellableClient() calls linkProject()`
-- c0040 ..> c0126: `cancellableClient() calls listProjects()`
-- c0040 ..> c0126: `cancellableClient() calls search()`
-- c0040 ..> c0126: `cancellableClient() calls supersede()`
-- c0040 ..> c0126: `constructor() calls get()`
-- c0040 ..> c0126: `createMemory() calls create()`
-- c0040 ..> c0126: `createResolutionReplacement() calls create()`
-- c0040 ..> c0126: `createResolutionReplacement() calls get()`
-- c0040 ..> c0126: `decideOverlapBatch() calls get()`
-- c0040 ..> c0126: `diagnostics() calls get()`
-- c0040 ..> c0126: `equivalentMemory() calls get()`
-- c0040 ..> c0126: `executeLinkReview() calls get()`
-- c0040 ..> c0126: `executeResolutionLinks() calls get()`
-- c0040 ..> c0126: `linkResolutionEntity() calls getMemoryEntityIds()`
-- c0040 ..> c0126: `loadOverlaps() calls search()`
-- c0040 ..> c0126: `planLinkReviews() calls get()`
-- c0040 ..> c0126: `read() calls get()`
-- c0040 ..> c0126: `resolveDestination() calls listProjects()`
-- c0040 ..> c0126: `revisionResources() calls get()`
-- c0040 ..> c0126: `revisionResources() calls getMemoryEntityIds()`
-- c0040 ..> c0126: `supersedeCandidate() calls get()`
-- c0040 ..> c0126: `updateResolutionReplacement() calls get()`
-- c0040 ..> c0126: `verifyConflictOrigin() calls get()`
-- c0040 --> c0165: `field knowledgeWriter`
-- c0040 ..> c0165: `constructor() constructs KnowledgeWriter`
-- c0040 ..> c0165: `writeKnowledge() calls execute()`
-- c0040 --> c0168: `field logger`
-- c0040 ..> c0170: `checkpointBranch() calls emit()`
-- c0040 ..> c0170: `checkpointOutcome() calls emit()`
-- c0040 ..> c0170: `createMemory() calls emit()`
-- c0040 ..> c0170: `decideOverlap() calls emit()`
-- c0040 ..> c0170: `emit() calls emit()`
-- c0040 ..> c0170: `enqueue() calls emit()`
-- c0040 ..> c0170: `enqueueSnapshot() calls emit()`
-- c0040 ..> c0170: `enqueueSnapshot() calls enqueue()`
-- c0040 ..> c0170: `loadCandidates() calls emit()`
-- c0040 ..> c0170: `processBranchJob() calls emit()`
-- c0040 ..> c0170: `recordBranchFailure() calls emit()`
-- c0040 ..> c0170: `recordCandidateFailure() calls emit()`
-- c0040 ..> c0170: `runBranchWorker() calls emit()`
-- c0040 ..> c0172: `createResolutionReplacement() calls replacementMemoryInput()`
-- c0040 ..> c0172: `planConflictReplacement() calls replacementMemoryContext()`
-- c0040 ..> c0172: `supersedeCandidate() calls replacementMemoryContext()`
-- c0040 ..> c0172: `updateResolutionReplacement() calls replacementMemoryInput()`
-- c0040 ..> c0176: `loadCandidates() calls prepareCapture()`
-- c0040 ..> c0186: `addConflict() calls sanitizeText()`
-- c0040 ..> c0186: `addConflict() calls sanitizeValue()`
-- c0040 ..> c0186: `applyDecision() calls sanitizeValue()`
-- c0040 ..> c0186: `decideOverlap() calls sanitizeValue()`
-- c0040 ..> c0186: `diagnostics() calls sanitizeText()`
-- c0040 ..> c0186: `emit() calls sanitizeValue()`
-- c0040 ..> c0186: `existingNeighborhood() calls hasSensitiveData()`
-- c0040 ..> c0186: `loadCandidates() calls sanitizeText()`
-- c0040 ..> c0186: `loadOverlaps() calls hasSensitiveData()`
-- c0040 ..> c0186: `loadOverlaps() calls sanitizeValue()`
-- c0040 ..> c0186: `neighborhoodEntity() calls hasSensitiveData()`
-- c0040 ..> c0186: `neighborhoodRelationships() calls hasSensitiveData()`
-- c0040 ..> c0186: `rejectConflict() calls sanitizeText()`
-- c0040 ..> c0186: `supersedeCandidate() calls sanitizeValue()`
-- c0040 ..> c0186: `writeKnowledge() calls sanitizeValue()`
-- c0040 --> c0190: `field queue`
-- c0040 ..> c0190: `addConflict() calls addConflict()`
-- c0040 ..> c0190: `addConflict() calls now()`
-- c0040 ..> c0190: `advance() calls advanceWatermark()`
-- c0040 ..> c0190: `applyConflictResolution() calls updateConflict()`
-- c0040 ..> c0190: `cancellableClient() calls mutate()`
-- c0040 ..> c0190: `cancellableKnowledge() calls mutate()`
-- c0040 ..> c0190: `checkpoint() calls hasClaimableWork()`
-- c0040 ..> c0190: `checkpointBranch() calls withWorkerLock()`
-- c0040 ..> c0190: `checkpointBranches() calls listJobMetadata()`
-- c0040 ..> c0190: `checkpointOutcome() calls checkpoint()`
-- c0040 ..> c0190: `checkpointOutcome() calls getJob()`
-- c0040 ..> c0190: `constructor() calls complete()`
-- c0040 ..> c0190: `createResolutionReplacement() calls updateConflict()`
-- c0040 ..> c0190: `decideOverlap() calls checkpoint()`
-- c0040 ..> c0190: `decideOverlap() calls complete()`
-- c0040 ..> c0190: `decideOverlapBatch() calls checkpoint()`
-- c0040 ..> c0190: `decideOverlapBatch() calls complete()`
-- c0040 ..> c0190: `diagnostics() calls listJobMetadata()`
-- c0040 ..> c0190: `diagnostics() calls pendingConflicts()`
-- c0040 ..> c0190: `enqueue() calls enqueueSnapshot()`
-- c0040 ..> c0190: `enqueueSnapshot() calls advanceWatermark()`
-- c0040 ..> c0190: `executeLinkReview() calls getJob()`
-- c0040 ..> c0190: `executeResolutionLinks() calls updateConflict()`
-- c0040 ..> c0190: `failConflictResolution() calls getConflict()`
-- c0040 ..> c0190: `failConflictResolution() calls updateConflict()`
-- c0040 ..> c0190: `loadCandidates() calls checkpoint()`
-- c0040 ..> c0190: `loadCandidates() calls complete()`
-- c0040 ..> c0190: `loadCandidates() calls getJob()`
-- c0040 ..> c0190: `markConflictResolved() calls updateConflict()`
-- c0040 ..> c0190: `ownedConflict() calls getConflict()`
-- c0040 ..> c0190: `pendingConflicts() calls pendingConflicts()`
-- c0040 ..> c0190: `planConflictReplacement() calls complete()`
-- c0040 ..> c0190: `planConflictReplacement() calls getJob()`
-- c0040 ..> c0190: `planLinkReviews() calls checkpoint()`
-- c0040 ..> c0190: `planLinkReviews() calls complete()`
-- c0040 ..> c0190: `processBranchJob() calls getJob()`
-- c0040 ..> c0190: `processBranchJob() calls now()`
-- c0040 ..> c0190: `processJob() calls checkpoint()`
-- c0040 ..> c0190: `processJob() calls complete()`
-- c0040 ..> c0190: `processJob() calls getJob()`
-- c0040 ..> c0190: `processJob() calls releaseProgress()`
-- c0040 ..> c0190: `processPending() calls checkpoint()`
-- c0040 ..> c0190: `recordBranchFailure() calls cancel()`
-- c0040 ..> c0190: `recordBranchFailure() calls checkpoint()`
-- c0040 ..> c0190: `recordBranchFailure() calls getJob()`
-- c0040 ..> c0190: `recordBranchFailure() calls now()`
-- c0040 ..> c0190: `recordCandidateFailure() calls cancel()`
-- c0040 ..> c0190: `recordCandidateFailure() calls checkpoint()`
-- c0040 ..> c0190: `recordCandidateFailure() calls getJob()`
-- c0040 ..> c0190: `recordEscalation() calls addConflict()`
-- c0040 ..> c0190: `recordSupersession() calls checkpoint()`
-- c0040 ..> c0190: `recordSupersession() calls updateConflict()`
-- c0040 ..> c0190: `rejectConflict() calls updateConflict()`
-- c0040 ..> c0190: `resolveConflict() calls getConflict()`
-- c0040 ..> c0190: `resolveConflict() calls withWorkerLock()`
-- c0040 ..> c0190: `reviewExecutionFailure() calls checkpoint()`
-- c0040 ..> c0190: `reviewExecutionFailure() calls complete()`
-- c0040 ..> c0190: `runBranchWorker() calls claimNext()`
-- c0040 ..> c0190: `sourceInspectionTool() calls checkpoint()`
-- c0040 ..> c0190: `updateResolutionReplacement() calls updateConflict()`
-- c0040 ..> c0190: `verifyConflictOrigin() calls getJob()`
-- c0040 ..> c0190: `watermark() calls getWatermark()`
-- c0040 ..> c0193: `type in addConflict`
-- c0040 ..> c0193: `type in applyConflictResolution`
-- c0040 ..> c0193: `type in authorizeResolutionAttachments`
-- c0040 ..> c0193: `type in createResolutionReplacement`
-- c0040 ..> c0193: `type in executeResolutionLinks`
-- c0040 ..> c0193: `type in linkResolutionEntity`
-- c0040 ..> c0193: `type in ownedConflict`
-- c0040 ..> c0193: `type in planConflictReplacement`
-- c0040 ..> c0193: `type in rejectConflict`
-- c0040 ..> c0193: `type in resolutionTarget`
-- c0040 ..> c0193: `type in selectResolutionEvidence`
-- c0040 ..> c0193: `type in updateResolutionReplacement`
-- c0040 ..> c0193: `type in validateConflictMemory`
-- c0040 ..> c0193: `type in validateResolutionEvidence`
-- c0040 ..> c0193: `type in verifyConflictOrigin`
-- c0040 --> c0197: `field identity`
-- c0040 ..> c0198: `type in addConflict`
-- c0040 ..> c0198: `type in applyDecision`
-- c0040 ..> c0198: `type in applySupersession`
-- c0040 ..> c0198: `type in checkpointOutcome`
-- c0040 ..> c0198: `type in correlation`
-- c0040 ..> c0198: `type in createMemory`
-- c0040 ..> c0198: `type in decideOverlap`
-- c0040 ..> c0198: `type in decideOverlapBatch`
-- c0040 ..> c0198: `type in ensureModelCallAllowed`
-- c0040 ..> c0198: `type in equivalentMemory`
-- c0040 ..> c0198: `type in executeLinkReview`
-- c0040 ..> c0198: `type in existingNeighborhood`
-- c0040 ..> c0198: `type in finishSupersession`
-- c0040 ..> c0198: `type in loadCandidates`
-- c0040 ..> c0198: `type in loadOverlaps`
-- c0040 ..> c0198: `type in neighborhoodEntities`
-- c0040 ..> c0198: `type in neighborhoodEntity`
-- c0040 ..> c0198: `type in neighborhoodRelationships`
-- c0040 ..> c0198: `type in planLinkReviews`
-- c0040 ..> c0198: `type in prepareDestination`
-- c0040 ..> c0198: `type in prepareLinkReviews`
-- c0040 ..> c0198: `type in processBranchJob`
-- c0040 ..> c0198: `type in processCandidate`
-- c0040 ..> c0198: `type in processCandidates`
-- c0040 ..> c0198: `type in processJob`
-- c0040 ..> c0198: `type in processKnowledgeCheckpoint`
-- c0040 ..> c0198: `type in processReplacementCheckpoint`
-- c0040 ..> c0198: `type in recordBranchFailure`
-- c0040 ..> c0198: `type in recordCandidateFailure`
-- c0040 ..> c0198: `type in recordEscalation`
-- c0040 ..> c0198: `type in refreshLinkReview`
-- c0040 ..> c0198: `type in reviewExecutionFailure`
-- c0040 ..> c0198: `type in reviewLinks`
-- c0040 ..> c0198: `type in sourceInspectionTool`
-- c0040 ..> c0198: `type in supersedeCandidate`
-- c0040 ..> c0198: `type in validateEquivalentCandidate`
-- c0040 ..> c0198: `type in writeKnowledge`
-- c0040 ..> c0205: `type in recordSupersession`
-- c0040 ..> c0218: `validateRevisionText() calls trim()`
-- c0040 ..> c0225: `planConflictReplacement() calls sanitizeCaptureConversation()`
-- c0040 ..> c0229: `sourceInspectionTool() calls inspect()`
-- c0040 ..> c0229: `sourceInspectionTool() constructs SourceInspector`
-- c0041 --> c0017: `field onActivity`
-- c0041 --> c0063: `field getMode`
-- c0041 --> c0079: `field client`
-- c0041 --> c0085: `field model`
-- c0041 --> c0168: `field logger`
-- c0041 --> c0190: `field queue`
-- c0042 --|> c0035: `inherits`
-- c0043 --> c0077: `field selectedAdditionalEntries`
-- c0044 --> c0021: `field candidate`
-- c0044 --> c0082: `field oldMemory`
-- c0044 --> c0198: `field fakeJob`
-- c0046 --> c0077: `field additionalEntries`
-- c0048 ..> c0011: `type in buildCandidate`
-- c0048 ..> c0011: `type in candidateDestination`
-- c0048 ..> c0012: `type in parseCandidates`
-- c0048 ..> c0013: `type in buildCandidate`
-- c0048 ..> c0013: `type in candidateFields`
-- c0048 ..> c0014: `type in buildCandidate`
-- c0048 ..> c0014: `type in candidateLists`
-- c0048 ..> c0015: `type in candidateDestination`
-- c0048 ..> c0015: `type in candidateFields`
-- c0048 ..> c0015: `type in candidateLists`
-- c0048 ..> c0015: `type in codeArtifactResource`
-- c0048 ..> c0015: `type in documentResource`
-- c0048 ..> c0015: `type in eligibleCandidate`
-- c0048 ..> c0015: `type in entityClassification`
-- c0048 ..> c0015: `type in entityResource`
-- c0048 ..> c0015: `type in invalidCandidate`
-- c0048 ..> c0015: `type in parseResourceList`
-- c0048 ..> c0015: `type in relationshipResource`
-- c0048 ..> c0015: `type in resourceEvidence`
-- c0048 ..> c0015: `type in resourceKey`
-- c0048 ..> c0015: `type in resourceString`
-- c0048 ..> c0015: `type in resourceStrings`
-- c0048 ..> c0015: `type in richResources`
-- c0048 ..> c0015: `type in validCandidate`
-- c0048 ..> c0021: `type in buildCandidate`
-- c0048 ..> c0021: `type in candidateEvidenceIneligibilityReason`
-- c0048 ..> c0021: `type in candidateEvidenceIsEligible`
-- c0048 ..> c0021: `type in captureKnowledgePlan`
-- c0048 ..> c0021: `type in codeArtifactResource`
-- c0048 ..> c0021: `type in documentResource`
-- c0048 ..> c0021: `type in eligibleCandidate`
-- c0048 ..> c0021: `type in entityResource`
-- c0048 ..> c0021: `type in evidenceType`
-- c0048 ..> c0021: `type in memoryInput`
-- c0048 ..> c0021: `type in overlapCandidate`
-- c0048 ..> c0021: `type in relationshipResource`
-- c0048 ..> c0021: `type in resourceEvidence`
-- c0048 ..> c0021: `type in richResources`
-- c0048 ..> c0021: `type in sourceEvidence`
-- c0048 ..> c0024: `type in codeArtifactResource`
-- c0048 ..> c0025: `type in applyEnrichmentDecision`
-- c0048 ..> c0025: `type in applyEquivalentCandidate`
-- c0048 ..> c0025: `type in decisionConflictIds`
-- c0048 ..> c0025: `type in firstConflictId`
-- c0048 ..> c0025: `type in parseDecision`
-- c0048 ..> c0030: `type in documentResource`
-- c0048 ..> c0032: `type in entityResource`
-- c0048 ..> c0037: `type in relationshipResource`
-- c0048 ..> c0043: `type in conflictResolutionEvidence`
-- c0048 ..> c0045: `applyEnrichmentDecision() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `applyEquivalentCandidate() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionEvidenceIds() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionMemoryId() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionMemoryIds() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionPartial() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionTargetMemoryId() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `decisionText() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `parseCandidates() constructs InvalidCaptureOutput`
-- c0048 ..> c0045: `parseDecision() constructs InvalidCaptureOutput`
-- c0048 ..> c0047: `type in buildCandidate`
-- c0048 ..> c0047: `type in richResources`
-- c0048 ..> c0048: `appendSubmissionRejection() calls boundedSubmissionRejections()`
-- c0048 ..> c0048: `buildCandidate() calls numberValue()`
-- c0048 ..> c0048: `buildCandidate() calls stringValue()`
-- c0048 ..> c0048: `candidateDestination() calls invalidCandidate()`
-- c0048 ..> c0048: `candidateDestination() calls projectId()`
-- c0048 ..> c0048: `candidateDestination() calls stringValue()`
-- c0048 ..> c0048: `candidateDestination() calls validCandidate()`
-- c0048 ..> c0048: `candidateEvidenceIsEligible() calls candidateEvidenceIneligibilityReason()`
-- c0048 ..> c0048: `candidateFields() calls candidateEvidenceIneligibilityReason()`
-- c0048 ..> c0048: `candidateFields() calls evidenceType()`
-- c0048 ..> c0048: `candidateFields() calls invalidCandidate()`
-- c0048 ..> c0048: `candidateFields() calls resourceStrings()`
-- c0048 ..> c0048: `candidateFields() calls sourceEvidence()`
-- c0048 ..> c0048: `candidateFields() calls stringValue()`
-- c0048 ..> c0048: `candidateFields() calls validCandidate()`
-- c0048 ..> c0048: `candidateLists() calls resourceStrings()`
-- c0048 ..> c0048: `candidateLists() calls validCandidate()`
-- c0048 ..> c0048: `captureConversation() calls record()`
-- c0048 ..> c0048: `codeArtifactResource() calls resourceEvidence()`
-- c0048 ..> c0048: `codeArtifactResource() calls resourceInput()`
-- c0048 ..> c0048: `codeArtifactResource() calls resourceKey()`
-- c0048 ..> c0048: `codeArtifactResource() calls resourceString()`
-- c0048 ..> c0048: `codeArtifactResource() calls resourceStrings()`
-- c0048 ..> c0048: `codeArtifactResource() calls validCandidate()`
-- c0048 ..> c0048: `currentProjectId() calls projectId()`
-- c0048 ..> c0048: `decisionMemoryId() calls projectId()`
-- c0048 ..> c0048: `decisionMemoryIds() calls projectId()`
-- c0048 ..> c0048: `decisionTargetMemoryId() calls projectId()`
-- c0048 ..> c0048: `decisionText() calls stringValue()`
-- c0048 ..> c0048: `documentResource() calls resourceEvidence()`
-- c0048 ..> c0048: `documentResource() calls resourceInput()`
-- c0048 ..> c0048: `documentResource() calls resourceKey()`
-- c0048 ..> c0048: `documentResource() calls resourceString()`
-- c0048 ..> c0048: `documentResource() calls resourceStrings()`
-- c0048 ..> c0048: `documentResource() calls validCandidate()`
-- c0048 ..> c0048: `eligibleCandidate() calls buildCandidate()`
-- c0048 ..> c0048: `eligibleCandidate() calls candidateDestination()`
-- c0048 ..> c0048: `eligibleCandidate() calls candidateFields()`
-- c0048 ..> c0048: `eligibleCandidate() calls candidateLists()`
-- c0048 ..> c0048: `eligibleCandidate() calls invalidCandidate()`
-- c0048 ..> c0048: `eligibleCandidate() calls record()`
-- c0048 ..> c0048: `eligibleCandidate() calls richResources()`
-- c0048 ..> c0048: `eligibleCandidate() calls stringValue()`
-- c0048 ..> c0048: `eligibleCandidate() calls validCandidate()`
-- c0048 ..> c0048: `entityClassification() calls invalidCandidate()`
-- c0048 ..> c0048: `entityClassification() calls resourceString()`
-- c0048 ..> c0048: `entityClassification() calls validCandidate()`
-- c0048 ..> c0048: `entityResource() calls entityClassification()`
-- c0048 ..> c0048: `entityResource() calls resourceEvidence()`
-- c0048 ..> c0048: `entityResource() calls resourceInput()`
-- c0048 ..> c0048: `entityResource() calls resourceKey()`
-- c0048 ..> c0048: `entityResource() calls resourceString()`
-- c0048 ..> c0048: `entityResource() calls resourceStrings()`
-- c0048 ..> c0048: `entityResource() calls validCandidate()`
-- c0048 ..> c0048: `isFinalOutcome() calls record()`
-- c0048 ..> c0048: `parseCandidates() calls eligibleCandidate()`
-- c0048 ..> c0048: `parseCandidates() calls record()`
-- c0048 ..> c0048: `parseCandidates() calls stringValue()`
-- c0048 ..> c0048: `parseDecision() calls applyEnrichmentDecision()`
-- c0048 ..> c0048: `parseDecision() calls applyEquivalentCandidate()`
-- c0048 ..> c0048: `parseDecision() calls decisionEvidenceIds()`
-- c0048 ..> c0048: `parseDecision() calls decisionMemoryId()`
-- c0048 ..> c0048: `parseDecision() calls decisionMemoryIds()`
-- c0048 ..> c0048: `parseDecision() calls decisionPartial()`
-- c0048 ..> c0048: `parseDecision() calls decisionTargetMemoryId()`
-- c0048 ..> c0048: `parseDecision() calls decisionText()`
-- c0048 ..> c0048: `parseDecision() calls record()`
-- c0048 ..> c0048: `parseResourceList() calls invalidCandidate()`
-- c0048 ..> c0048: `parseResourceList() calls record()`
-- c0048 ..> c0048: `parseResourceList() calls validCandidate()`
-- c0048 ..> c0048: `relationshipResource() calls resourceEvidence()`
-- c0048 ..> c0048: `relationshipResource() calls resourceInput()`
-- c0048 ..> c0048: `relationshipResource() calls resourceKey()`
-- c0048 ..> c0048: `relationshipResource() calls resourceString()`
-- c0048 ..> c0048: `relationshipResource() calls validCandidate()`
-- c0048 ..> c0048: `resourceEvidence() calls candidateEvidenceIsEligible()`
-- c0048 ..> c0048: `resourceEvidence() calls invalidCandidate()`
-- c0048 ..> c0048: `resourceEvidence() calls resourceStrings()`
-- c0048 ..> c0048: `resourceEvidence() calls sourceEvidence()`
-- c0048 ..> c0048: `resourceEvidence() calls validCandidate()`
-- c0048 ..> c0048: `resourceInput() calls record()`
-- c0048 ..> c0048: `resourceKey() calls resourceString()`
-- c0048 ..> c0048: `resourceKey() calls validCandidate()`
-- c0048 ..> c0048: `resourceString() calls invalidCandidate()`
-- c0048 ..> c0048: `resourceString() calls stringValue()`
-- c0048 ..> c0048: `resourceString() calls validCandidate()`
-- c0048 ..> c0048: `resourceStrings() calls invalidCandidate()`
-- c0048 ..> c0048: `resourceStrings() calls validCandidate()`
-- c0048 ..> c0048: `richResources() calls invalidCandidate()`
-- c0048 ..> c0048: `richResources() calls parseResourceList()`
-- c0048 ..> c0048: `richResources() calls validCandidate()`
-- c0048 ..> c0048: `snapshotForPersistence() calls clone()`
-- c0048 ..> c0048: `trustedAdditionalEntries() calls record()`
-- c0048 ..> c0048: `trustedAdditionalEntries() calls stringValue()`
-- c0048 ..> c0064: `type in candidateFields`
-- c0048 ..> c0064: `type in captureCandidateSubmission`
-- c0048 ..> c0064: `type in captureConversation`
-- c0048 ..> c0064: `type in captureWorkMetadata`
-- c0048 ..> c0064: `type in codeArtifactResource`
-- c0048 ..> c0064: `type in documentResource`
-- c0048 ..> c0064: `type in eligibleCandidate`
-- c0048 ..> c0064: `type in entityResource`
-- c0048 ..> c0064: `type in parseCandidates`
-- c0048 ..> c0064: `type in relationshipResource`
-- c0048 ..> c0064: `type in resourceEvidence`
-- c0048 ..> c0064: `type in richResources`
-- c0048 ..> c0064: `type in snapshotForPersistence`
-- c0048 ..> c0064: `type in sourceEvidence`
-- c0048 ..> c0073: `type in entityClassification`
-- c0048 ..> c0077: `type in candidateEvidenceIneligibilityReason`
-- c0048 ..> c0077: `type in candidateEvidenceIsEligible`
-- c0048 ..> c0077: `type in sourceEvidence`
-- c0048 ..> c0077: `type in trustedAdditionalEntries`
-- c0048 ..> c0082: `type in captureKnowledgePlan`
-- c0048 ..> c0084: `type in memoryInput`
-- c0048 ..> c0090: `type in captureCandidateSubmission`
-- c0048 ..> c0097: `type in captureKnowledgePlan`
-- c0048 ..> c0097: `type in currentProjectId`
-- c0048 ..> c0097: `type in memoryInput`
-- c0048 ..> c0126: `sourceEvidence() calls get()`
-- c0048 ..> c0161: `type in captureKnowledgePlan`
-- c0048 ..> c0172: `candidateFields() calls storedMemoryContext()`
-- c0048 ..> c0172: `memoryInput() calls storedMemoryContext()`
-- c0048 ..> c0186: `boundedSubmissionRejections() calls sanitizeText()`
-- c0048 ..> c0186: `buildCandidate() calls hasSensitiveData()`
-- c0048 ..> c0186: `buildCandidate() calls sanitizeText()`
-- c0048 ..> c0186: `candidateDestination() calls sanitizeText()`
-- c0048 ..> c0186: `candidateEvidenceIneligibilityReason() calls isMemoryOperation()`
-- c0048 ..> c0186: `candidateFields() calls hasSensitiveData()`
-- c0048 ..> c0186: `captureWorkMetadata() calls isMemoryOperation()`
-- c0048 ..> c0186: `decisionText() calls sanitizeText()`
-- c0048 ..> c0186: `eligibleCandidate() calls hasSensitiveData()`
-- c0048 ..> c0186: `resourceString() calls sanitizeText()`
-- c0048 ..> c0186: `resourceStrings() calls sanitizeText()`
-- c0048 ..> c0186: `scrubError() calls sanitizeText()`
-- c0048 ..> c0186: `strings() calls sanitizeText()`
-- c0048 ..> c0186: `trustedAdditionalEntries() calls hasSensitiveData()`
-- c0048 ..> c0186: `trustedAdditionalEntries() calls isMemoryOperation()`
-- c0048 ..> c0186: `trustedAdditionalEntries() calls sanitizeText()`
-- c0048 ..> c0218: `applyEnrichmentDecision() calls trim()`
-- c0048 ..> c0218: `applyEquivalentCandidate() calls trim()`
-- c0048 ..> c0218: `decisionEvidenceIds() calls trim()`
-- c0048 ..> c0218: `parseDecision() calls trim()`
-- c0048 ..> c0218: `resourceStrings() calls trim()`
-- c0048 ..> c0218: `stringValue() calls trim()`
-- c0048 ..> c0218: `strings() calls trim()`
-- c0048 ..> c0225: `snapshotForPersistence() calls sanitizeCaptureSnapshot()`
-- c0050 --> c0051: `field instance`
-- c0050 --> c0054: `field model`
-- c0050 --> c0058: `field prompts`
-- c0050 --> c0059: `field scopeSource`
-- c0050 --> c0060: `field verbosity`
-- c0050 --> c0063: `field captureMode`
-- c0050 --> c0094: `field scope`
-- c0050 --> c0169: `field logging`
-- c0061 ..> c0050: `type in loadForgetfulConfig`
-- c0061 ..> c0052: `type in readJson`
-- c0061 ..> c0052: `type in resolveScope`
-- c0061 ..> c0053: `type in loadForgetfulConfig`
-- c0061 ..> c0054: `type in modelToString`
-- c0061 ..> c0054: `type in parseModel`
-- c0061 ..> c0056: `type in resolveVerbosity`
-- c0061 ..> c0056: `type in updateUserSettings`
-- c0061 ..> c0058: `type in mergePrompts`
-- c0061 ..> c0058: `type in readPromptDirectory`
-- c0061 ..> c0059: `type in resolveScope`
-- c0061 ..> c0060: `type in isVerbosity`
-- c0061 ..> c0060: `type in resolveVerbosity`
-- c0061 ..> c0061: `loadForgetfulConfig() calls asBoolean()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls asPositiveInteger()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls asString()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls isFileLogLevel()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls isRecord()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls mergePrompts()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls parseModel()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls projectSettingsPath()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls readJson()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls readPromptDirectory()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls resolveCaptureMode()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls resolveContextLimit()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls resolveRecallConcurrency()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls resolveScope()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls resolveVerbosity()`
-- c0061 ..> c0061: `loadForgetfulConfig() calls userSettingsPath()`
-- c0061 ..> c0061: `parseModel() calls isRecord()`
-- c0061 ..> c0061: `resolveRecallConcurrency() calls isRecallConcurrency()`
-- c0061 ..> c0061: `resolveScope() calls isRecord()`
-- c0061 ..> c0061: `resolveVerbosity() calls isVerbosity()`
-- c0061 ..> c0061: `updateForgetfulConnection() calls isRecord()`
-- c0061 ..> c0061: `updateForgetfulConnection() calls readJson()`
-- c0061 ..> c0061: `updateForgetfulConnection() calls writeJson()`
-- c0061 ..> c0061: `updateUserSettings() calls isRecord()`
-- c0061 ..> c0061: `updateUserSettings() calls readJson()`
-- c0061 ..> c0061: `updateUserSettings() calls writeJson()`
-- c0061 ..> c0061: `userSettingsPath() calls defaultAgentDir()`
-- c0061 ..> c0061: `writeProjectScope() calls projectSettingsPath()`
-- c0061 ..> c0061: `writeProjectScope() calls writeJson()`
-- c0061 ..> c0063: `type in resolveCaptureMode`
-- c0061 ..> c0094: `type in resolveScope`
-- c0061 ..> c0094: `type in writeProjectScope`
-- c0061 ..> c0151: `readJson() calls readFile()`
-- c0061 ..> c0151: `readPromptDirectory() calls readFile()`
-- c0061 ..> c0169: `type in isFileLogLevel`
-- c0061 ..> c0170: `writeJson() calls close()`
-- c0061 ..> c0218: `asString() calls trim()`
-- c0061 ..> c0218: `parseModel() calls trim()`
-- c0061 ..> c0218: `readPromptDirectory() calls trim()`
-- c0064 --> c0062: `field historySummary`
-- c0064 --> c0063: `field mode`
-- c0064 --> c0077: `field entries`
-- c0064 --> c0094: `field scope`
-- c0064 --> c0097: `field context`
-- c0065 --|> c0066: `inherits`
-- c0066 --|> c0093: `inherits`
-- c0069 --|> c0070: `inherits`
-- c0070 --|> c0093: `inherits`
+- c0004 ..> c0047: `refresh() calls now()`
+- c0007 ..> c0005: `type in initialCorrectionCycle`
+- c0007 ..> c0096: `type in captureFailureReport`
+- c0007 ..> c0196: `captureFailureReport() calls sanitizeValue()`
+- c0008 --> c0009: `field executionResults`
+- c0008 --> c0009: `field previousResults`
+- c0008 --> c0010: `field decisions`
+- c0008 --> c0011: `field preservation`
+- c0008 --> c0012: `field previous`
+- c0008 --> c0072: `field resources`
+- c0008 --> c0076: `field resources`
+- c0008 --> c0089: `field memories`
+- c0008 --> c0089: `field memory`
+- c0012 --> c0072: `field codeArtifacts`
+- c0012 --> c0076: `field documents`
+- c0012 --> c0079: `field entities`
+- c0012 --> c0089: `field memory`
+- c0013 ..> c0004: `validateLinkDecisions() calls set()`
+- c0013 ..> c0004: `validateLinkReviews() calls set()`
+- c0013 ..> c0006: `authorizedMemory() constructs CaptureSelectionError`
+- c0013 ..> c0008: `type in applyLinkReview`
+- c0013 ..> c0008: `type in executeConnection`
+- c0013 ..> c0008: `type in finishLinkExecution`
+- c0013 ..> c0008: `type in prepareLinkReview`
+- c0013 ..> c0008: `type in preserveConnections`
+- c0013 ..> c0008: `type in readSelectedMemory`
+- c0013 ..> c0008: `type in validateLinkDecisions`
+- c0013 ..> c0008: `type in validateLinkReviews`
+- c0013 ..> c0009: `type in executeConnection`
+- c0013 ..> c0010: `type in validateLinkDecisions`
+- c0013 ..> c0010: `type in validateLinkReviews`
+- c0013 ..> c0010: `type in wantsEdge`
+- c0013 ..> c0011: `type in validateLinkReviews`
+- c0013 ..> c0012: `type in preparePreviousConnections`
+- c0013 ..> c0013: `applyLinkReview() calls authorizedMemory()`
+- c0013 ..> c0013: `applyLinkReview() calls executeConnection()`
+- c0013 ..> c0013: `applyLinkReview() calls finishLinkExecution()`
+- c0013 ..> c0013: `executeConnection() calls operationError()`
+- c0013 ..> c0013: `prepareLinkReview() calls exclusiveMemory()`
+- c0013 ..> c0013: `prepareLinkReview() calls readAttachmentRecords()`
+- c0013 ..> c0013: `prepareLinkReview() calls readSelectedMemory()`
+- c0013 ..> c0013: `preserveConnections() calls executeConnection()`
+- c0013 ..> c0013: `validateLinkDecisions() calls wantsEdge()`
+- c0013 ..> c0013: `validateLinkReviews() calls validateLinkDecisions()`
+- c0013 ..> c0072: `type in readAttachmentRecords`
+- c0013 ..> c0076: `type in readAttachmentRecords`
+- c0013 ..> c0086: `type in applyLinkReview`
+- c0013 ..> c0086: `type in authorizedMemory`
+- c0013 ..> c0086: `type in prepareLinkReview`
+- c0013 ..> c0086: `type in preparePreviousConnections`
+- c0013 ..> c0086: `type in preserveConnections`
+- c0013 ..> c0086: `type in readAttachmentRecords`
+- c0013 ..> c0086: `type in readSelectedMemory`
+- c0013 ..> c0089: `type in authorizedMemory`
+- c0013 ..> c0089: `type in exclusiveMemory`
+- c0013 ..> c0089: `type in prepareLinkReview`
+- c0013 ..> c0089: `type in preparePreviousConnections`
+- c0013 ..> c0089: `type in readAttachmentRecords`
+- c0013 ..> c0089: `type in readSelectedMemory`
+- c0013 ..> c0104: `type in applyLinkReview`
+- c0013 ..> c0104: `type in authorizedMemory`
+- c0013 ..> c0104: `type in prepareLinkReview`
+- c0013 ..> c0131: `applyLinkReview() calls linkMemories()`
+- c0013 ..> c0131: `preparePreviousConnections() calls getCodeArtifact()`
+- c0013 ..> c0131: `preparePreviousConnections() calls getDocument()`
+- c0013 ..> c0131: `preparePreviousConnections() calls getEntity()`
+- c0013 ..> c0131: `preserveConnections() calls linkEntityMemory()`
+- c0013 ..> c0131: `preserveConnections() calls updateMemory()`
+- c0013 ..> c0131: `readAttachmentRecords() calls getCodeArtifact()`
+- c0013 ..> c0131: `readAttachmentRecords() calls getDocument()`
+- c0013 ..> c0134: `authorizedMemory() calls get()`
+- c0013 ..> c0134: `prepareLinkReview() calls get()`
+- c0013 ..> c0134: `preparePreviousConnections() calls get()`
+- c0013 ..> c0134: `preparePreviousConnections() calls getMemoryEntityIds()`
+- c0013 ..> c0134: `readSelectedMemory() calls get()`
+- c0013 ..> c0134: `validateLinkDecisions() calls get()`
+- c0013 ..> c0174: `executeConnection() calls execute()`
+- c0013 ..> c0196: `operationError() calls errorMessage()`
+- c0013 ..> c0196: `prepareLinkReview() calls hasSensitiveData()`
+- c0013 ..> c0196: `preparePreviousConnections() calls hasSensitiveData()`
+- c0013 ..> c0196: `readAttachmentRecords() calls hasSensitiveData()`
+- c0013 ..> c0196: `validateLinkDecisions() calls hasSensitiveData()`
+- c0013 ..> c0229: `validateLinkDecisions() calls trim()`
+- c0014 --> c0104: `field scope`
+- c0016 --|> c0014: `inherits`
+- c0018 ..> c0006: `checkMergeEntity() constructs CaptureSelectionError`
+- c0018 ..> c0006: `preflightMergeConnections() constructs CaptureSelectionError`
+- c0018 ..> c0006: `requireResourceScope() constructs CaptureSelectionError`
+- c0018 ..> c0014: `type in checkMergeAttachments`
+- c0018 ..> c0014: `type in checkMergeEntity`
+- c0018 ..> c0014: `type in preflightMergeConnections`
+- c0018 ..> c0014: `type in requireResourceScope`
+- c0018 ..> c0015: `type in checkMergeAttachments`
+- c0018 ..> c0015: `type in collectMergeConnections`
+- c0018 ..> c0015: `type in preflightMergeConnections`
+- c0018 ..> c0015: `type in preserveMergeConnections`
+- c0018 ..> c0016: `type in preserveMergeConnections`
+- c0018 ..> c0018: `checkMergeAttachments() calls requireResourceScope()`
+- c0018 ..> c0018: `collectMergeConnections() calls union()`
+- c0018 ..> c0018: `preflightMergeConnections() calls checkMergeAttachments()`
+- c0018 ..> c0018: `preflightMergeConnections() calls checkMergeEntity()`
+- c0018 ..> c0018: `preserveMergeConnections() calls checkMergeAttachments()`
+- c0018 ..> c0018: `preserveMergeConnections() calls checkMergeEntity()`
+- c0018 ..> c0018: `preserveMergeConnections() calls preflightMergeConnections()`
+- c0018 ..> c0018: `preserveMergeConnections() calls union()`
+- c0018 ..> c0086: `type in checkMergeAttachments`
+- c0018 ..> c0086: `type in checkMergeEntity`
+- c0018 ..> c0086: `type in collectMergeConnections`
+- c0018 ..> c0086: `type in preflightMergeConnections`
+- c0018 ..> c0086: `type in preserveMergeConnections`
+- c0018 ..> c0089: `type in collectMergeConnections`
+- c0018 ..> c0131: `checkMergeAttachments() calls getCodeArtifact()`
+- c0018 ..> c0131: `checkMergeAttachments() calls getDocument()`
+- c0018 ..> c0131: `checkMergeAttachments() calls getFile()`
+- c0018 ..> c0131: `checkMergeEntity() calls getEntity()`
+- c0018 ..> c0131: `preserveMergeConnections() calls linkEntityMemory()`
+- c0018 ..> c0131: `preserveMergeConnections() calls linkMemories()`
+- c0018 ..> c0131: `preserveMergeConnections() calls updateMemory()`
+- c0018 ..> c0134: `collectMergeConnections() calls getMemoryEntityIds()`
+- c0018 ..> c0134: `preflightMergeConnections() calls get()`
+- c0018 ..> c0174: `preserveMergeConnections() calls execute()`
+- c0019 --> c0026: `field candidates`
+- c0024 --> c0026: `field candidate`
+- c0024 --> c0039: `field neighborhood`
+- c0024 --> c0089: `field overlaps`
+- c0026 --> c0029: `field codeArtifacts`
+- c0026 --> c0035: `field documents`
+- c0026 --> c0037: `field entities`
+- c0026 --> c0044: `field relationships`
+- c0027 --> c0025: `field excludeBranches`
+- c0028 --> c0025: `field deferredBranches`
+- c0029 --|> c0162: `inherits`
+- c0030 --> c0021: `field action`
+- c0030 --> c0046: `field reuse`
+- c0031 --> c0008: `field linkReview`
+- c0031 --> c0021: `field action`
+- c0032 --> c0204: `field status`
+- c0033 --> c0031: `field candidates`
+- c0033 --> c0211: `field status`
+- c0034 --> c0032: `field conflicts`
+- c0034 --> c0033: `field jobs`
+- c0035 --|> c0163: `inherits`
+- c0037 --|> c0165: `inherits`
+- c0038 --> c0015: `field connections`
+- c0038 --> c0026: `field candidate`
+- c0038 --> c0089: `field memories`
+- c0039 --> c0072: `field codeArtifacts`
+- c0039 --> c0076: `field documents`
+- c0039 --> c0079: `field entities`
+- c0039 --> c0081: `field relationships`
+- c0040 --> c0049: `field uncertainWrite`
+- c0040 --> c0216: `field supersession`
+- c0041 --|> c0100: `inherits`
+- c0042 --|> c0204: `inherits`
+- c0044 --|> c0167: `inherits`
+- c0045 --> c0204: `field conflict`
+- c0047 ..> c0004: `activity() calls set()`
+- c0047 ..> c0006: `composeMerge() constructs CaptureSelectionError`
+- c0047 ..> c0006: `equivalentMemory() constructs CaptureSelectionError`
+- c0047 ..> c0006: `finishMerge() constructs CaptureSelectionError`
+- c0047 ..> c0006: `processCandidates() constructs CaptureSelectionError`
+- c0047 ..> c0006: `readMaintenanceTargets() constructs CaptureSelectionError`
+- c0047 ..> c0006: `retireCandidate() constructs CaptureSelectionError`
+- c0047 ..> c0006: `supersedeCandidate() constructs CaptureSelectionError`
+- c0047 ..> c0006: `supersessionAlreadyApplied() constructs CaptureSelectionError`
+- c0047 ..> c0006: `verifyRequestedMerge() constructs CaptureSelectionError`
+- c0047 ..> c0007: `executeLinkReview() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `migrateLegacyLinkReview() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `planLinkReviews() calls captureFailureReport()`
+- c0047 ..> c0007: `planLinkReviews() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `processOrderedCandidates() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `recordCandidateFailure() calls correctableCaptureError()`
+- c0047 ..> c0007: `recordCandidateFailure() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `recordLinkReviewFailure() calls correctableCaptureError()`
+- c0047 ..> c0007: `refreshLinkReview() calls correctableCaptureError()`
+- c0047 ..> c0007: `reviewExecutionFailure() calls captureFailureReport()`
+- c0047 ..> c0007: `reviewExecutionFailure() calls initialCorrectionCycle()`
+- c0047 ..> c0007: `saveCorrectableFailure() calls correctableCaptureError()`
+- c0047 ..> c0007: `saveCorrectableFailure() calls initialCorrectionCycle()`
+- c0047 ..> c0008: `type in planLinkReviews`
+- c0047 ..> c0008: `type in prepareLinkReviews`
+- c0047 ..> c0008: `type in previousSupersessionCompleted`
+- c0047 ..> c0008: `type in recordLinkReviewFailure`
+- c0047 ..> c0008: `type in refreshLinkReview`
+- c0047 ..> c0013: `executeLinkReview() calls applyLinkReview()`
+- c0047 ..> c0013: `executeLinkReview() calls preserveConnections()`
+- c0047 ..> c0013: `refreshLinkReview() calls prepareLinkReview()`
+- c0047 ..> c0013: `refreshLinkReview() calls preparePreviousConnections()`
+- c0047 ..> c0018: `composeMerge() calls collectMergeConnections()`
+- c0047 ..> c0018: `composeMerge() calls preflightMergeConnections()`
+- c0047 ..> c0018: `finishMerge() calls collectMergeConnections()`
+- c0047 ..> c0018: `finishMerge() calls preserveMergeConnections()`
+- c0047 ..> c0018: `mergeCandidate() calls collectMergeConnections()`
+- c0047 ..> c0018: `mergeCandidate() calls preflightMergeConnections()`
+- c0047 --> c0022: `field activityPhase`
+- c0047 ..> c0022: `type in activity`
+- c0047 ..> c0023: `type in advance`
+- c0047 ..> c0023: `type in advanceWatermark`
+- c0047 ..> c0024: `type in prepareOverlapBatch`
+- c0047 ..> c0025: `type in checkpointBranch`
+- c0047 ..> c0025: `type in checkpointBranches`
+- c0047 ..> c0025: `type in runBranchWorker`
+- c0047 ..> c0026: `type in addConflict`
+- c0047 ..> c0026: `type in applyDecision`
+- c0047 ..> c0026: `type in composeMerge`
+- c0047 ..> c0026: `type in correctCandidateFailures`
+- c0047 ..> c0026: `type in correctedCaptureOutcome`
+- c0047 ..> c0026: `type in createMemory`
+- c0047 ..> c0026: `type in decideOverlap`
+- c0047 ..> c0026: `type in decideOverlapBatch`
+- c0047 ..> c0026: `type in destinationProjects`
+- c0047 ..> c0026: `type in executeLinkReview`
+- c0047 ..> c0026: `type in executeLinkReviews`
+- c0047 ..> c0026: `type in existingNeighborhood`
+- c0047 ..> c0026: `type in finishMerge`
+- c0047 ..> c0026: `type in finishReviewedSupersession`
+- c0047 ..> c0026: `type in finishSupersession`
+- c0047 ..> c0026: `type in loadCandidates`
+- c0047 ..> c0026: `type in loadOverlaps`
+- c0047 ..> c0026: `type in mergeCandidate`
+- c0047 ..> c0026: `type in neighborhoodEntities`
+- c0047 ..> c0026: `type in planConflictReplacement`
+- c0047 ..> c0026: `type in planLinkReviews`
+- c0047 ..> c0026: `type in prepareDestination`
+- c0047 ..> c0026: `type in prepareLinkReviews`
+- c0047 ..> c0026: `type in prepareOverlapBatch`
+- c0047 ..> c0026: `type in processCandidate`
+- c0047 ..> c0026: `type in processCandidates`
+- c0047 ..> c0026: `type in processKnowledgeCheckpoint`
+- c0047 ..> c0026: `type in processOrderedCandidates`
+- c0047 ..> c0026: `type in processReplacementCheckpoint`
+- c0047 ..> c0026: `type in recordCandidateFailure`
+- c0047 ..> c0026: `type in recordEscalation`
+- c0047 ..> c0026: `type in recordLinkReviewFailure`
+- c0047 ..> c0026: `type in refreshLinkReview`
+- c0047 ..> c0026: `type in resolveDestination`
+- c0047 ..> c0026: `type in retireCandidate`
+- c0047 ..> c0026: `type in reviewExecutionFailure`
+- c0047 ..> c0026: `type in reviewLinks`
+- c0047 ..> c0026: `type in saveCorrectableFailure`
+- c0047 ..> c0026: `type in skipCandidate`
+- c0047 ..> c0026: `type in supersedeCandidate`
+- c0047 ..> c0026: `type in validateDecision`
+- c0047 ..> c0026: `type in writeKnowledge`
+- c0047 ..> c0027: `type in checkpoint`
+- c0047 ..> c0027: `type in checkpointBranches`
+- c0047 ..> c0027: `type in processPending`
+- c0047 ..> c0028: `type in appendCheckpointResult`
+- c0047 ..> c0028: `type in checkpoint`
+- c0047 ..> c0028: `type in checkpointBranch`
+- c0047 ..> c0028: `type in correctCandidateFailures`
+- c0047 ..> c0028: `type in pauseCandidate`
+- c0047 ..> c0028: `type in processBranchJob`
+- c0047 ..> c0028: `type in processCandidates`
+- c0047 ..> c0028: `type in processJob`
+- c0047 ..> c0028: `type in processOrderedCandidates`
+- c0047 ..> c0028: `type in processPending`
+- c0047 ..> c0028: `type in recordBranchFailure`
+- c0047 ..> c0028: `type in recordCandidateFailure`
+- c0047 ..> c0028: `type in runBranchWorker`
+- c0047 ..> c0030: `type in addConflict`
+- c0047 ..> c0030: `type in applyDecision`
+- c0047 ..> c0030: `type in composeMerge`
+- c0047 ..> c0030: `type in correctedCaptureOutcome`
+- c0047 ..> c0030: `type in decideOverlap`
+- c0047 ..> c0030: `type in finishMerge`
+- c0047 ..> c0030: `type in finishSupersession`
+- c0047 ..> c0030: `type in mergeCandidate`
+- c0047 ..> c0030: `type in recordEscalation`
+- c0047 ..> c0030: `type in retireCandidate`
+- c0047 ..> c0030: `type in skipCandidate`
+- c0047 ..> c0030: `type in supersedeCandidate`
+- c0047 ..> c0030: `type in validateDecision`
+- c0047 ..> c0034: `type in diagnostics`
+- c0047 ..> c0036: `type in enqueue`
+- c0047 ..> c0036: `type in enqueueSnapshot`
+- c0047 ..> c0038: `type in composeMerge`
+- c0047 ..> c0038: `type in correctedCaptureOutcome`
+- c0047 ..> c0038: `type in finishMerge`
+- c0047 ..> c0039: `type in existingNeighborhood`
+- c0047 ..> c0039: `type in validateDecision`
+- c0047 ..> c0041: `assertWriteAllowedNow() constructs CapturePause`
+- c0047 ..> c0041: `decideOverlap() constructs CapturePause`
+- c0047 ..> c0041: `ensureModelCallAllowed() constructs CapturePause`
+- c0047 ..> c0041: `ensureWriteAllowed() constructs CapturePause`
+- c0047 ..> c0041: `evidenceReadTool() constructs CapturePause`
+- c0047 ..> c0041: `loadOverlaps() constructs CapturePause`
+- c0047 ..> c0041: `neighborhoodEntity() constructs CapturePause`
+- c0047 ..> c0041: `neighborhoodMatches() constructs CapturePause`
+- c0047 ..> c0041: `neighborhoodRelationships() constructs CapturePause`
+- c0047 ..> c0041: `processCandidate() constructs CapturePause`
+- c0047 ..> c0041: `processJob() constructs CapturePause`
+- c0047 ..> c0041: `stop() constructs CapturePause`
+- c0047 ..> c0041: `type in pauseCandidate`
+- c0047 ..> c0042: `type in pendingConflicts`
+- c0047 ..> c0042: `type in verifyConflictOrigin`
+- c0047 ..> c0043: `ensureModelCallAllowed() constructs CaptureProgress`
+- c0047 ..> c0045: `type in applyConflictResolution`
+- c0047 ..> c0045: `type in markConflictResolved`
+- c0047 ..> c0045: `type in rejectConflict`
+- c0047 ..> c0045: `type in resolve`
+- c0047 ..> c0045: `type in resolveConflict`
+- c0047 ..> c0045: `type in resolveConflictOwned`
+- c0047 ..> c0047: `activity() calls publishActivity()`
+- c0047 ..> c0047: `advanceWatermark() calls advance()`
+- c0047 ..> c0047: `applyConflictResolution() calls applySupersession()`
+- c0047 ..> c0047: `applyConflictResolution() calls createResolutionReplacement()`
+- c0047 ..> c0047: `applyConflictResolution() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `applyConflictResolution() calls executeResolutionLinks()`
+- c0047 ..> c0047: `applyConflictResolution() calls failConflictResolution()`
+- c0047 ..> c0047: `applyConflictResolution() calls markConflictResolved()`
+- c0047 ..> c0047: `applyConflictResolution() calls planConflictReplacement()`
+- c0047 ..> c0047: `applyConflictResolution() calls updateResolutionReplacement()`
+- c0047 ..> c0047: `applyDecision() calls checkpointOutcome()`
+- c0047 ..> c0047: `applyDecision() calls createMemory()`
+- c0047 ..> c0047: `applyDecision() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `applyDecision() calls equivalentMemory()`
+- c0047 ..> c0047: `applyDecision() calls mergeCandidate()`
+- c0047 ..> c0047: `applyDecision() calls recordEscalation()`
+- c0047 ..> c0047: `applyDecision() calls retireCandidate()`
+- c0047 ..> c0047: `applyDecision() calls skipCandidate()`
+- c0047 ..> c0047: `applyDecision() calls supersedeCandidate()`
+- c0047 ..> c0047: `applyDecision() calls writeKnowledge()`
+- c0047 ..> c0047: `applySupersession() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `applySupersession() calls recordSupersession()`
+- c0047 ..> c0047: `applySupersession() calls supersessionAlreadyApplied()`
+- c0047 ..> c0047: `assertWriteAllowedNow() calls canWriteNow()`
+- c0047 ..> c0047: `cancellableClient() calls read()`
+- c0047 ..> c0047: `cancellableKnowledge() calls read()`
+- c0047 ..> c0047: `checkpoint() calls appendCheckpointResult()`
+- c0047 ..> c0047: `checkpoint() calls checkpointBranch()`
+- c0047 ..> c0047: `checkpoint() calls checkpointBranches()`
+- c0047 ..> c0047: `checkpoint() calls enabled()`
+- c0047 ..> c0047: `checkpointBranch() calls runBranchWorker()`
+- c0047 ..> c0047: `checkpointOutcome() calls correlation()`
+- c0047 ..> c0047: `composeMerge() calls checkpointOutcome()`
+- c0047 ..> c0047: `composeMerge() calls correlation()`
+- c0047 ..> c0047: `composeMerge() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `composeMerge() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `composeMerge() calls readMaintenanceTargets()`
+- c0047 ..> c0047: `constructor() calls activity()`
+- c0047 ..> c0047: `constructor() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `constructor() calls cancellableClient()`
+- c0047 ..> c0047: `constructor() calls read()`
+- c0047 ..> c0047: `correctCandidateFailures() calls recordCandidateFailure()`
+- c0047 ..> c0047: `correctCandidateFailures() calls reviewExecutionFailure()`
+- c0047 ..> c0047: `createMemory() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `createMemory() calls checkpointOutcome()`
+- c0047 ..> c0047: `createMemory() calls correlation()`
+- c0047 ..> c0047: `createMemory() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `createResolutionReplacement() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `createResolutionReplacement() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `decideOverlap() calls checkpointOutcome()`
+- c0047 ..> c0047: `decideOverlap() calls correlation()`
+- c0047 ..> c0047: `decideOverlap() calls enabled()`
+- c0047 ..> c0047: `decideOverlap() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `decideOverlap() calls existingNeighborhood()`
+- c0047 ..> c0047: `decideOverlap() calls policyFor()`
+- c0047 ..> c0047: `decideOverlap() calls validateDecision()`
+- c0047 ..> c0047: `decideOverlapBatch() calls correlation()`
+- c0047 ..> c0047: `decideOverlapBatch() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `decideOverlapBatch() calls policyFor()`
+- c0047 ..> c0047: `decideOverlapBatch() calls prepareOverlapBatch()`
+- c0047 ..> c0047: `destinationProjects() calls resolveDestination()`
+- c0047 ..> c0047: `enabled() calls getMode()`
+- c0047 ..> c0047: `enabled() calls isEnabled()`
+- c0047 ..> c0047: `enqueueSnapshot() calls getMode()`
+- c0047 ..> c0047: `enqueueSnapshot() calls isEnabled()`
+- c0047 ..> c0047: `ensureModelCallAllowed() calls enabled()`
+- c0047 ..> c0047: `ensureWriteAllowed() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `ensureWriteAllowed() calls enabled()`
+- c0047 ..> c0047: `ensureWriteAllowed() calls getMode()`
+- c0047 ..> c0047: `equivalentMemory() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `evidenceReadTool() calls canReadNow()`
+- c0047 ..> c0047: `evidenceReadTool() calls enabled()`
+- c0047 ..> c0047: `executeLinkReview() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `executeLinkReview() calls checkpointOutcome()`
+- c0047 ..> c0047: `executeLinkReview() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `executeLinkReview() calls finishReviewedSupersession()`
+- c0047 ..> c0047: `executeLinkReview() calls previousSupersessionCompleted()`
+- c0047 ..> c0047: `executeLinkReview() calls recordLinkReviewFailure()`
+- c0047 ..> c0047: `executeLinkReviews() calls executeLinkReview()`
+- c0047 ..> c0047: `executeResolutionLinks() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `executeResolutionLinks() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `executeResolutionLinks() calls linkResolutionEntity()`
+- c0047 ..> c0047: `existingNeighborhood() calls neighborhoodEntities()`
+- c0047 ..> c0047: `existingNeighborhood() calls neighborhoodRelationships()`
+- c0047 ..> c0047: `finishMerge() calls applySupersession()`
+- c0047 ..> c0047: `finishMerge() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `finishMerge() calls checkpointOutcome()`
+- c0047 ..> c0047: `finishMerge() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `finishMerge() calls readMaintenanceTargets()`
+- c0047 ..> c0047: `finishMerge() calls verifyRequestedMerge()`
+- c0047 ..> c0047: `finishReviewedSupersession() calls finishSupersession()`
+- c0047 ..> c0047: `finishSupersession() calls applySupersession()`
+- c0047 ..> c0047: `finishSupersession() calls checkpointOutcome()`
+- c0047 ..> c0047: `linkResolutionEntity() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `linkResolutionEntity() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `loadCandidates() calls correlation()`
+- c0047 ..> c0047: `loadCandidates() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `loadCandidates() calls evidenceReadTool()`
+- c0047 ..> c0047: `loadCandidates() calls policyFor()`
+- c0047 ..> c0047: `loadCandidates() calls sourceInspectionTool()`
+- c0047 ..> c0047: `loadOverlaps() calls checkpointOutcome()`
+- c0047 ..> c0047: `loadOverlaps() calls enabled()`
+- c0047 ..> c0047: `mergeCandidate() calls checkpointOutcome()`
+- c0047 ..> c0047: `mergeCandidate() calls composeMerge()`
+- c0047 ..> c0047: `mergeCandidate() calls createMemory()`
+- c0047 ..> c0047: `mergeCandidate() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `mergeCandidate() calls finishMerge()`
+- c0047 ..> c0047: `mergeCandidate() calls readMaintenanceTargets()`
+- c0047 ..> c0047: `mergeCandidate() calls writeKnowledge()`
+- c0047 ..> c0047: `migrateLegacyLinkReview() calls checkpointOutcome()`
+- c0047 ..> c0047: `migrateLegacyLinkReview() calls connectionUncertainty()`
+- c0047 ..> c0047: `mutate() calls activity()`
+- c0047 ..> c0047: `mutate() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `neighborhoodEntities() calls neighborhoodEntity()`
+- c0047 ..> c0047: `neighborhoodEntities() calls neighborhoodMatches()`
+- c0047 ..> c0047: `neighborhoodEntity() calls enabled()`
+- c0047 ..> c0047: `neighborhoodMatches() calls enabled()`
+- c0047 ..> c0047: `neighborhoodRelationships() calls enabled()`
+- c0047 ..> c0047: `ownedConflict() calls verifyConflictOrigin()`
+- c0047 ..> c0047: `pendingConflicts() calls verifyConflictOrigin()`
+- c0047 ..> c0047: `planConflictReplacement() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `planConflictReplacement() calls readSavedMemory()`
+- c0047 ..> c0047: `planConflictReplacement() calls revisionResources()`
+- c0047 ..> c0047: `planLinkReviews() calls correlation()`
+- c0047 ..> c0047: `planLinkReviews() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `planLinkReviews() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `preflightRetirement() calls confirmedRetirement()`
+- c0047 ..> c0047: `preflightRetirement() calls readMaintenanceTargets()`
+- c0047 ..> c0047: `prepareDestination() calls checkpointOutcome()`
+- c0047 ..> c0047: `prepareDestination() calls destinationProjects()`
+- c0047 ..> c0047: `prepareLinkReviews() calls checkpointOutcome()`
+- c0047 ..> c0047: `prepareLinkReviews() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `prepareLinkReviews() calls migrateLegacyLinkReview()`
+- c0047 ..> c0047: `prepareLinkReviews() calls refreshLinkReview()`
+- c0047 ..> c0047: `prepareOverlapBatch() calls existingNeighborhood()`
+- c0047 ..> c0047: `prepareOverlapBatch() calls loadOverlaps()`
+- c0047 ..> c0047: `prepareOverlapBatch() calls prepareDestination()`
+- c0047 ..> c0047: `previousSupersessionCompleted() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `processBranchJob() calls correlation()`
+- c0047 ..> c0047: `processBranchJob() calls processJob()`
+- c0047 ..> c0047: `processBranchJob() calls recordBranchFailure()`
+- c0047 ..> c0047: `processCandidate() calls applyDecision()`
+- c0047 ..> c0047: `processCandidate() calls checkpointOutcome()`
+- c0047 ..> c0047: `processCandidate() calls decideOverlap()`
+- c0047 ..> c0047: `processCandidate() calls enabled()`
+- c0047 ..> c0047: `processCandidate() calls getMode()`
+- c0047 ..> c0047: `processCandidate() calls loadOverlaps()`
+- c0047 ..> c0047: `processCandidate() calls mergeCandidate()`
+- c0047 ..> c0047: `processCandidate() calls prepareDestination()`
+- c0047 ..> c0047: `processCandidate() calls processKnowledgeCheckpoint()`
+- c0047 ..> c0047: `processCandidate() calls processReplacementCheckpoint()`
+- c0047 ..> c0047: `processCandidate() calls retireCandidate()`
+- c0047 ..> c0047: `processCandidates() calls correctCandidateFailures()`
+- c0047 ..> c0047: `processCandidates() calls processOrderedCandidates()`
+- c0047 ..> c0047: `processCandidates() calls recordCandidateFailure()`
+- c0047 ..> c0047: `processCandidates() calls saveCorrectableFailure()`
+- c0047 ..> c0047: `processJob() calls decideOverlapBatch()`
+- c0047 ..> c0047: `processJob() calls enabled()`
+- c0047 ..> c0047: `processJob() calls getMode()`
+- c0047 ..> c0047: `processJob() calls loadCandidates()`
+- c0047 ..> c0047: `processJob() calls processCandidates()`
+- c0047 ..> c0047: `processJob() calls reviewLinks()`
+- c0047 ..> c0047: `processKnowledgeCheckpoint() calls finishSupersession()`
+- c0047 ..> c0047: `processKnowledgeCheckpoint() calls writeKnowledge()`
+- c0047 ..> c0047: `processOrderedCandidates() calls checkpointOutcome()`
+- c0047 ..> c0047: `processOrderedCandidates() calls processCandidate()`
+- c0047 ..> c0047: `processOrderedCandidates() calls processCandidates()`
+- c0047 ..> c0047: `processOrderedCandidates() calls recordCandidateFailure()`
+- c0047 ..> c0047: `processOrderedCandidates() calls saveCorrectableFailure()`
+- c0047 ..> c0047: `processReplacementCheckpoint() calls finishSupersession()`
+- c0047 ..> c0047: `processReplacementCheckpoint() calls writeKnowledge()`
+- c0047 ..> c0047: `publishActivity() calls onActivity()`
+- c0047 ..> c0047: `read() calls activity()`
+- c0047 ..> c0047: `read() calls readSignal()`
+- c0047 ..> c0047: `readMaintenanceTargets() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `recordBranchFailure() calls correlation()`
+- c0047 ..> c0047: `recordCandidateFailure() calls candidateUncertainty()`
+- c0047 ..> c0047: `recordCandidateFailure() calls checkpointOutcome()`
+- c0047 ..> c0047: `recordCandidateFailure() calls correlation()`
+- c0047 ..> c0047: `recordCandidateFailure() calls isModelFailure()`
+- c0047 ..> c0047: `recordCandidateFailure() calls pauseCandidate()`
+- c0047 ..> c0047: `recordEscalation() calls checkpointOutcome()`
+- c0047 ..> c0047: `recordLinkReviewFailure() calls checkpointOutcome()`
+- c0047 ..> c0047: `recordLinkReviewFailure() calls connectionUncertainty()`
+- c0047 ..> c0047: `refreshLinkReview() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `resolve() calls resolveConflict()`
+- c0047 ..> c0047: `resolveConflict() calls resolveConflictOwned()`
+- c0047 ..> c0047: `resolveConflictOwned() calls applyConflictResolution()`
+- c0047 ..> c0047: `resolveConflictOwned() calls enabled()`
+- c0047 ..> c0047: `resolveConflictOwned() calls ownedConflict()`
+- c0047 ..> c0047: `resolveConflictOwned() calls rejectConflict()`
+- c0047 ..> c0047: `resolveConflictOwned() calls resolutionTarget()`
+- c0047 ..> c0047: `resolveConflictOwned() calls validateResolutionEvidence()`
+- c0047 ..> c0047: `retireCandidate() calls applySupersession()`
+- c0047 ..> c0047: `retireCandidate() calls checkpointOutcome()`
+- c0047 ..> c0047: `retireCandidate() calls confirmedRetirement()`
+- c0047 ..> c0047: `retireCandidate() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `retireCandidate() calls preflightRetirement()`
+- c0047 ..> c0047: `reviewExecutionFailure() calls checkpointOutcome()`
+- c0047 ..> c0047: `reviewExecutionFailure() calls correctedCaptureOutcome()`
+- c0047 ..> c0047: `reviewExecutionFailure() calls correlation()`
+- c0047 ..> c0047: `reviewExecutionFailure() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `reviewLinks() calls executeLinkReviews()`
+- c0047 ..> c0047: `reviewLinks() calls planLinkReviews()`
+- c0047 ..> c0047: `reviewLinks() calls prepareLinkReviews()`
+- c0047 ..> c0047: `revisionResources() calls read()`
+- c0047 ..> c0047: `runBranchWorker() calls enabled()`
+- c0047 ..> c0047: `runBranchWorker() calls processBranchJob()`
+- c0047 ..> c0047: `saveCorrectableFailure() calls candidateUncertainty()`
+- c0047 ..> c0047: `saveCorrectableFailure() calls checkpointOutcome()`
+- c0047 ..> c0047: `saveCorrectableFailure() calls correlation()`
+- c0047 ..> c0047: `saveCorrectableFailure() calls isModelFailure()`
+- c0047 ..> c0047: `skipCandidate() calls checkpointOutcome()`
+- c0047 ..> c0047: `skipCandidate() calls writeKnowledge()`
+- c0047 ..> c0047: `supersedeCandidate() calls checkpointOutcome()`
+- c0047 ..> c0047: `supersedeCandidate() calls createMemory()`
+- c0047 ..> c0047: `supersedeCandidate() calls ensureModelCallAllowed()`
+- c0047 ..> c0047: `supersedeCandidate() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `supersedeCandidate() calls finishSupersession()`
+- c0047 ..> c0047: `supersedeCandidate() calls writeKnowledge()`
+- c0047 ..> c0047: `supersessionAlreadyApplied() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `updateResolutionReplacement() calls assertWriteAllowedNow()`
+- c0047 ..> c0047: `updateResolutionReplacement() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `validateResolutionEvidence() calls selectResolutionEvidence()`
+- c0047 ..> c0047: `verifyRequestedMerge() calls ensureWriteAllowed()`
+- c0047 ..> c0047: `writeKnowledge() calls checkpointOutcome()`
+- c0047 ..> c0047: `writeKnowledge() calls ensureWriteAllowed()`
+- c0047 --> c0048: `field onActivity`
+- c0047 ..> c0048: `type in constructor`
+- c0047 ..> c0049: `applySupersession() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `candidateUncertainty() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `connectionUncertainty() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `createMemory() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `mutate() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `processJob() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `reviewExecutionFailure() constructs CaptureUncertainWrite`
+- c0047 ..> c0049: `type in candidateUncertainty`
+- c0047 ..> c0049: `type in connectionUncertainty`
+- c0047 ..> c0050: `type in applyConflictResolution`
+- c0047 ..> c0050: `type in planConflictReplacement`
+- c0047 ..> c0050: `type in validateResolutionEvidence`
+- c0047 ..> c0051: `type in applyConflictResolution`
+- c0047 ..> c0051: `type in resolutionTarget`
+- c0047 ..> c0052: `destinationProjects() constructs InvalidCaptureOutput`
+- c0047 ..> c0052: `processKnowledgeCheckpoint() constructs InvalidCaptureOutput`
+- c0047 ..> c0052: `processReplacementCheckpoint() constructs InvalidCaptureOutput`
+- c0047 ..> c0052: `validateDecision() constructs InvalidCaptureOutput`
+- c0047 ..> c0053: `resolveDestination() constructs MissingCaptureDestination`
+- c0047 ..> c0054: `type in rejectConflict`
+- c0047 ..> c0054: `type in resolve`
+- c0047 ..> c0054: `type in resolveConflict`
+- c0047 ..> c0054: `type in resolveConflictOwned`
+- c0047 ..> c0054: `type in selectResolutionEvidence`
+- c0047 ..> c0054: `type in validateResolutionEvidence`
+- c0047 ..> c0055: `addConflict() calls clone()`
+- c0047 ..> c0055: `addConflict() calls sourceEvidence()`
+- c0047 ..> c0055: `applyConflictResolution() calls blockedSave()`
+- c0047 ..> c0055: `applyConflictResolution() calls conflictResolutionEvidence()`
+- c0047 ..> c0055: `applyDecision() calls firstConflictId()`
+- c0047 ..> c0055: `applySupersession() calls definitelyRejected()`
+- c0047 ..> c0055: `candidateUncertainty() calls record()`
+- c0047 ..> c0055: `checkpointBranch() calls scrubError()`
+- c0047 ..> c0055: `checkpointOutcome() calls clone()`
+- c0047 ..> c0055: `checkpointOutcome() calls record()`
+- c0047 ..> c0055: `composeMerge() calls captureWorkMetadata()`
+- c0047 ..> c0055: `composeMerge() calls decisionConflictIds()`
+- c0047 ..> c0055: `composeMerge() calls record()`
+- c0047 ..> c0055: `composeMerge() calls sourceEvidence()`
+- c0047 ..> c0055: `correctCandidateFailures() calls isFinalOutcome()`
+- c0047 ..> c0055: `correctedCaptureOutcome() calls decisionConflictIds()`
+- c0047 ..> c0055: `correctedCaptureOutcome() calls record()`
+- c0047 ..> c0055: `correctedCaptureOutcome() calls reusableMergeComposition()`
+- c0047 ..> c0055: `createMemory() calls definitelyRejected()`
+- c0047 ..> c0055: `createMemory() calls memoryInput()`
+- c0047 ..> c0055: `createMemory() calls projectId()`
+- c0047 ..> c0055: `createMemory() calls record()`
+- c0047 ..> c0055: `createResolutionReplacement() calls definitelyRejected()`
+- c0047 ..> c0055: `createResolutionReplacement() calls projectId()`
+- c0047 ..> c0055: `decideOverlap() calls appendSubmissionRejection()`
+- c0047 ..> c0055: `decideOverlap() calls boundedSubmissionRejections()`
+- c0047 ..> c0055: `decideOverlap() calls captureWorkMetadata()`
+- c0047 ..> c0055: `decideOverlap() calls decisionConflictIds()`
+- c0047 ..> c0055: `decideOverlap() calls overlapCandidate()`
+- c0047 ..> c0055: `decideOverlap() calls parseDecision()`
+- c0047 ..> c0055: `decideOverlap() calls sourceEvidence()`
+- c0047 ..> c0055: `decideOverlapBatch() calls appendSubmissionRejection()`
+- c0047 ..> c0055: `decideOverlapBatch() calls boundedSubmissionRejections()`
+- c0047 ..> c0055: `decideOverlapBatch() calls captureWorkMetadata()`
+- c0047 ..> c0055: `decideOverlapBatch() calls overlapCandidate()`
+- c0047 ..> c0055: `decideOverlapBatch() calls record()`
+- c0047 ..> c0055: `decideOverlapBatch() calls scrubError()`
+- c0047 ..> c0055: `decideOverlapBatch() calls sharedSourceEvidence()`
+- c0047 ..> c0055: `diagnostics() calls boundedSubmissionRejections()`
+- c0047 ..> c0055: `diagnostics() calls projectId()`
+- c0047 ..> c0055: `diagnostics() calls record()`
+- c0047 ..> c0055: `diagnostics() calls scrubError()`
+- c0047 ..> c0055: `diagnostics() calls stringValue()`
+- c0047 ..> c0055: `diagnostics() calls strings()`
+- c0047 ..> c0055: `enqueue() calls scrubError()`
+- c0047 ..> c0055: `enqueueSnapshot() calls snapshotForPersistence()`
+- c0047 ..> c0055: `equivalentMemory() calls projectId()`
+- c0047 ..> c0055: `equivalentMemory() calls record()`
+- c0047 ..> c0055: `evidenceReadTool() calls record()`
+- c0047 ..> c0055: `executeLinkReview() calls record()`
+- c0047 ..> c0055: `executeLinkReviews() calls record()`
+- c0047 ..> c0055: `finishMerge() calls record()`
+- c0047 ..> c0055: `finishSupersession() calls record()`
+- c0047 ..> c0055: `loadCandidates() calls appendSubmissionRejection()`
+- c0047 ..> c0055: `loadCandidates() calls boundedSubmissionRejections()`
+- c0047 ..> c0055: `loadCandidates() calls captureCandidateSubmission()`
+- c0047 ..> c0055: `loadCandidates() calls captureWorkMetadata()`
+- c0047 ..> c0055: `loadCandidates() calls parseCandidates()`
+- c0047 ..> c0055: `loadCandidates() calls record()`
+- c0047 ..> c0055: `loadCandidates() calls strings()`
+- c0047 ..> c0055: `loadOverlaps() calls record()`
+- c0047 ..> c0055: `mergeCandidate() calls projectId()`
+- c0047 ..> c0055: `mergeCandidate() calls record()`
+- c0047 ..> c0055: `neighborhoodMatches() calls record()`
+- c0047 ..> c0055: `pauseCandidate() calls scrubError()`
+- c0047 ..> c0055: `planLinkReviews() calls appendSubmissionRejection()`
+- c0047 ..> c0055: `planLinkReviews() calls boundedSubmissionRejections()`
+- c0047 ..> c0055: `planLinkReviews() calls captureWorkMetadata()`
+- c0047 ..> c0055: `planLinkReviews() calls record()`
+- c0047 ..> c0055: `planLinkReviews() calls sharedSourceEvidence()`
+- c0047 ..> c0055: `preflightRetirement() calls record()`
+- c0047 ..> c0055: `prepareLinkReviews() calls record()`
+- c0047 ..> c0055: `prepareOverlapBatch() calls isFinalOutcome()`
+- c0047 ..> c0055: `prepareOverlapBatch() calls record()`
+- c0047 ..> c0055: `processCandidate() calls isFinalOutcome()`
+- c0047 ..> c0055: `processCandidate() calls record()`
+- c0047 ..> c0055: `processJob() calls isFinalOutcome()`
+- c0047 ..> c0055: `processKnowledgeCheckpoint() calls projectId()`
+- c0047 ..> c0055: `processKnowledgeCheckpoint() calls record()`
+- c0047 ..> c0055: `processOrderedCandidates() calls isFinalOutcome()`
+- c0047 ..> c0055: `processOrderedCandidates() calls record()`
+- c0047 ..> c0055: `processReplacementCheckpoint() calls projectId()`
+- c0047 ..> c0055: `processReplacementCheckpoint() calls record()`
+- c0047 ..> c0055: `recordBranchFailure() calls scrubError()`
+- c0047 ..> c0055: `recordCandidateFailure() calls record()`
+- c0047 ..> c0055: `recordCandidateFailure() calls scrubError()`
+- c0047 ..> c0055: `recordLinkReviewFailure() calls record()`
+- c0047 ..> c0055: `refreshLinkReview() calls projectId()`
+- c0047 ..> c0055: `refreshLinkReview() calls record()`
+- c0047 ..> c0055: `resolutionTarget() calls record()`
+- c0047 ..> c0055: `resolveDestination() calls currentProjectId()`
+- c0047 ..> c0055: `resolveDestination() calls projectId()`
+- c0047 ..> c0055: `retireCandidate() calls decisionConflictIds()`
+- c0047 ..> c0055: `retireCandidate() calls record()`
+- c0047 ..> c0055: `reviewExecutionFailure() calls captureWorkMetadata()`
+- c0047 ..> c0055: `reviewExecutionFailure() calls record()`
+- c0047 ..> c0055: `reviewLinks() calls record()`
+- c0047 ..> c0055: `saveCorrectableFailure() calls record()`
+- c0047 ..> c0055: `saveCorrectableFailure() calls scrubError()`
+- c0047 ..> c0055: `skipCandidate() calls firstConflictId()`
+- c0047 ..> c0055: `skipCandidate() calls record()`
+- c0047 ..> c0055: `supersedeCandidate() calls decisionConflictIds()`
+- c0047 ..> c0055: `validateResolutionEvidence() calls stringValue()`
+- c0047 ..> c0055: `validateResolutionEvidence() calls trustedAdditionalEntries()`
+- c0047 ..> c0055: `verifyConflictOrigin() calls record()`
+- c0047 ..> c0055: `writeKnowledge() calls captureKnowledgePlan()`
+- c0047 ..> c0055: `writeKnowledge() calls record()`
+- c0047 --> c0070: `field getMode`
+- c0047 ..> c0070: `type in enabled`
+- c0047 ..> c0070: `type in ensureWriteAllowed`
+- c0047 ..> c0070: `type in refreshLinkReview`
+- c0047 ..> c0071: `type in advance`
+- c0047 ..> c0071: `type in advanceWatermark`
+- c0047 ..> c0071: `type in checkpoint`
+- c0047 ..> c0071: `type in checkpointBranches`
+- c0047 ..> c0071: `type in enqueue`
+- c0047 ..> c0071: `type in enqueueSnapshot`
+- c0047 ..> c0071: `type in policyFor`
+- c0047 ..> c0079: `type in neighborhoodEntities`
+- c0047 ..> c0079: `type in neighborhoodEntity`
+- c0047 ..> c0079: `type in neighborhoodMatches`
+- c0047 ..> c0079: `type in neighborhoodRelationships`
+- c0047 ..> c0081: `type in neighborhoodRelationships`
+- c0047 --> c0086: `field client`
+- c0047 ..> c0086: `type in cancellableClient`
+- c0047 ..> c0087: `type in cancellableKnowledge`
+- c0047 --> c0089: `field readSavedMemory`
+- c0047 ..> c0089: `type in addConflict`
+- c0047 ..> c0089: `type in applyDecision`
+- c0047 ..> c0089: `type in applySupersession`
+- c0047 ..> c0089: `type in decideOverlap`
+- c0047 ..> c0089: `type in equivalentMemory`
+- c0047 ..> c0089: `type in finishSupersession`
+- c0047 ..> c0089: `type in loadOverlaps`
+- c0047 ..> c0089: `type in planConflictReplacement`
+- c0047 ..> c0089: `type in readMaintenanceTargets`
+- c0047 ..> c0089: `type in recordEscalation`
+- c0047 ..> c0089: `type in revisionResources`
+- c0047 ..> c0089: `type in skipCandidate`
+- c0047 ..> c0089: `type in supersedeCandidate`
+- c0047 ..> c0089: `type in validateDecision`
+- c0047 ..> c0089: `type in writeKnowledge`
+- c0047 ..> c0090: `type in createMemory`
+- c0047 --> c0092: `field model`
+- c0047 ..> c0094: `evidenceReadTool() constructs ModelEvidencePage`
+- c0047 ..> c0095: `sourceInspectionTool() constructs ModelReadErrorResult`
+- c0047 ..> c0096: `type in evidenceReadTool`
+- c0047 ..> c0096: `type in sourceInspectionTool`
+- c0047 ..> c0107: `type in destinationProjects`
+- c0047 ..> c0107: `type in planConflictReplacement`
+- c0047 ..> c0107: `type in resolveDestination`
+- c0047 ..> c0107: `type in watermark`
+- c0047 ..> c0131: `cancellableKnowledge() calls createCodeArtifact()`
+- c0047 ..> c0131: `cancellableKnowledge() calls createDocument()`
+- c0047 ..> c0131: `cancellableKnowledge() calls createEntity()`
+- c0047 ..> c0131: `cancellableKnowledge() calls createRelationship()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getCodeArtifact()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getDocument()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getEntity()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getEntityMemories()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getFile()`
+- c0047 ..> c0131: `cancellableKnowledge() calls getRelationships()`
+- c0047 ..> c0131: `cancellableKnowledge() calls linkEntityMemory()`
+- c0047 ..> c0131: `cancellableKnowledge() calls linkMemories()`
+- c0047 ..> c0131: `cancellableKnowledge() calls listCodeArtifacts()`
+- c0047 ..> c0131: `cancellableKnowledge() calls listDocuments()`
+- c0047 ..> c0131: `cancellableKnowledge() calls listFiles()`
+- c0047 ..> c0131: `cancellableKnowledge() calls searchEntities()`
+- c0047 ..> c0131: `cancellableKnowledge() calls updateCodeArtifact()`
+- c0047 ..> c0131: `cancellableKnowledge() calls updateDocument()`
+- c0047 ..> c0131: `cancellableKnowledge() calls updateEntity()`
+- c0047 ..> c0131: `cancellableKnowledge() calls updateMemory()`
+- c0047 ..> c0131: `executeResolutionLinks() calls linkMemories()`
+- c0047 ..> c0131: `existingNeighborhood() calls getCodeArtifact()`
+- c0047 ..> c0131: `existingNeighborhood() calls getDocument()`
+- c0047 ..> c0131: `existingNeighborhood() calls listCodeArtifacts()`
+- c0047 ..> c0131: `existingNeighborhood() calls listDocuments()`
+- c0047 ..> c0131: `linkResolutionEntity() calls linkEntityMemory()`
+- c0047 ..> c0131: `neighborhoodEntity() calls getEntity()`
+- c0047 ..> c0131: `neighborhoodMatches() calls searchEntities()`
+- c0047 ..> c0131: `neighborhoodRelationships() calls getRelationships()`
+- c0047 ..> c0131: `revisionResources() calls getCodeArtifact()`
+- c0047 ..> c0131: `revisionResources() calls getDocument()`
+- c0047 ..> c0131: `revisionResources() calls getEntity()`
+- c0047 ..> c0131: `revisionResources() calls getFile()`
+- c0047 ..> c0131: `updateResolutionReplacement() calls updateMemory()`
+- c0047 ..> c0131: `verifyRequestedMerge() calls getEntity()`
+- c0047 ..> c0134: `applyConflictResolution() calls get()`
+- c0047 ..> c0134: `applySupersession() calls supersede()`
+- c0047 ..> c0134: `cancellableClient() calls create()`
+- c0047 ..> c0134: `cancellableClient() calls createProject()`
+- c0047 ..> c0134: `cancellableClient() calls get()`
+- c0047 ..> c0134: `cancellableClient() calls linkProject()`
+- c0047 ..> c0134: `cancellableClient() calls listProjects()`
+- c0047 ..> c0134: `cancellableClient() calls search()`
+- c0047 ..> c0134: `cancellableClient() calls supersede()`
+- c0047 ..> c0134: `constructor() calls get()`
+- c0047 ..> c0134: `createMemory() calls create()`
+- c0047 ..> c0134: `createResolutionReplacement() calls create()`
+- c0047 ..> c0134: `decideOverlapBatch() calls get()`
+- c0047 ..> c0134: `diagnostics() calls get()`
+- c0047 ..> c0134: `equivalentMemory() calls get()`
+- c0047 ..> c0134: `executeResolutionLinks() calls get()`
+- c0047 ..> c0134: `finishMerge() calls get()`
+- c0047 ..> c0134: `linkResolutionEntity() calls getMemoryEntityIds()`
+- c0047 ..> c0134: `loadOverlaps() calls search()`
+- c0047 ..> c0134: `planLinkReviews() calls get()`
+- c0047 ..> c0134: `previousSupersessionCompleted() calls get()`
+- c0047 ..> c0134: `read() calls get()`
+- c0047 ..> c0134: `readMaintenanceTargets() calls get()`
+- c0047 ..> c0134: `resolveDestination() calls listProjects()`
+- c0047 ..> c0134: `retireCandidate() calls get()`
+- c0047 ..> c0134: `revisionResources() calls get()`
+- c0047 ..> c0134: `revisionResources() calls getMemoryEntityIds()`
+- c0047 ..> c0134: `skipCandidate() calls get()`
+- c0047 ..> c0134: `supersedeCandidate() calls get()`
+- c0047 ..> c0134: `supersessionAlreadyApplied() calls get()`
+- c0047 ..> c0134: `verifyConflictOrigin() calls get()`
+- c0047 ..> c0134: `verifyRequestedMerge() calls get()`
+- c0047 --> c0174: `field knowledgeWriter`
+- c0047 ..> c0174: `constructor() constructs KnowledgeWriter`
+- c0047 ..> c0174: `writeKnowledge() calls execute()`
+- c0047 --> c0178: `field logger`
+- c0047 ..> c0180: `checkpointBranch() calls emit()`
+- c0047 ..> c0180: `checkpointOutcome() calls emit()`
+- c0047 ..> c0180: `createMemory() calls emit()`
+- c0047 ..> c0180: `decideOverlap() calls emit()`
+- c0047 ..> c0180: `emit() calls emit()`
+- c0047 ..> c0180: `enqueue() calls emit()`
+- c0047 ..> c0180: `enqueueSnapshot() calls emit()`
+- c0047 ..> c0180: `enqueueSnapshot() calls enqueue()`
+- c0047 ..> c0180: `loadCandidates() calls emit()`
+- c0047 ..> c0180: `processBranchJob() calls emit()`
+- c0047 ..> c0180: `recordBranchFailure() calls emit()`
+- c0047 ..> c0180: `recordCandidateFailure() calls emit()`
+- c0047 ..> c0180: `runBranchWorker() calls emit()`
+- c0047 ..> c0180: `saveCorrectableFailure() calls emit()`
+- c0047 ..> c0182: `createMemory() calls replacementMemoryInput()`
+- c0047 ..> c0182: `createResolutionReplacement() calls replacementMemoryInput()`
+- c0047 ..> c0182: `planConflictReplacement() calls replacementMemoryInput()`
+- c0047 ..> c0182: `updateResolutionReplacement() calls replacementMemoryInput()`
+- c0047 ..> c0186: `loadCandidates() calls prepareCapture()`
+- c0047 ..> c0196: `addConflict() calls sanitizeText()`
+- c0047 ..> c0196: `addConflict() calls sanitizeValue()`
+- c0047 ..> c0196: `applySupersession() calls errorMessage()`
+- c0047 ..> c0196: `candidateUncertainty() calls errorMessage()`
+- c0047 ..> c0196: `createMemory() calls errorMessage()`
+- c0047 ..> c0196: `createResolutionReplacement() calls errorMessage()`
+- c0047 ..> c0196: `decideOverlap() calls sanitizeValue()`
+- c0047 ..> c0196: `diagnostics() calls sanitizeText()`
+- c0047 ..> c0196: `emit() calls sanitizeValue()`
+- c0047 ..> c0196: `existingNeighborhood() calls hasSensitiveData()`
+- c0047 ..> c0196: `failConflictResolution() calls errorMessage()`
+- c0047 ..> c0196: `loadCandidates() calls sanitizeText()`
+- c0047 ..> c0196: `loadOverlaps() calls sanitizeValue()`
+- c0047 ..> c0196: `mutate() calls errorMessage()`
+- c0047 ..> c0196: `neighborhoodEntity() calls hasSensitiveData()`
+- c0047 ..> c0196: `neighborhoodRelationships() calls hasSensitiveData()`
+- c0047 ..> c0196: `recordCandidateFailure() calls errorMessage()`
+- c0047 ..> c0196: `recordLinkReviewFailure() calls errorMessage()`
+- c0047 ..> c0196: `refreshLinkReview() calls errorMessage()`
+- c0047 ..> c0196: `rejectConflict() calls sanitizeText()`
+- c0047 ..> c0196: `reviewExecutionFailure() calls errorMessage()`
+- c0047 ..> c0196: `saveCorrectableFailure() calls errorMessage()`
+- c0047 ..> c0196: `skipCandidate() calls sanitizeValue()`
+- c0047 --> c0200: `field queue`
+- c0047 ..> c0200: `addConflict() calls addConflict()`
+- c0047 ..> c0200: `addConflict() calls now()`
+- c0047 ..> c0200: `advance() calls advanceWatermark()`
+- c0047 ..> c0200: `applyConflictResolution() calls updateConflict()`
+- c0047 ..> c0200: `cancellableClient() calls mutate()`
+- c0047 ..> c0200: `cancellableKnowledge() calls mutate()`
+- c0047 ..> c0200: `checkpoint() calls hasClaimableWork()`
+- c0047 ..> c0200: `checkpointBranch() calls withWorkerLock()`
+- c0047 ..> c0200: `checkpointBranches() calls listJobMetadata()`
+- c0047 ..> c0200: `checkpointOutcome() calls checkpoint()`
+- c0047 ..> c0200: `checkpointOutcome() calls getJob()`
+- c0047 ..> c0200: `composeMerge() calls checkpoint()`
+- c0047 ..> c0200: `composeMerge() calls complete()`
+- c0047 ..> c0200: `constructor() calls complete()`
+- c0047 ..> c0200: `createResolutionReplacement() calls updateConflict()`
+- c0047 ..> c0200: `decideOverlap() calls checkpoint()`
+- c0047 ..> c0200: `decideOverlap() calls complete()`
+- c0047 ..> c0200: `decideOverlapBatch() calls checkpoint()`
+- c0047 ..> c0200: `decideOverlapBatch() calls complete()`
+- c0047 ..> c0200: `diagnostics() calls listJobMetadata()`
+- c0047 ..> c0200: `diagnostics() calls pendingConflicts()`
+- c0047 ..> c0200: `enqueue() calls enqueueSnapshot()`
+- c0047 ..> c0200: `enqueueSnapshot() calls advanceWatermark()`
+- c0047 ..> c0200: `executeLinkReviews() calls getJob()`
+- c0047 ..> c0200: `executeResolutionLinks() calls updateConflict()`
+- c0047 ..> c0200: `failConflictResolution() calls getConflict()`
+- c0047 ..> c0200: `failConflictResolution() calls updateConflict()`
+- c0047 ..> c0200: `loadCandidates() calls checkpoint()`
+- c0047 ..> c0200: `loadCandidates() calls complete()`
+- c0047 ..> c0200: `loadCandidates() calls getJob()`
+- c0047 ..> c0200: `loadCandidates() calls refreshCaptureHistory()`
+- c0047 ..> c0200: `markConflictResolved() calls updateConflict()`
+- c0047 ..> c0200: `ownedConflict() calls getConflict()`
+- c0047 ..> c0200: `pauseCandidate() calls checkpoint()`
+- c0047 ..> c0200: `pauseCandidate() calls getJob()`
+- c0047 ..> c0200: `pendingConflicts() calls pendingConflicts()`
+- c0047 ..> c0200: `planConflictReplacement() calls complete()`
+- c0047 ..> c0200: `planConflictReplacement() calls getJob()`
+- c0047 ..> c0200: `planLinkReviews() calls checkpoint()`
+- c0047 ..> c0200: `planLinkReviews() calls complete()`
+- c0047 ..> c0200: `processBranchJob() calls getJob()`
+- c0047 ..> c0200: `processBranchJob() calls now()`
+- c0047 ..> c0200: `processBranchJob() calls releaseProgress()`
+- c0047 ..> c0200: `processJob() calls checkpoint()`
+- c0047 ..> c0200: `processJob() calls complete()`
+- c0047 ..> c0200: `processJob() calls getJob()`
+- c0047 ..> c0200: `processJob() calls releaseProgress()`
+- c0047 ..> c0200: `processPending() calls checkpoint()`
+- c0047 ..> c0200: `recordBranchFailure() calls cancel()`
+- c0047 ..> c0200: `recordBranchFailure() calls checkpoint()`
+- c0047 ..> c0200: `recordBranchFailure() calls getJob()`
+- c0047 ..> c0200: `recordBranchFailure() calls now()`
+- c0047 ..> c0200: `recordCandidateFailure() calls cancel()`
+- c0047 ..> c0200: `recordCandidateFailure() calls checkpoint()`
+- c0047 ..> c0200: `recordCandidateFailure() calls getJob()`
+- c0047 ..> c0200: `recordEscalation() calls addConflict()`
+- c0047 ..> c0200: `recordLinkReviewFailure() calls getJob()`
+- c0047 ..> c0200: `recordSupersession() calls checkpoint()`
+- c0047 ..> c0200: `recordSupersession() calls updateConflict()`
+- c0047 ..> c0200: `rejectConflict() calls updateConflict()`
+- c0047 ..> c0200: `resolveConflict() calls getConflict()`
+- c0047 ..> c0200: `resolveConflict() calls withWorkerLock()`
+- c0047 ..> c0200: `reviewExecutionFailure() calls checkpoint()`
+- c0047 ..> c0200: `reviewExecutionFailure() calls complete()`
+- c0047 ..> c0200: `runBranchWorker() calls claimNext()`
+- c0047 ..> c0200: `saveCorrectableFailure() calls getJob()`
+- c0047 ..> c0200: `sourceInspectionTool() calls checkpoint()`
+- c0047 ..> c0200: `updateResolutionReplacement() calls updateConflict()`
+- c0047 ..> c0200: `verifyConflictOrigin() calls getJob()`
+- c0047 ..> c0200: `watermark() calls getWatermark()`
+- c0047 ..> c0204: `type in addConflict`
+- c0047 ..> c0204: `type in applyConflictResolution`
+- c0047 ..> c0204: `type in createResolutionReplacement`
+- c0047 ..> c0204: `type in executeResolutionLinks`
+- c0047 ..> c0204: `type in linkResolutionEntity`
+- c0047 ..> c0204: `type in ownedConflict`
+- c0047 ..> c0204: `type in planConflictReplacement`
+- c0047 ..> c0204: `type in rejectConflict`
+- c0047 ..> c0204: `type in resolutionTarget`
+- c0047 ..> c0204: `type in selectResolutionEvidence`
+- c0047 ..> c0204: `type in updateResolutionReplacement`
+- c0047 ..> c0204: `type in validateResolutionEvidence`
+- c0047 ..> c0204: `type in verifyConflictOrigin`
+- c0047 --> c0208: `field identity`
+- c0047 ..> c0209: `type in addConflict`
+- c0047 ..> c0209: `type in applyDecision`
+- c0047 ..> c0209: `type in applySupersession`
+- c0047 ..> c0209: `type in checkpointOutcome`
+- c0047 ..> c0209: `type in composeMerge`
+- c0047 ..> c0209: `type in correctCandidateFailures`
+- c0047 ..> c0209: `type in correlation`
+- c0047 ..> c0209: `type in createMemory`
+- c0047 ..> c0209: `type in decideOverlap`
+- c0047 ..> c0209: `type in decideOverlapBatch`
+- c0047 ..> c0209: `type in ensureModelCallAllowed`
+- c0047 ..> c0209: `type in equivalentMemory`
+- c0047 ..> c0209: `type in evidenceReadTool`
+- c0047 ..> c0209: `type in executeLinkReview`
+- c0047 ..> c0209: `type in executeLinkReviews`
+- c0047 ..> c0209: `type in existingNeighborhood`
+- c0047 ..> c0209: `type in finishMerge`
+- c0047 ..> c0209: `type in finishReviewedSupersession`
+- c0047 ..> c0209: `type in finishSupersession`
+- c0047 ..> c0209: `type in loadCandidates`
+- c0047 ..> c0209: `type in loadOverlaps`
+- c0047 ..> c0209: `type in mergeCandidate`
+- c0047 ..> c0209: `type in migrateLegacyLinkReview`
+- c0047 ..> c0209: `type in neighborhoodEntities`
+- c0047 ..> c0209: `type in neighborhoodEntity`
+- c0047 ..> c0209: `type in neighborhoodMatches`
+- c0047 ..> c0209: `type in neighborhoodRelationships`
+- c0047 ..> c0209: `type in pauseCandidate`
+- c0047 ..> c0209: `type in planLinkReviews`
+- c0047 ..> c0209: `type in preflightRetirement`
+- c0047 ..> c0209: `type in prepareDestination`
+- c0047 ..> c0209: `type in prepareLinkReviews`
+- c0047 ..> c0209: `type in prepareOverlapBatch`
+- c0047 ..> c0209: `type in previousSupersessionCompleted`
+- c0047 ..> c0209: `type in processBranchJob`
+- c0047 ..> c0209: `type in processCandidate`
+- c0047 ..> c0209: `type in processCandidates`
+- c0047 ..> c0209: `type in processJob`
+- c0047 ..> c0209: `type in processKnowledgeCheckpoint`
+- c0047 ..> c0209: `type in processOrderedCandidates`
+- c0047 ..> c0209: `type in processReplacementCheckpoint`
+- c0047 ..> c0209: `type in readMaintenanceTargets`
+- c0047 ..> c0209: `type in recordBranchFailure`
+- c0047 ..> c0209: `type in recordCandidateFailure`
+- c0047 ..> c0209: `type in recordEscalation`
+- c0047 ..> c0209: `type in recordLinkReviewFailure`
+- c0047 ..> c0209: `type in refreshLinkReview`
+- c0047 ..> c0209: `type in retireCandidate`
+- c0047 ..> c0209: `type in reviewExecutionFailure`
+- c0047 ..> c0209: `type in reviewLinks`
+- c0047 ..> c0209: `type in saveCorrectableFailure`
+- c0047 ..> c0209: `type in skipCandidate`
+- c0047 ..> c0209: `type in sourceInspectionTool`
+- c0047 ..> c0209: `type in supersedeCandidate`
+- c0047 ..> c0209: `type in supersessionAlreadyApplied`
+- c0047 ..> c0209: `type in verifyRequestedMerge`
+- c0047 ..> c0209: `type in writeKnowledge`
+- c0047 ..> c0216: `type in recordSupersession`
+- c0047 ..> c0229: `composeMerge() calls trim()`
+- c0047 ..> c0229: `neighborhoodMatches() calls trim()`
+- c0047 ..> c0229: `retireCandidate() calls trim()`
+- c0047 ..> c0238: `composeMerge() calls captureConversation()`
+- c0047 ..> c0238: `decideOverlap() calls captureConversation()`
+- c0047 ..> c0238: `decideOverlapBatch() calls captureConversation()`
+- c0047 ..> c0238: `loadCandidates() calls captureConversation()`
+- c0047 ..> c0238: `planConflictReplacement() calls captureConversation()`
+- c0047 ..> c0238: `planConflictReplacement() calls sanitizeCaptureConversation()`
+- c0047 ..> c0238: `planLinkReviews() calls captureConversation()`
+- c0047 ..> c0238: `reviewExecutionFailure() calls captureConversation()`
+- c0047 ..> c0242: `sourceInspectionTool() calls inspect()`
+- c0047 ..> c0242: `sourceInspectionTool() constructs SourceInspector`
+- c0048 --> c0022: `field onActivity`
+- c0048 --> c0070: `field getMode`
+- c0048 --> c0086: `field client`
+- c0048 --> c0092: `field model`
+- c0048 --> c0178: `field logger`
+- c0048 --> c0200: `field queue`
+- c0049 --|> c0041: `inherits`
+- c0050 --> c0084: `field selectedAdditionalEntries`
+- c0051 --> c0026: `field candidate`
+- c0051 --> c0089: `field oldMemory`
+- c0051 --> c0209: `field fakeJob`
+- c0053 --|> c0006: `inherits`
+- c0053 ..> c0026: `type in constructor`
+- c0054 --> c0084: `field additionalEntries`
+- c0055 ..> c0019: `type in parseCandidates`
+- c0055 ..> c0020: `type in eligibleCandidate`
+- c0055 ..> c0020: `type in invalidCandidate`
+- c0055 ..> c0020: `type in validCandidate`
+- c0055 ..> c0026: `type in captureKnowledgePlan`
+- c0055 ..> c0026: `type in captureProvenance`
+- c0055 ..> c0026: `type in eligibleCandidate`
+- c0055 ..> c0026: `type in memoryInput`
+- c0055 ..> c0026: `type in overlapCandidate`
+- c0055 ..> c0026: `type in sharedSourceEvidence`
+- c0055 ..> c0026: `type in sourceEvidence`
+- c0055 ..> c0030: `type in applyEnrichmentDecision`
+- c0055 ..> c0030: `type in applyEquivalentCandidate`
+- c0055 ..> c0030: `type in decisionConflictIds`
+- c0055 ..> c0030: `type in firstConflictId`
+- c0055 ..> c0030: `type in parseDecision`
+- c0055 ..> c0030: `type in reusableMergeComposition`
+- c0055 ..> c0038: `type in reusableMergeComposition`
+- c0055 ..> c0050: `type in conflictResolutionEvidence`
+- c0055 ..> c0052: `applyEnrichmentDecision() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `applyEquivalentCandidate() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `captureResource() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionEvidenceIds() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionMemoryId() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionMemoryIds() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionPartial() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionTargetMemoryId() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `decisionText() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `parseCandidates() constructs InvalidCaptureOutput`
+- c0055 ..> c0052: `parseDecision() constructs InvalidCaptureOutput`
+- c0055 ..> c0055: `appendSubmissionRejection() calls boundedSubmissionRejections()`
+- c0055 ..> c0055: `captureEvidenceError() calls record()`
+- c0055 ..> c0055: `captureEvidenceError() calls stringValue()`
+- c0055 ..> c0055: `captureKnowledgePlan() calls captureProvenance()`
+- c0055 ..> c0055: `captureKnowledgePlan() calls resourceInput()`
+- c0055 ..> c0055: `captureResource() calls record()`
+- c0055 ..> c0055: `currentProjectId() calls projectId()`
+- c0055 ..> c0055: `decisionMemoryId() calls projectId()`
+- c0055 ..> c0055: `decisionMemoryIds() calls projectId()`
+- c0055 ..> c0055: `decisionTargetMemoryId() calls projectId()`
+- c0055 ..> c0055: `eligibleCandidate() calls captureEvidenceError()`
+- c0055 ..> c0055: `eligibleCandidate() calls captureResource()`
+- c0055 ..> c0055: `eligibleCandidate() calls invalidCandidate()`
+- c0055 ..> c0055: `eligibleCandidate() calls record()`
+- c0055 ..> c0055: `eligibleCandidate() calls stringValue()`
+- c0055 ..> c0055: `eligibleCandidate() calls validCandidate()`
+- c0055 ..> c0055: `isFinalOutcome() calls record()`
+- c0055 ..> c0055: `memoryInput() calls captureProvenance()`
+- c0055 ..> c0055: `parseCandidates() calls eligibleCandidate()`
+- c0055 ..> c0055: `parseCandidates() calls record()`
+- c0055 ..> c0055: `parseCandidates() calls stringValue()`
+- c0055 ..> c0055: `parseDecision() calls applyEnrichmentDecision()`
+- c0055 ..> c0055: `parseDecision() calls applyEquivalentCandidate()`
+- c0055 ..> c0055: `parseDecision() calls decisionEvidenceIds()`
+- c0055 ..> c0055: `parseDecision() calls decisionMemoryId()`
+- c0055 ..> c0055: `parseDecision() calls decisionMemoryIds()`
+- c0055 ..> c0055: `parseDecision() calls decisionPartial()`
+- c0055 ..> c0055: `parseDecision() calls decisionTargetMemoryId()`
+- c0055 ..> c0055: `parseDecision() calls decisionText()`
+- c0055 ..> c0055: `parseDecision() calls record()`
+- c0055 ..> c0055: `resourceInput() calls record()`
+- c0055 ..> c0055: `reusableMergeComposition() calls decisionConflictIds()`
+- c0055 ..> c0055: `sharedSourceEvidence() calls sourceEvidence()`
+- c0055 ..> c0055: `snapshotForPersistence() calls clone()`
+- c0055 ..> c0055: `trustedAdditionalEntries() calls record()`
+- c0055 ..> c0055: `trustedAdditionalEntries() calls stringValue()`
+- c0055 ..> c0071: `type in captureCandidateSubmission`
+- c0055 ..> c0071: `type in captureEvidenceError`
+- c0055 ..> c0071: `type in captureWorkMetadata`
+- c0055 ..> c0071: `type in eligibleCandidate`
+- c0055 ..> c0071: `type in parseCandidates`
+- c0055 ..> c0071: `type in sharedSourceEvidence`
+- c0055 ..> c0071: `type in snapshotForPersistence`
+- c0055 ..> c0071: `type in sourceEvidence`
+- c0055 ..> c0084: `type in sharedSourceEvidence`
+- c0055 ..> c0084: `type in sourceEvidence`
+- c0055 ..> c0084: `type in trustedAdditionalEntries`
+- c0055 ..> c0089: `type in captureKnowledgePlan`
+- c0055 ..> c0091: `type in memoryInput`
+- c0055 ..> c0099: `type in captureCandidateSubmission`
+- c0055 ..> c0107: `type in captureKnowledgePlan`
+- c0055 ..> c0107: `type in captureProvenance`
+- c0055 ..> c0107: `type in currentProjectId`
+- c0055 ..> c0107: `type in memoryInput`
+- c0055 ..> c0134: `captureEvidenceError() calls get()`
+- c0055 ..> c0134: `sourceEvidence() calls get()`
+- c0055 ..> c0170: `type in captureKnowledgePlan`
+- c0055 ..> c0196: `boundedSubmissionRejections() calls sanitizeText()`
+- c0055 ..> c0196: `captureEvidenceError() calls isMemoryOperation()`
+- c0055 ..> c0196: `captureEvidenceError() calls sanitizeText()`
+- c0055 ..> c0196: `captureWorkMetadata() calls isMemoryOperation()`
+- c0055 ..> c0196: `scrubError() calls errorMessage()`
+- c0055 ..> c0196: `scrubError() calls sanitizeText()`
+- c0055 ..> c0196: `strings() calls sanitizeText()`
+- c0055 ..> c0196: `trustedAdditionalEntries() calls hasSensitiveData()`
+- c0055 ..> c0196: `trustedAdditionalEntries() calls isMemoryOperation()`
+- c0055 ..> c0196: `trustedAdditionalEntries() calls sanitizeText()`
+- c0055 ..> c0229: `applyEnrichmentDecision() calls trim()`
+- c0055 ..> c0229: `applyEquivalentCandidate() calls trim()`
+- c0055 ..> c0229: `decisionEvidenceIds() calls trim()`
+- c0055 ..> c0229: `eligibleCandidate() calls trim()`
+- c0055 ..> c0229: `parseDecision() calls trim()`
+- c0055 ..> c0229: `stringValue() calls trim()`
+- c0055 ..> c0229: `strings() calls trim()`
+- c0055 ..> c0238: `snapshotForPersistence() calls sanitizeCaptureSnapshot()`
+- c0055 ..> c0242: `errorMessage() calls inspect()`
+- c0057 --> c0058: `field instance`
+- c0057 --> c0061: `field model`
+- c0057 --> c0065: `field prompts`
+- c0057 --> c0066: `field scopeSource`
+- c0057 --> c0067: `field verbosity`
+- c0057 --> c0070: `field captureMode`
+- c0057 --> c0104: `field scope`
+- c0057 --> c0179: `field logging`
+- c0068 ..> c0047: `resolveLogDirectory() calls resolve()`
+- c0068 ..> c0057: `type in loadForgetfulConfig`
+- c0068 ..> c0059: `type in readJson`
+- c0068 ..> c0059: `type in resolveScope`
+- c0068 ..> c0060: `type in loadForgetfulConfig`
+- c0068 ..> c0061: `type in modelToString`
+- c0068 ..> c0061: `type in parseModel`
+- c0068 ..> c0063: `type in resolveVerbosity`
+- c0068 ..> c0063: `type in updateUserSettings`
+- c0068 ..> c0065: `type in mergePrompts`
+- c0068 ..> c0065: `type in readPromptDirectory`
+- c0068 ..> c0066: `type in resolveScope`
+- c0068 ..> c0067: `type in isVerbosity`
+- c0068 ..> c0067: `type in resolveVerbosity`
+- c0068 ..> c0068: `loadForgetfulConfig() calls asBoolean()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls asPositiveInteger()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls asString()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls defaultAgentDir()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls isFileLogLevel()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls isRecord()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls mergePrompts()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls parseModel()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls projectSettingsPath()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls readJson()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls readPromptDirectory()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveCaptureMode()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveContextLimit()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveLogDirectory()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveRecallConcurrency()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveScope()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls resolveVerbosity()`
+- c0068 ..> c0068: `loadForgetfulConfig() calls userSettingsPath()`
+- c0068 ..> c0068: `parseModel() calls isRecord()`
+- c0068 ..> c0068: `resolveRecallConcurrency() calls isRecallConcurrency()`
+- c0068 ..> c0068: `resolveScope() calls isRecord()`
+- c0068 ..> c0068: `resolveVerbosity() calls isVerbosity()`
+- c0068 ..> c0068: `updateForgetfulConnection() calls isRecord()`
+- c0068 ..> c0068: `updateForgetfulConnection() calls readJson()`
+- c0068 ..> c0068: `updateForgetfulConnection() calls writeJson()`
+- c0068 ..> c0068: `updateUserSettings() calls isRecord()`
+- c0068 ..> c0068: `updateUserSettings() calls readJson()`
+- c0068 ..> c0068: `updateUserSettings() calls writeJson()`
+- c0068 ..> c0068: `userSettingsPath() calls defaultAgentDir()`
+- c0068 ..> c0068: `writeProjectScope() calls projectSettingsPath()`
+- c0068 ..> c0068: `writeProjectScope() calls writeJson()`
+- c0068 ..> c0070: `type in resolveCaptureMode`
+- c0068 ..> c0104: `type in resolveScope`
+- c0068 ..> c0104: `type in writeProjectScope`
+- c0068 ..> c0160: `readJson() calls readFile()`
+- c0068 ..> c0160: `readPromptDirectory() calls readFile()`
+- c0068 ..> c0179: `type in isFileLogLevel`
+- c0068 ..> c0180: `writeJson() calls close()`
+- c0068 ..> c0229: `asString() calls trim()`
+- c0068 ..> c0229: `parseModel() calls trim()`
+- c0068 ..> c0229: `readPromptDirectory() calls trim()`
+- c0068 ..> c0229: `resolveLogDirectory() calls trim()`
+- c0071 --> c0069: `field historySummary`
+- c0071 --> c0070: `field mode`
+- c0071 --> c0084: `field entries`
+- c0071 --> c0104: `field scope`
+- c0071 --> c0107: `field context`
 - c0072 --|> c0073: `inherits`
-- c0073 --> c0076: `field entity_type`
-- c0073 --|> c0093: `inherits`
-- c0074 --|> c0075: `inherits`
-- c0075 --|> c0093: `inherits`
-- c0079 --> c0080: `field knowledge`
-- c0079 ..> c0082: `type in get`
-- c0079 ..> c0082: `type in search`
-- c0079 ..> c0083: `type in create`
-- c0079 ..> c0084: `type in create`
-- c0079 ..> c0086: `type in queryMemory`
-- c0079 ..> c0091: `type in createProject`
-- c0079 ..> c0091: `type in linkProject`
-- c0079 ..> c0091: `type in listProjects`
-- c0079 ..> c0092: `type in createProject`
-- c0079 ..> c0095: `type in queryMemory`
-- c0079 ..> c0095: `type in search`
-- c0080 ..> c0065: `type in createCodeArtifact`
-- c0080 ..> c0065: `type in getCodeArtifact`
-- c0080 ..> c0065: `type in updateCodeArtifact`
-- c0080 ..> c0066: `type in createCodeArtifact`
-- c0080 ..> c0066: `type in updateCodeArtifact`
-- c0080 ..> c0067: `type in listCodeArtifacts`
-- c0080 ..> c0069: `type in createDocument`
-- c0080 ..> c0069: `type in getDocument`
-- c0080 ..> c0069: `type in updateDocument`
-- c0080 ..> c0070: `type in createDocument`
-- c0080 ..> c0070: `type in updateDocument`
-- c0080 ..> c0071: `type in listDocuments`
-- c0080 ..> c0072: `type in createEntity`
-- c0080 ..> c0072: `type in getEntity`
-- c0080 ..> c0072: `type in searchEntities`
-- c0080 ..> c0072: `type in updateEntity`
-- c0080 ..> c0073: `type in createEntity`
-- c0080 ..> c0073: `type in updateEntity`
-- c0080 ..> c0074: `type in createRelationship`
-- c0080 ..> c0074: `type in getRelationships`
-- c0080 ..> c0075: `type in createRelationship`
-- c0080 ..> c0078: `type in listFiles`
-- c0080 ..> c0082: `type in updateMemory`
-- c0080 ..> c0084: `type in updateMemory`
-- c0080 ..> c0096: `type in getFile`
-- c0081 --> c0082: `field memory`
-- c0082 --|> c0084: `inherits`
-- c0085 ..> c0088: `type in complete`
-- c0085 ..> c0088: `type in prepareCapture`
-- c0086 --> c0081: `field linked_memories`
-- c0086 --> c0082: `field primary_memories`
-- c0088 --> c0068: `field onConversationCompacted`
-- c0088 --> c0087: `field readTools`
-- c0088 --> c0090: `field submission`
-- c0096 --|> c0078: `inherits`
-- c0097 --> c0091: `field project`
-- c0098 ..> c0098: `buildEncodePrompt() calls bundledSkillPaths()`
-- c0098 ..> c0151: `buildEncodePrompt() calls readFile()`
-- c0098 ..> c0218: `buildEncodePrompt() calls trim()`
-- c0102 --> c0099: `field outcome`
-- c0102 --> c0103: `field state`
-- c0104 ..> c0022: `type in checkpoint`
-- c0104 ..> c0023: `type in checkpoint`
-- c0104 ..> c0064: `type in enqueue`
-- c0104 ..> c0077: `type in resolveConflict`
-- c0107 --> c0091: `field projects`
-- c0107 --|> c0097: `inherits`
-- c0108 --> c0050: `field createCapture`
-- c0108 --> c0050: `field createRecall`
-- c0108 --> c0079: `field client`
-- c0108 --> c0079: `field createCapture`
-- c0108 --> c0079: `field createClient`
-- c0108 --> c0079: `field createRecall`
-- c0108 --> c0104: `field capture`
-- c0108 --> c0104: `field createCapture`
-- c0108 --> c0107: `field resolveWorkContext`
-- c0108 --> c0116: `field createRecall`
-- c0108 --> c0116: `field recall`
-- c0108 --> c0182: `field createCapture`
-- c0108 --> c0182: `field createRecall`
-- c0109 --> c0053: `field config`
-- c0109 --> c0108: `field dependencies`
-- c0109 --> c0111: `field policies`
-- c0112 --> c0050: `field config`
-- c0112 --> c0079: `field client`
-- c0112 --> c0107: `field context`
-- c0112 --> c0116: `field recall`
-- c0112 --> c0170: `field logger`
-- c0112 --> c0182: `field model`
-- c0113 --> c0094: `field scope`
-- c0115 --> c0118: `field runtime`
-- c0115 --> c0212: `field promise`
-- c0115 --> c0212: `field result`
-- c0116 ..> c0077: `type in recall`
-- c0116 ..> c0209: `type in deeper`
-- c0116 ..> c0211: `type in recall`
-- c0116 ..> c0212: `type in deeper`
-- c0116 ..> c0212: `type in recall`
-- c0117 --> c0094: `field scope`
-- c0118 --> c0004: `field activity`
-- c0118 --> c0020: `field captureDeferrals`
-- c0118 --> c0023: `field capturePass`
-- c0118 --> c0023: `field recoveryResult`
-- c0118 --> c0050: `field config`
-- c0118 --> c0079: `field client`
-- c0118 --> c0103: `field pendingCaptureJobs`
-- c0118 --> c0104: `field capture`
-- c0118 --> c0107: `field context`
-- c0118 --> c0113: `field lastRecall`
-- c0118 --> c0116: `field recall`
-- c0118 --> c0170: `field logger`
-- c0118 --> c0182: `field model`
-- c0118 --> c0190: `field queue`
-- c0120 --> c0100: `field automaticRecalls`
-- c0120 --> c0110: `field pendingQueuedRecall`
-- c0120 --> c0115: `field recallJobs`
-- c0120 --> c0118: `field loading`
-- c0120 --> c0118: `field runtime`
-- c0121 ..> c0004: `collectCaptureFeedback() calls set()`
-- c0121 ..> c0004: `diagnosticCandidateDetail() calls set()`
-- c0121 ..> c0004: `pickMemoryModel() calls refresh()`
-- c0121 ..> c0023: `type in captureProcessedJobIds`
-- c0121 ..> c0023: `type in readCaptureOutcome`
-- c0121 ..> c0040: `findResolutionConflict() calls pendingConflicts()`
-- c0121 ..> c0040: `log() calls emit()`
-- c0121 ..> c0040: `logFailure() calls emit()`
-- c0121 ..> c0040: `readCaptureOutcome() calls diagnostics()`
-- c0121 ..> c0040: `recordRecallActivity() calls emit()`
-- c0121 ..> c0040: `textMessage() calls now()`
-- c0121 ..> c0050: `type in log`
-- c0121 ..> c0050: `type in logFailure`
-- c0121 ..> c0050: `type in makeInstanceId`
-- c0121 ..> c0050: `type in policyText`
-- c0121 ..> c0050: `type in promptSetupEndpoint`
-- c0121 ..> c0054: `type in parseSelection`
-- c0121 ..> c0060: `type in log`
-- c0121 ..> c0077: `type in recallContextEntries`
-- c0121 ..> c0077: `type in resolutionEvidence`
-- c0121 ..> c0098: `createForgetfulExtension() calls bundledSkillPaths()`
-- c0121 ..> c0099: `type in automaticCaptureJobOutcome`
-- c0121 ..> c0099: `type in readCaptureOutcome`
-- c0121 ..> c0099: `type in recordCaptureRetry`
-- c0121 ..> c0101: `type in boundedWait`
-- c0121 ..> c0102: `type in automaticCaptureFeedback`
-- c0121 ..> c0102: `type in collectCaptureFeedback`
-- c0121 ..> c0102: `type in recordCaptureRetry`
-- c0121 ..> c0104: `type in readCaptureOutcome`
-- c0121 ..> c0106: `type in collectDiagnosticParts`
-- c0121 ..> c0107: `type in defaultWorkContext`
-- c0121 ..> c0107: `type in discoverWorkContext`
-- c0121 ..> c0107: `type in snapshotWorkContext`
-- c0121 ..> c0109: `type in createForgetfulExtension`
-- c0121 ..> c0111: `type in policyText`
-- c0121 ..> c0113: `type in recallActivitySummary`
-- c0121 ..> c0118: `type in conflictBelongsToActiveBranch`
-- c0121 ..> c0118: `type in findResolutionConflict`
-- c0121 ..> c0118: `type in readCaptureOutcome`
-- c0121 ..> c0118: `type in recordRecallActivity`
-- c0121 ..> c0119: `type in promptSetupAuthentication`
-- c0121 ..> c0121: `automaticCaptureFeedback() calls captureCount()`
-- c0121 ..> c0121: `automaticCaptureFeedback() calls captureFeedbackParts()`
-- c0121 ..> c0121: `automaticCaptureFeedback() calls collectCaptureFeedback()`
-- c0121 ..> c0121: `automaticCaptureJobOutcome() calls boundedErrorDiagnostic()`
-- c0121 ..> c0121: `automaticCaptureJobOutcome() calls captureFeedbackReason()`
-- c0121 ..> c0121: `automaticRecallTerminalText() calls usefulRecallText()`
-- c0121 ..> c0121: `canonicalRepository() calls qualifiedRepository()`
-- c0121 ..> c0121: `captureFeedbackParts() calls captureCount()`
-- c0121 ..> c0121: `captureFeedbackParts() calls skippedReasonBreakdown()`
-- c0121 ..> c0121: `collectCaptureFeedback() calls recordCaptureRetry()`
-- c0121 ..> c0121: `collectDiagnosticParts() calls diagnosticCandidateDetail()`
-- c0121 ..> c0121: `createForgetfulExtension() calls logFailure()`
-- c0121 ..> c0121: `createForgetfulExtension() calls notify()`
-- c0121 ..> c0121: `createForgetfulExtension() calls sessionKey()`
-- c0121 ..> c0121: `diagnosticCandidateDetail() calls diagnosticSourceIds()`
-- c0121 ..> c0121: `diagnosticSummary() calls collectDiagnosticParts()`
-- c0121 ..> c0121: `discoverWorkContext() calls canonicalRepository()`
-- c0121 ..> c0121: `discoverWorkContext() calls defaultWorkContext()`
-- c0121 ..> c0121: `findResolutionConflict() calls conflictBelongsToActiveBranch()`
-- c0121 ..> c0121: `latestBranchUserEntry() calls messageContentText()`
-- c0121 ..> c0121: `latestContextUserPrompt() calls messageContentText()`
-- c0121 ..> c0121: `log() calls notify()`
-- c0121 ..> c0121: `logFailure() calls boundedErrorDiagnostic()`
-- c0121 ..> c0121: `logFailure() calls log()`
-- c0121 ..> c0121: `pickMemoryModel() calls parseSelection()`
-- c0121 ..> c0121: `promptSetupAuthentication() calls notify()`
-- c0121 ..> c0121: `promptSetupEndpoint() calls notify()`
-- c0121 ..> c0121: `promptSetupEndpoint() calls setupEndpointSuggestion()`
-- c0121 ..> c0121: `readCaptureOutcome() calls automaticCaptureJobOutcome()`
-- c0121 ..> c0121: `recallContextEntries() calls messageContentText()`
-- c0121 ..> c0121: `recordRecallActivity() calls log()`
-- c0121 ..> c0121: `recordRecallActivity() calls recallActivitySummary()`
-- c0121 ..> c0121: `resolutionEvidence() calls messageContentText()`
-- c0121 ..> c0121: `savedRecallResultText() calls usefulRecallText()`
-- c0121 ..> c0122: `createForgetfulExtension() calls registerForegroundTool()`
-- c0121 ..> c0126: `collectCaptureFeedback() calls get()`
-- c0121 ..> c0126: `diagnosticCandidateDetail() calls get()`
-- c0121 ..> c0126: `log() calls get()`
-- c0121 ..> c0126: `logFailure() calls get()`
-- c0121 ..> c0126: `resolutionEvidence() calls get()`
-- c0121 ..> c0185: `pickMemoryModel() calls availableMemoryModels()`
-- c0121 ..> c0185: `pickMemoryModel() calls modelLabel()`
-- c0121 ..> c0185: `pickMemoryModel() calls modelSelectionFromModel()`
-- c0121 ..> c0186: `automaticCaptureJobOutcome() calls sanitizeText()`
-- c0121 ..> c0186: `automaticRecallTerminalText() calls sanitizeText()`
-- c0121 ..> c0186: `boundedErrorDiagnostic() calls sanitizeText()`
-- c0121 ..> c0186: `captureFeedbackReason() calls sanitizeText()`
-- c0121 ..> c0186: `captureJobId() calls sanitizeText()`
-- c0121 ..> c0186: `captureProcessedJobIds() calls sanitizeText()`
-- c0121 ..> c0186: `diagnosticCandidateDetail() calls sanitizeText()`
-- c0121 ..> c0186: `diagnosticSourceIds() calls sanitizeText()`
-- c0121 ..> c0186: `log() calls sanitizeText()`
-- c0121 ..> c0186: `recallActivitySummary() calls sanitizeText()`
-- c0121 ..> c0186: `recallContextEntries() calls sanitizeText()`
-- c0121 ..> c0186: `recordRecallActivity() calls sanitizeText()`
-- c0121 ..> c0186: `resolutionEvidence() calls isMemoryOperation()`
-- c0121 ..> c0186: `resolutionEvidence() calls sanitizeText()`
-- c0121 ..> c0186: `usefulRecallText() calls sanitizeText()`
-- c0121 ..> c0212: `type in automaticRecallResultStatus`
-- c0121 ..> c0212: `type in automaticRecallTerminalText`
-- c0121 ..> c0212: `type in recordRecallActivity`
-- c0121 ..> c0212: `type in savedRecallResultText`
-- c0121 ..> c0212: `type in usefulRecallText`
-- c0121 ..> c0218: `canonicalRepository() calls trim()`
-- c0121 ..> c0218: `captureFeedbackReason() calls trim()`
-- c0121 ..> c0218: `createForgetfulExtension() calls trim()`
-- c0121 ..> c0218: `promptSetupAuthentication() calls trim()`
-- c0121 ..> c0218: `promptSetupEndpoint() calls trim()`
-- c0121 ..> c0218: `recallContextEntries() calls trim()`
-- c0121 ..> c0218: `resolutionEvidence() calls trim()`
-- c0121 ..> c0218: `setupEndpointSuggestion() calls trim()`
-- c0121 ..> c0218: `usefulRecallText() calls trim()`
-- c0121 ..> c0219: `qualifiedRepository() calls repositoryName()`
-- c0123 ..> c0065: `type in createCodeArtifact`
-- c0123 ..> c0065: `type in getCodeArtifact`
-- c0123 ..> c0066: `type in createCodeArtifact`
-- c0123 ..> c0066: `type in updateCodeArtifact`
-- c0123 ..> c0067: `type in listCodeArtifacts`
-- c0123 ..> c0069: `type in createDocument`
-- c0123 ..> c0069: `type in getDocument`
-- c0123 ..> c0070: `type in createDocument`
-- c0123 ..> c0070: `type in updateDocument`
-- c0123 ..> c0071: `type in listDocuments`
-- c0123 ..> c0072: `type in createEntity`
-- c0123 ..> c0072: `type in getEntity`
-- c0123 ..> c0072: `type in searchEntities`
-- c0123 ..> c0073: `type in createEntity`
-- c0123 ..> c0073: `type in updateEntity`
-- c0123 ..> c0074: `type in getRelationships`
-- c0123 ..> c0075: `type in createRelationship`
-- c0123 ..> c0078: `type in listFiles`
-- c0123 ..|> c0080: `implements`
-- c0123 --> c0082: `field parseMemory`
-- c0123 ..> c0082: `type in constructor`
-- c0123 ..> c0084: `type in updateMemory`
-- c0123 ..> c0096: `type in getFile`
-- c0123 --> c0124: `field request`
-- c0123 ..> c0124: `type in constructor`
-- c0123 ..> c0125: `createCodeArtifact() calls artifact()`
-- c0123 ..> c0125: `createCodeArtifact() calls resourceBody()`
-- c0123 ..> c0125: `createDocument() calls document()`
-- c0123 ..> c0125: `createDocument() calls resourceBody()`
-- c0123 ..> c0125: `createEntity() calls entity()`
-- c0123 ..> c0125: `createEntity() calls entityBody()`
-- c0123 ..> c0125: `createRelationship() calls id()`
-- c0123 ..> c0125: `createRelationship() calls relationship()`
-- c0123 ..> c0125: `createRelationship() calls relationshipBody()`
-- c0123 ..> c0125: `getCodeArtifact() calls artifact()`
-- c0123 ..> c0125: `getCodeArtifact() calls id()`
-- c0123 ..> c0125: `getDocument() calls document()`
-- c0123 ..> c0125: `getDocument() calls id()`
-- c0123 ..> c0125: `getEntity() calls entity()`
-- c0123 ..> c0125: `getEntity() calls id()`
-- c0123 ..> c0125: `getEntityMemories() calls id()`
-- c0123 ..> c0125: `getEntityMemories() calls object()`
-- c0123 ..> c0125: `getEntityMemories() calls records()`
-- c0123 ..> c0125: `getEntityMemories() calls text()`
-- c0123 ..> c0125: `getFile() calls fileSummary()`
-- c0123 ..> c0125: `getFile() calls id()`
-- c0123 ..> c0125: `getFile() calls object()`
-- c0123 ..> c0125: `getFile() calls text()`
-- c0123 ..> c0125: `getRelationships() calls id()`
-- c0123 ..> c0125: `getRelationships() calls records()`
-- c0123 ..> c0125: `linkEntityMemory() calls id()`
-- c0123 ..> c0125: `linkEntityMemory() calls object()`
-- c0123 ..> c0125: `linkMemories() calls id()`
-- c0123 ..> c0125: `linkMemories() calls ids()`
-- c0123 ..> c0125: `linkMemories() calls object()`
-- c0123 ..> c0125: `listCodeArtifacts() calls projectPath()`
-- c0123 ..> c0125: `listCodeArtifacts() calls records()`
-- c0123 ..> c0125: `listCodeArtifacts() calls summary()`
-- c0123 ..> c0125: `listDocuments() calls projectPath()`
-- c0123 ..> c0125: `listDocuments() calls records()`
-- c0123 ..> c0125: `listDocuments() calls summary()`
-- c0123 ..> c0125: `listFiles() calls projectPath()`
-- c0123 ..> c0125: `listFiles() calls records()`
-- c0123 ..> c0125: `searchEntities() calls records()`
-- c0123 ..> c0125: `unlinkMemories() calls id()`
-- c0123 ..> c0125: `unlinkMemories() calls object()`
-- c0123 ..> c0125: `updateCodeArtifact() calls artifact()`
-- c0123 ..> c0125: `updateCodeArtifact() calls id()`
-- c0123 ..> c0125: `updateCodeArtifact() calls resourceBody()`
-- c0123 ..> c0125: `updateDocument() calls document()`
-- c0123 ..> c0125: `updateDocument() calls id()`
-- c0123 ..> c0125: `updateDocument() calls resourceBody()`
-- c0123 ..> c0125: `updateEntity() calls entity()`
-- c0123 ..> c0125: `updateEntity() calls entityBody()`
-- c0123 ..> c0125: `updateEntity() calls id()`
-- c0123 ..> c0125: `updateMemory() calls id()`
-- c0123 ..> c0125: `updateMemory() calls ids()`
-- c0123 ..> c0125: `updateMemory() calls memoryMetadata()`
-- c0123 ..> c0125: `updateMemory() calls object()`
-- c0123 ..> c0125: `updateMemory() calls strings()`
-- c0123 ..> c0125: `updateMemory() calls text()`
-- c0123 ..> c0126: `createCodeArtifact() calls request()`
-- c0123 ..> c0126: `createDocument() calls request()`
-- c0123 ..> c0126: `createEntity() calls request()`
-- c0123 ..> c0126: `createRelationship() calls request()`
-- c0123 ..> c0126: `getCodeArtifact() calls request()`
-- c0123 ..> c0126: `getDocument() calls request()`
-- c0123 ..> c0126: `getEntity() calls request()`
-- c0123 ..> c0126: `getEntityMemories() calls request()`
-- c0123 ..> c0126: `getFile() calls request()`
-- c0123 ..> c0126: `getRelationships() calls request()`
-- c0123 ..> c0126: `linkEntityMemory() calls request()`
-- c0123 ..> c0126: `linkMemories() calls request()`
-- c0123 ..> c0126: `listCodeArtifacts() calls request()`
-- c0123 ..> c0126: `listDocuments() calls request()`
-- c0123 ..> c0126: `listFiles() calls request()`
-- c0123 ..> c0126: `searchEntities() calls request()`
-- c0123 ..> c0126: `unlinkMemories() calls request()`
-- c0123 ..> c0126: `updateCodeArtifact() calls request()`
-- c0123 ..> c0126: `updateDocument() calls request()`
-- c0123 ..> c0126: `updateEntity() calls request()`
-- c0123 ..> c0126: `updateMemory() calls request()`
-- c0123 ..> c0130: `getFile() constructs ForgetfulSchemaError`
-- c0123 ..> c0130: `linkEntityMemory() constructs ForgetfulSchemaError`
-- c0123 ..> c0130: `linkMemories() constructs ForgetfulSchemaError`
-- c0123 ..> c0130: `searchEntities() constructs ForgetfulSchemaError`
-- c0123 ..> c0130: `unlinkMemories() constructs ForgetfulSchemaError`
-- c0123 ..> c0132: `linkMemories() calls parseMemory()`
-- c0123 ..> c0132: `updateMemory() calls parseMemory()`
-- c0123 ..> c0218: `searchEntities() calls trim()`
-- c0125 ..> c0065: `type in artifact`
-- c0125 ..> c0066: `type in resourceBody`
-- c0125 ..> c0067: `type in summary`
-- c0125 ..> c0069: `type in document`
-- c0125 ..> c0070: `type in resourceBody`
-- c0125 ..> c0071: `type in summary`
-- c0125 ..> c0072: `type in entity`
-- c0125 ..> c0073: `type in entityBody`
-- c0125 ..> c0074: `type in relationship`
-- c0125 ..> c0075: `type in relationshipBody`
-- c0125 ..> c0078: `type in fileSummary`
-- c0125 ..> c0093: `type in provenance`
-- c0125 ..> c0125: `artifact() calls id()`
-- c0125 ..> c0125: `artifact() calls object()`
-- c0125 ..> c0125: `artifact() calls resourceBody()`
-- c0125 ..> c0125: `document() calls id()`
-- c0125 ..> c0125: `document() calls object()`
-- c0125 ..> c0125: `document() calls resourceBody()`
-- c0125 ..> c0125: `entity() calls entityBody()`
-- c0125 ..> c0125: `entity() calls id()`
-- c0125 ..> c0125: `entity() calls object()`
-- c0125 ..> c0125: `entityBody() calls ids()`
-- c0125 ..> c0125: `entityBody() calls object()`
-- c0125 ..> c0125: `entityBody() calls provenance()`
-- c0125 ..> c0125: `entityBody() calls strings()`
-- c0125 ..> c0125: `entityBody() calls text()`
-- c0125 ..> c0125: `fileSummary() calls id()`
-- c0125 ..> c0125: `fileSummary() calls object()`
-- c0125 ..> c0125: `fileSummary() calls strings()`
-- c0125 ..> c0125: `fileSummary() calls text()`
-- c0125 ..> c0125: `memoryMetadata() calls ids()`
-- c0125 ..> c0125: `memoryMetadata() calls provenance()`
-- c0125 ..> c0125: `projectPath() calls id()`
-- c0125 ..> c0125: `provenance() calls strings()`
-- c0125 ..> c0125: `provenance() calls text()`
-- c0125 ..> c0125: `records() calls object()`
-- c0125 ..> c0125: `relationship() calls id()`
-- c0125 ..> c0125: `relationship() calls object()`
-- c0125 ..> c0125: `relationship() calls relationshipBody()`
-- c0125 ..> c0125: `relationshipBody() calls id()`
-- c0125 ..> c0125: `relationshipBody() calls object()`
-- c0125 ..> c0125: `relationshipBody() calls provenance()`
-- c0125 ..> c0125: `relationshipBody() calls text()`
-- c0125 ..> c0125: `resourceBody() calls id()`
-- c0125 ..> c0125: `resourceBody() calls object()`
-- c0125 ..> c0125: `resourceBody() calls provenance()`
-- c0125 ..> c0125: `resourceBody() calls strings()`
-- c0125 ..> c0125: `resourceBody() calls text()`
-- c0125 ..> c0125: `summary() calls id()`
-- c0125 ..> c0125: `summary() calls object()`
-- c0125 ..> c0125: `summary() calls provenance()`
-- c0125 ..> c0125: `summary() calls strings()`
-- c0125 ..> c0125: `summary() calls text()`
-- c0125 ..> c0130: `entityBody() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `fileSummary() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `id() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `ids() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `object() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `records() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `strings() constructs ForgetfulSchemaError`
-- c0125 ..> c0130: `text() constructs ForgetfulSchemaError`
-- c0125 ..> c0218: `text() calls trim()`
-- c0126 ..> c0004: `listProjects() calls set()`
-- c0126 ..> c0004: `readResponse() calls set()`
-- c0126 ..> c0040: `readResponse() calls read()`
-- c0126 ..|> c0079: `implements`
-- c0126 ..> c0082: `type in get`
-- c0126 ..> c0082: `type in search`
-- c0126 ..> c0083: `type in create`
-- c0126 ..> c0084: `type in create`
-- c0126 ..> c0084: `type in createBody`
-- c0126 ..> c0086: `type in queryMemory`
-- c0126 ..> c0091: `type in createProject`
-- c0126 ..> c0091: `type in linkProject`
-- c0126 ..> c0091: `type in listProjects`
-- c0126 ..> c0092: `type in createProject`
-- c0126 ..> c0095: `type in queryMemory`
-- c0126 ..> c0095: `type in search`
-- c0126 ..> c0125: `createBody() calls memoryMetadata()`
-- c0126 ..> c0126: `create() calls createBody()`
-- c0126 ..> c0126: `create() calls request()`
-- c0126 ..> c0126: `createProject() calls request()`
-- c0126 ..> c0126: `get() calls request()`
-- c0126 ..> c0126: `get() calls validId()`
-- c0126 ..> c0126: `getMemoryEntityIds() calls request()`
-- c0126 ..> c0126: `getMemoryEntityIds() calls validId()`
-- c0126 ..> c0126: `linkProject() calls request()`
-- c0126 ..> c0126: `linkProject() calls validId()`
-- c0126 ..> c0126: `listProjects() calls endpoint()`
-- c0126 ..> c0126: `listProjects() calls request()`
-- c0126 ..> c0126: `queryMemory() calls request()`
-- c0126 ..> c0126: `readResponse() calls get()`
-- c0126 ..> c0126: `request() calls endpoint()`
-- c0126 ..> c0126: `request() calls fetchImpl()`
-- c0126 ..> c0126: `request() calls readResponse()`
-- c0126 ..> c0126: `request() calls responseByteLimit()`
-- c0126 ..> c0126: `request() calls throwResponseError()`
-- c0126 ..> c0126: `search() calls request()`
-- c0126 ..> c0126: `supersede() calls request()`
-- c0126 ..> c0126: `supersede() calls validId()`
-- c0126 ..> c0126: `throwResponseError() calls readResponse()`
-- c0126 ..> c0127: `type in constructor`
-- c0126 ..> c0129: `throwResponseError() constructs ForgetfulHttpError`
-- c0126 ..> c0130: `create() constructs ForgetfulSchemaError`
-- c0126 ..> c0130: `getMemoryEntityIds() constructs ForgetfulSchemaError`
-- c0126 ..> c0130: `listProjects() constructs ForgetfulSchemaError`
-- c0126 ..> c0130: `readResponse() constructs ForgetfulSchemaError`
-- c0126 ..> c0130: `supersede() constructs ForgetfulSchemaError`
-- c0126 ..> c0131: `request() constructs ForgetfulTimeoutError`
-- c0126 ..> c0132: `constructor() calls localHost()`
-- c0126 ..> c0132: `constructor() calls trimTrailingSlashes()`
-- c0126 ..> c0132: `create() calls integerArray()`
-- c0126 ..> c0132: `create() calls isObject()`
-- c0126 ..> c0132: `create() calls requiredInteger()`
-- c0126 ..> c0132: `createProject() calls parseProject()`
-- c0126 ..> c0132: `createProject() calls projectText()`
-- c0126 ..> c0132: `get() calls parseMemory()`
-- c0126 ..> c0132: `getMemoryEntityIds() calls directEntityId()`
-- c0126 ..> c0132: `getMemoryEntityIds() calls isObject()`
-- c0126 ..> c0132: `linkProject() calls parseProject()`
-- c0126 ..> c0132: `listProjects() calls isObject()`
-- c0126 ..> c0132: `listProjects() calls parseProject()`
-- c0126 ..> c0132: `queryMemory() calls parseSearchPayload()`
-- c0126 ..> c0132: `queryMemory() calls searchBody()`
-- c0126 ..> c0132: `request() calls makeAbortError()`
-- c0126 ..> c0132: `request() calls parseJson()`
-- c0126 ..> c0132: `search() calls flattenSearchResult()`
-- c0126 ..> c0132: `search() calls parseSearchPayload()`
-- c0126 ..> c0132: `search() calls searchBody()`
-- c0126 ..> c0132: `supersede() calls isObject()`
-- c0126 ..> c0190: `readResponse() calls cancel()`
-- c0126 ..> c0218: `supersede() calls trim()`
-- c0126 ..> c0219: `createProject() calls repositoryName()`
-- c0126 ..> c0219: `linkProject() calls repositoryName()`
-- c0132 ..> c0004: `uniqueMemories() calls set()`
-- c0132 ..> c0081: `type in parseLinkedMemories`
-- c0132 ..> c0082: `type in flattenSearchResult`
-- c0132 ..> c0082: `type in parseMemory`
-- c0132 ..> c0082: `type in uniqueMemories`
-- c0132 ..> c0086: `type in flattenSearchResult`
-- c0132 ..> c0086: `type in parseSearchPayload`
-- c0132 ..> c0091: `type in parseProject`
-- c0132 ..> c0095: `type in addSearchProjectFilter`
-- c0132 ..> c0095: `type in searchBody`
-- c0132 ..> c0095: `type in validatedSearchOptions`
-- c0132 ..> c0125: `parseMemory() calls memoryMetadata()`
-- c0132 ..> c0128: `makeAbortError() constructs ForgetfulAbortError`
-- c0132 ..> c0128: `type in makeAbortError`
-- c0132 ..> c0130: `directEntityId() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `integerArray() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `nonNegativeInteger() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `optionalString() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `parseJson() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `parseLinkedMemories() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `parseMemory() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `parseProject() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `parseSearchPayload() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `requiredInteger() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `requiredString() constructs ForgetfulSchemaError`
-- c0132 ..> c0130: `stringArray() constructs ForgetfulSchemaError`
-- c0132 ..> c0132: `directEntityId() calls isObject()`
-- c0132 ..> c0132: `directEntityId() calls requiredInteger()`
-- c0132 ..> c0132: `flattenSearchResult() calls uniqueMemories()`
-- c0132 ..> c0132: `parseLinkedMemories() calls isObject()`
-- c0132 ..> c0132: `parseLinkedMemories() calls parseMemory()`
-- c0132 ..> c0132: `parseLinkedMemories() calls requiredInteger()`
-- c0132 ..> c0132: `parseMemory() calls integerArray()`
-- c0132 ..> c0132: `parseMemory() calls isObject()`
-- c0132 ..> c0132: `parseMemory() calls nonNegativeInteger()`
-- c0132 ..> c0132: `parseMemory() calls optionalString()`
-- c0132 ..> c0132: `parseMemory() calls requiredInteger()`
-- c0132 ..> c0132: `parseMemory() calls requiredString()`
-- c0132 ..> c0132: `parseMemory() calls stringArray()`
-- c0132 ..> c0132: `parseProject() calls isObject()`
-- c0132 ..> c0132: `parseProject() calls optionalString()`
-- c0132 ..> c0132: `parseProject() calls requiredInteger()`
-- c0132 ..> c0132: `parseProject() calls requiredString()`
-- c0132 ..> c0132: `parseSearchPayload() calls isObject()`
-- c0132 ..> c0132: `parseSearchPayload() calls nonNegativeInteger()`
-- c0132 ..> c0132: `parseSearchPayload() calls parseLinkedMemories()`
-- c0132 ..> c0132: `parseSearchPayload() calls parseMemory()`
-- c0132 ..> c0132: `parseSearchPayload() calls requiredString()`
-- c0132 ..> c0132: `searchBody() calls addSearchProjectFilter()`
-- c0132 ..> c0132: `searchBody() calls validatedSearchOptions()`
-- c0132 ..> c0218: `projectText() calls trim()`
-- c0133 --> c0065: `field artifacts`
-- c0133 --> c0069: `field documents`
-- c0133 --> c0078: `field files`
-- c0134 --> c0082: `field memories`
-- c0134 --> c0094: `field scope`
-- c0136 ..> c0004: `collectRelationships() calls set()`
-- c0136 ..> c0004: `findEntities() calls set()`
-- c0136 ..> c0004: `resolveRelationshipEndpoints() calls set()`
-- c0136 ..> c0065: `type in appendArtifactLines`
-- c0136 ..> c0069: `type in appendDocumentLines`
-- c0136 ..> c0072: `type in appendEntityLines`
-- c0136 ..> c0072: `type in collectEntityMemories`
-- c0136 ..> c0072: `type in collectRelationships`
-- c0136 ..> c0072: `type in findEntities`
-- c0136 ..> c0072: `type in findEntityMemories`
-- c0136 ..> c0072: `type in findRelationships`
-- c0136 ..> c0072: `type in formatExpansion`
-- c0136 ..> c0072: `type in formatRelationships`
-- c0136 ..> c0072: `type in resolveRelationshipEndpoints`
-- c0136 ..> c0074: `type in collectRelationships`
-- c0136 ..> c0074: `type in formatRelationships`
-- c0136 ..> c0074: `type in resolveRelationshipEndpoints`
-- c0136 ..> c0078: `type in appendFileLines`
-- c0136 --> c0080: `field client`
-- c0136 ..> c0080: `type in constructor`
-- c0136 ..> c0123: `collectRelationships() calls getRelationships()`
-- c0136 ..> c0123: `findAttachments() calls getCodeArtifact()`
-- c0136 ..> c0123: `findAttachments() calls getDocument()`
-- c0136 ..> c0123: `findAttachments() calls listFiles()`
-- c0136 ..> c0123: `findEntities() calls getEntity()`
-- c0136 ..> c0123: `findEntities() calls searchEntities()`
-- c0136 ..> c0123: `findEntityMemories() calls getEntityMemories()`
-- c0136 ..> c0123: `resolveRelationshipEndpoints() calls getEntity()`
-- c0136 ..> c0126: `formatRelationships() calls get()`
-- c0136 ..> c0133: `type in findAttachments`
-- c0136 ..> c0133: `type in formatExpansion`
-- c0136 ..> c0134: `type in collectEntityMemories`
-- c0136 ..> c0134: `type in expand`
-- c0136 ..> c0134: `type in findAttachments`
-- c0136 ..> c0134: `type in findEntities`
-- c0136 ..> c0134: `type in findEntityMemories`
-- c0136 ..> c0134: `type in findRelationships`
-- c0136 ..> c0134: `type in formatRelationships`
-- c0136 ..> c0134: `type in isAllowedEntityMemory`
-- c0136 ..> c0135: `type in emptyExpansion`
-- c0136 ..> c0135: `type in expand`
-- c0136 ..> c0135: `type in formatExpansion`
-- c0136 ..> c0136: `collectEntityMemories() calls isAllowedEntityMemory()`
-- c0136 ..> c0136: `expand() calls emptyExpansion()`
-- c0136 ..> c0136: `expand() calls findAttachments()`
-- c0136 ..> c0136: `expand() calls findEntities()`
-- c0136 ..> c0136: `expand() calls findEntityMemories()`
-- c0136 ..> c0136: `expand() calls findRelationships()`
-- c0136 ..> c0136: `expand() calls formatExpansion()`
-- c0136 ..> c0136: `findEntityMemories() calls collectEntityMemories()`
-- c0136 ..> c0136: `findRelationships() calls collectRelationships()`
-- c0136 ..> c0136: `findRelationships() calls formatRelationships()`
-- c0136 ..> c0136: `findRelationships() calls resolveRelationshipEndpoints()`
-- c0136 ..> c0136: `formatExpansion() calls appendArtifactLines()`
-- c0136 ..> c0136: `formatExpansion() calls appendDocumentLines()`
-- c0136 ..> c0136: `formatExpansion() calls appendEntityLines()`
-- c0136 ..> c0136: `formatExpansion() calls appendFileLines()`
-- c0136 ..> c0136: `formatExpansion() calls appendLinkedMemoryLines()`
-- c0136 ..> c0136: `formatExpansion() calls appendRelationshipLines()`
-- c0136 ..> c0137: `type in constructor`
-- c0136 ..> c0138: `type in appendLinkedMemoryLines`
-- c0136 ..> c0138: `type in collectEntityMemories`
-- c0136 ..> c0138: `type in findEntityMemories`
-- c0136 ..> c0138: `type in formatExpansion`
-- c0136 --> c0139: `field readMemory`
-- c0136 ..> c0139: `type in constructor`
-- c0136 ..> c0140: `type in appendRelationshipLines`
-- c0136 ..> c0140: `type in findRelationships`
-- c0136 ..> c0140: `type in formatExpansion`
-- c0136 ..> c0140: `type in formatRelationships`
-- c0136 ..> c0141: `appendArtifactLines() calls clean()`
-- c0136 ..> c0141: `appendDocumentLines() calls clean()`
-- c0136 ..> c0141: `appendEntityLines() calls clean()`
-- c0136 ..> c0141: `appendFileLines() calls clean()`
-- c0136 ..> c0141: `appendLinkedMemoryLines() calls clean()`
-- c0136 ..> c0141: `appendRelationshipLines() calls clean()`
-- c0136 ..> c0141: `collectEntityMemories() calls validId()`
-- c0136 ..> c0141: `collectRelationships() calls safeCall()`
-- c0136 ..> c0141: `collectRelationships() calls validRelationship()`
-- c0136 ..> c0141: `findAttachments() calls inProjectScope()`
-- c0136 ..> c0141: `findAttachments() calls safeCall()`
-- c0136 ..> c0141: `findAttachments() calls validId()`
-- c0136 ..> c0141: `findEntities() calls inEntityScope()`
-- c0136 ..> c0141: `findEntities() calls safeCall()`
-- c0136 ..> c0141: `findEntities() calls validEntity()`
-- c0136 ..> c0141: `findEntityMemories() calls safeCall()`
-- c0136 ..> c0141: `formatRelationships() calls inEntityScope()`
-- c0136 ..> c0141: `isAllowedEntityMemory() calls safeCall()`
-- c0136 ..> c0141: `isAllowedEntityMemory() calls validMemory()`
-- c0136 ..> c0141: `resolveRelationshipEndpoints() calls safeCall()`
-- c0136 ..> c0141: `resolveRelationshipEndpoints() calls validEntity()`
-- c0136 ..> c0218: `findEntities() calls trim()`
-- c0137 --> c0139: `field readMemory`
-- c0138 --> c0072: `field entity`
-- c0140 --> c0072: `field source`
-- c0140 --> c0072: `field target`
-- c0140 --> c0074: `field relationship`
-- c0141 ..> c0072: `type in inEntityScope`
-- c0141 ..> c0072: `type in validEntity`
-- c0141 ..> c0074: `type in validRelationship`
-- c0141 ..> c0082: `type in validMemory`
-- c0141 ..> c0094: `type in inEntityScope`
-- c0141 ..> c0094: `type in inProjectScope`
-- c0141 ..> c0141: `inEntityScope() calls validId()`
-- c0141 ..> c0141: `inProjectScope() calls validId()`
-- c0141 ..> c0141: `validEntity() calls validId()`
-- c0141 ..> c0141: `validMemory() calls validId()`
-- c0141 ..> c0141: `validRelationship() calls validId()`
-- c0141 ..> c0186: `clean() calls sanitizeText()`
-- c0141 ..> c0218: `validRelationship() calls trim()`
-- c0142 --> c0079: `field client`
-- c0142 --> c0080: `field knowledge`
-- c0142 --> c0143: `field request`
-- c0142 --> c0144: `field context`
-- c0144 --> c0094: `field scope`
-- c0145 --> c0096: `field file`
-- c0145 --> c0149: `field content`
-- c0145 --> c0150: `field content`
-- c0146 --> c0079: `field client`
-- c0146 --> c0080: `field knowledge`
-- c0146 --> c0144: `field context`
-- c0146 --> c0147: `field request`
-- c0151 ..> c0065: `type in page`
-- c0151 ..> c0069: `type in page`
-- c0151 ..> c0072: `type in assertReadEntity`
-- c0151 ..> c0072: `type in entityInProject`
-- c0151 ..> c0072: `type in hydrateEntities`
-- c0151 ..> c0072: `type in inEntityProject`
-- c0151 ..> c0076: `type in isEntityType`
-- c0151 ..> c0079: `type in assertReadMemory`
-- c0151 ..> c0079: `type in createMemory`
-- c0151 ..> c0079: `type in executeKnowledgeRead`
-- c0151 ..> c0079: `type in executeKnowledgeWrite`
-- c0151 ..> c0079: `type in memoryInProject`
-- c0151 ..> c0079: `type in resolveWriteProject`
-- c0151 ..> c0079: `type in rich`
-- c0151 ..> c0080: `type in assertReadEntity`
-- c0151 ..> c0080: `type in createCodeArtifact`
-- c0151 ..> c0080: `type in createDocument`
-- c0151 ..> c0080: `type in createEntity`
-- c0151 ..> c0080: `type in entityInProject`
-- c0151 ..> c0080: `type in hydrateEntities`
-- c0151 ..> c0080: `type in requireReadKnowledge`
-- c0151 ..> c0080: `type in rich`
-- c0151 ..> c0080: `type in validateAttachments`
-- c0151 ..> c0082: `type in assertReadMemory`
-- c0151 ..> c0082: `type in inMemoryProject`
-- c0151 ..> c0082: `type in memoryInProject`
-- c0151 ..> c0082: `type in replacementMemory`
-- c0151 ..> c0093: `type in updateProvenance`
-- c0151 ..> c0096: `type in fileContent`
-- c0151 ..> c0123: `assertReadEntity() calls getEntity()`
-- c0151 ..> c0123: `createCodeArtifact() calls createCodeArtifact()`
-- c0151 ..> c0123: `createDocument() calls createDocument()`
-- c0151 ..> c0123: `createEntity() calls createEntity()`
-- c0151 ..> c0123: `createRelationship() calls createRelationship()`
-- c0151 ..> c0123: `entityInProject() calls getEntity()`
-- c0151 ..> c0123: `hydrateEntities() calls getEntity()`
-- c0151 ..> c0123: `linkEntityMemory() calls linkEntityMemory()`
-- c0151 ..> c0123: `linkMemories() calls linkMemories()`
-- c0151 ..> c0123: `readCodeArtifact() calls getCodeArtifact()`
-- c0151 ..> c0123: `readCodeArtifacts() calls listCodeArtifacts()`
-- c0151 ..> c0123: `readDocument() calls getDocument()`
-- c0151 ..> c0123: `readDocuments() calls listDocuments()`
-- c0151 ..> c0123: `readEntities() calls searchEntities()`
-- c0151 ..> c0123: `readEntityMemories() calls getEntityMemories()`
-- c0151 ..> c0123: `readFile() calls getFile()`
-- c0151 ..> c0123: `readFiles() calls listFiles()`
-- c0151 ..> c0123: `readRelationships() calls getEntity()`
-- c0151 ..> c0123: `readRelationships() calls getRelationships()`
-- c0151 ..> c0123: `updateCodeArtifact() calls getCodeArtifact()`
-- c0151 ..> c0123: `updateCodeArtifact() calls updateCodeArtifact()`
-- c0151 ..> c0123: `updateDocument() calls getDocument()`
-- c0151 ..> c0123: `updateDocument() calls updateDocument()`
-- c0151 ..> c0123: `updateEntity() calls updateEntity()`
-- c0151 ..> c0123: `updateMemory() calls updateMemory()`
-- c0151 ..> c0123: `validateAttachments() calls getCodeArtifact()`
-- c0151 ..> c0123: `validateAttachments() calls getDocument()`
-- c0151 ..> c0123: `validateAttachments() calls getFile()`
-- c0151 ..> c0126: `assertReadMemory() calls get()`
-- c0151 ..> c0126: `createMemory() calls create()`
-- c0151 ..> c0126: `memoryInProject() calls get()`
-- c0151 ..> c0126: `readEntityMemories() calls get()`
-- c0151 ..> c0126: `readMemories() calls queryMemory()`
-- c0151 ..> c0126: `readProjects() calls listProjects()`
-- c0151 ..> c0126: `replacementMemory() calls create()`
-- c0151 ..> c0126: `replacementMemory() calls get()`
-- c0151 ..> c0126: `resolveWriteProject() calls listProjects()`
-- c0151 ..> c0126: `supersedeMemory() calls supersede()`
-- c0151 ..> c0142: `type in readCodeArtifact`
-- c0151 ..> c0142: `type in readCodeArtifacts`
-- c0151 ..> c0142: `type in readDocument`
-- c0151 ..> c0142: `type in readDocuments`
-- c0151 ..> c0142: `type in readEntities`
-- c0151 ..> c0142: `type in readEntity`
-- c0151 ..> c0142: `type in readEntityMemories`
-- c0151 ..> c0142: `type in readFile`
-- c0151 ..> c0142: `type in readFiles`
-- c0151 ..> c0142: `type in readMemories`
-- c0151 ..> c0142: `type in readMemory`
-- c0151 ..> c0142: `type in readProjects`
-- c0151 ..> c0142: `type in readRelationships`
-- c0151 ..> c0142: `type in requestedReadProject`
-- c0151 ..> c0142: `type in requireReadKnowledge`
-- c0151 ..> c0143: `type in executeKnowledgeRead`
-- c0151 ..> c0143: `type in validateKnowledgeReadRequest`
-- c0151 ..> c0144: `type in assertReadEntity`
-- c0151 ..> c0144: `type in assertReadMemory`
-- c0151 ..> c0144: `type in createCodeArtifact`
-- c0151 ..> c0144: `type in createDocument`
-- c0151 ..> c0144: `type in createEntity`
-- c0151 ..> c0144: `type in createMemory`
-- c0151 ..> c0144: `type in currentProject`
-- c0151 ..> c0144: `type in effectiveCommit`
-- c0151 ..> c0144: `type in executeKnowledgeRead`
-- c0151 ..> c0144: `type in executeKnowledgeWrite`
-- c0151 ..> c0144: `type in provenance`
-- c0151 ..> c0144: `type in resolveWriteProject`
-- c0151 ..> c0144: `type in updateProvenance`
-- c0151 ..> c0145: `type in createCodeArtifact`
-- c0151 ..> c0145: `type in createDocument`
-- c0151 ..> c0145: `type in createEntity`
-- c0151 ..> c0145: `type in createMemory`
-- c0151 ..> c0145: `type in createRelationship`
-- c0151 ..> c0145: `type in executeKnowledgeRead`
-- c0151 ..> c0145: `type in executeKnowledgeWrite`
-- c0151 ..> c0145: `type in linkEntityMemory`
-- c0151 ..> c0145: `type in linkMemories`
-- c0151 ..> c0145: `type in readCodeArtifact`
-- c0151 ..> c0145: `type in readCodeArtifacts`
-- c0151 ..> c0145: `type in readDocument`
-- c0151 ..> c0145: `type in readDocuments`
-- c0151 ..> c0145: `type in readEntities`
-- c0151 ..> c0145: `type in readEntity`
-- c0151 ..> c0145: `type in readEntityMemories`
-- c0151 ..> c0145: `type in readFile`
-- c0151 ..> c0145: `type in readFiles`
-- c0151 ..> c0145: `type in readMemories`
-- c0151 ..> c0145: `type in readMemory`
-- c0151 ..> c0145: `type in readProjects`
-- c0151 ..> c0145: `type in readRelationships`
-- c0151 ..> c0145: `type in readResult`
-- c0151 ..> c0145: `type in supersedeMemory`
-- c0151 ..> c0145: `type in updateCodeArtifact`
-- c0151 ..> c0145: `type in updateDocument`
-- c0151 ..> c0145: `type in updateEntity`
-- c0151 ..> c0145: `type in updateMemory`
-- c0151 ..> c0145: `type in writeResult`
-- c0151 ..> c0146: `type in createRelationship`
-- c0151 ..> c0146: `type in linkEntityMemory`
-- c0151 ..> c0146: `type in linkMemories`
-- c0151 ..> c0146: `type in replacementMemory`
-- c0151 ..> c0146: `type in supersedeMemory`
-- c0151 ..> c0146: `type in updateCodeArtifact`
-- c0151 ..> c0146: `type in updateDocument`
-- c0151 ..> c0146: `type in updateEntity`
-- c0151 ..> c0146: `type in updateMemory`
-- c0151 ..> c0147: `type in executeKnowledgeWrite`
-- c0151 ..> c0147: `type in validateKnowledgeWriteRequest`
-- c0151 ..> c0148: `type in resolveWriteProject`
-- c0151 ..> c0149: `type in fileContent`
-- c0151 ..> c0150: `type in fileContent`
-- c0151 ..> c0151: `assertReadEntity() calls currentProject()`
-- c0151 ..> c0151: `assertReadEntity() calls inEntityProject()`
-- c0151 ..> c0151: `assertReadMemory() calls currentProject()`
-- c0151 ..> c0151: `assertReadMemory() calls inMemoryProject()`
-- c0151 ..> c0151: `boundedId() calls optionalId()`
-- c0151 ..> c0151: `boundedListPage() calls compactWriteValue()`
-- c0151 ..> c0151: `boundedListPage() calls json()`
-- c0151 ..> c0151: `boundedListPage() calls listPage()`
-- c0151 ..> c0151: `commit() calls optionalText()`
-- c0151 ..> c0151: `compactObjectEntry() calls compactWriteValue()`
-- c0151 ..> c0151: `compactWriteValue() calls compactObjectEntry()`
-- c0151 ..> c0151: `compactWriteValue() calls compactString()`
-- c0151 ..> c0151: `createCodeArtifact() calls beforeMutation()`
-- c0151 ..> c0151: `createCodeArtifact() calls provenance()`
-- c0151 ..> c0151: `createCodeArtifact() calls writeResult()`
-- c0151 ..> c0151: `createDocument() calls beforeMutation()`
-- c0151 ..> c0151: `createDocument() calls provenance()`
-- c0151 ..> c0151: `createDocument() calls writeResult()`
-- c0151 ..> c0151: `createEntity() calls beforeMutation()`
-- c0151 ..> c0151: `createEntity() calls provenance()`
-- c0151 ..> c0151: `createEntity() calls writeResult()`
-- c0151 ..> c0151: `createMemory() calls beforeMutation()`
-- c0151 ..> c0151: `createMemory() calls provenance()`
-- c0151 ..> c0151: `createMemory() calls rich()`
-- c0151 ..> c0151: `createMemory() calls validateAttachments()`
-- c0151 ..> c0151: `createMemory() calls writeResult()`
-- c0151 ..> c0151: `createRelationship() calls beforeMutation()`
-- c0151 ..> c0151: `createRelationship() calls entityInProject()`
-- c0151 ..> c0151: `createRelationship() calls provenance()`
-- c0151 ..> c0151: `createRelationship() calls writeResult()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls currentProject()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readCodeArtifact()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readCodeArtifacts()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readDocument()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readDocuments()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readEntities()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readEntity()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readEntityMemories()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readFile()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readFiles()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readMemories()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readMemory()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readProjects()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls readRelationships()`
-- c0151 ..> c0151: `executeKnowledgeRead() calls validateKnowledgeReadRequest()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls createCodeArtifact()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls createDocument()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls createEntity()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls createMemory()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls createRelationship()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls effectiveCommit()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls linkEntityMemory()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls linkMemories()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls rejectSensitiveInput()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls resolveWriteProject()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls rich()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls supersedeMemory()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls updateCodeArtifact()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls updateDocument()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls updateEntity()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls updateMemory()`
-- c0151 ..> c0151: `executeKnowledgeWrite() calls validateKnowledgeWriteRequest()`
-- c0151 ..> c0151: `fileContent() calls json()`
-- c0151 ..> c0151: `linkEntityMemory() calls beforeMutation()`
-- c0151 ..> c0151: `linkEntityMemory() calls entityInProject()`
-- c0151 ..> c0151: `linkEntityMemory() calls memoryInProject()`
-- c0151 ..> c0151: `linkEntityMemory() calls writeResult()`
-- c0151 ..> c0151: `linkMemories() calls beforeMutation()`
-- c0151 ..> c0151: `linkMemories() calls memoryInProject()`
-- c0151 ..> c0151: `linkMemories() calls writeResult()`
-- c0151 ..> c0151: `need() calls requiredText()`
-- c0151 ..> c0151: `optionalId() calls requiredId()`
-- c0151 ..> c0151: `optionalIds() calls requiredIds()`
-- c0151 ..> c0151: `optionalStrings() calls requiredStrings()`
-- c0151 ..> c0151: `optionalText() calls requiredText()`
-- c0151 ..> c0151: `provenance() calls effectiveCommit()`
-- c0151 ..> c0151: `readCodeArtifact() calls page()`
-- c0151 ..> c0151: `readCodeArtifact() calls readResult()`
-- c0151 ..> c0151: `readCodeArtifact() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readCodeArtifacts() calls boundedListPage()`
-- c0151 ..> c0151: `readCodeArtifacts() calls readResult()`
-- c0151 ..> c0151: `readCodeArtifacts() calls requestedReadProject()`
-- c0151 ..> c0151: `readCodeArtifacts() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readDocument() calls page()`
-- c0151 ..> c0151: `readDocument() calls readResult()`
-- c0151 ..> c0151: `readDocument() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readDocuments() calls boundedListPage()`
-- c0151 ..> c0151: `readDocuments() calls readResult()`
-- c0151 ..> c0151: `readDocuments() calls requestedReadProject()`
-- c0151 ..> c0151: `readDocuments() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readEntities() calls boundedListPage()`
-- c0151 ..> c0151: `readEntities() calls hydrateEntities()`
-- c0151 ..> c0151: `readEntities() calls inEntityProject()`
-- c0151 ..> c0151: `readEntities() calls readResult()`
-- c0151 ..> c0151: `readEntities() calls requestedReadProject()`
-- c0151 ..> c0151: `readEntities() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readEntity() calls assertReadEntity()`
-- c0151 ..> c0151: `readEntity() calls readResult()`
-- c0151 ..> c0151: `readEntity() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readEntityMemories() calls assertReadEntity()`
-- c0151 ..> c0151: `readEntityMemories() calls compactWriteValue()`
-- c0151 ..> c0151: `readEntityMemories() calls inMemoryProject()`
-- c0151 ..> c0151: `readEntityMemories() calls listPage()`
-- c0151 ..> c0151: `readEntityMemories() calls readResult()`
-- c0151 ..> c0151: `readEntityMemories() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readFile() calls fileContent()`
-- c0151 ..> c0151: `readFile() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readFiles() calls boundedListPage()`
-- c0151 ..> c0151: `readFiles() calls readResult()`
-- c0151 ..> c0151: `readFiles() calls requestedReadProject()`
-- c0151 ..> c0151: `readFiles() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readMemories() calls inMemoryProject()`
-- c0151 ..> c0151: `readMemories() calls readResult()`
-- c0151 ..> c0151: `readMemories() calls requestedReadProject()`
-- c0151 ..> c0151: `readMemory() calls assertReadMemory()`
-- c0151 ..> c0151: `readMemory() calls readResult()`
-- c0151 ..> c0151: `readProjects() calls boundedListPage()`
-- c0151 ..> c0151: `readProjects() calls readResult()`
-- c0151 ..> c0151: `readRelationships() calls assertReadEntity()`
-- c0151 ..> c0151: `readRelationships() calls inEntityProject()`
-- c0151 ..> c0151: `readRelationships() calls listPage()`
-- c0151 ..> c0151: `readRelationships() calls readResult()`
-- c0151 ..> c0151: `readRelationships() calls requireReadKnowledge()`
-- c0151 ..> c0151: `readResult() calls json()`
-- c0151 ..> c0151: `rejectSensitiveInput() calls containsSensitiveData()`
-- c0151 ..> c0151: `replacementMemory() calls beforeMutation()`
-- c0151 ..> c0151: `replacementMemory() calls memoryInProject()`
-- c0151 ..> c0151: `replacementMemory() calls provenance()`
-- c0151 ..> c0151: `replacementMemory() calls validateAttachments()`
-- c0151 ..> c0151: `requestedReadProject() calls currentProject()`
-- c0151 ..> c0151: `requiredIds() calls requiredId()`
-- c0151 ..> c0151: `requiredStrings() calls requiredText()`
-- c0151 ..> c0151: `resolveWriteProject() calls currentProject()`
-- c0151 ..> c0151: `supersedeMemory() calls beforeMutation()`
-- c0151 ..> c0151: `supersedeMemory() calls memoryInProject()`
-- c0151 ..> c0151: `supersedeMemory() calls replacementMemory()`
-- c0151 ..> c0151: `supersedeMemory() calls writeResult()`
-- c0151 ..> c0151: `updateCodeArtifact() calls beforeMutation()`
-- c0151 ..> c0151: `updateCodeArtifact() calls updateProvenance()`
-- c0151 ..> c0151: `updateCodeArtifact() calls writeResult()`
-- c0151 ..> c0151: `updateDocument() calls beforeMutation()`
-- c0151 ..> c0151: `updateDocument() calls updateProvenance()`
-- c0151 ..> c0151: `updateDocument() calls writeResult()`
-- c0151 ..> c0151: `updateEntity() calls beforeMutation()`
-- c0151 ..> c0151: `updateEntity() calls entityInProject()`
-- c0151 ..> c0151: `updateEntity() calls updateProvenance()`
-- c0151 ..> c0151: `updateEntity() calls writeResult()`
-- c0151 ..> c0151: `updateMemory() calls beforeMutation()`
-- c0151 ..> c0151: `updateMemory() calls memoryInProject()`
-- c0151 ..> c0151: `updateMemory() calls updateProvenance()`
-- c0151 ..> c0151: `updateMemory() calls validateAttachments()`
-- c0151 ..> c0151: `updateMemory() calls writeResult()`
-- c0151 ..> c0151: `updateProvenance() calls effectiveCommit()`
-- c0151 ..> c0151: `validateEntityFields() calls isEntityType()`
-- c0151 ..> c0151: `validateEntityFields() calls optionalText()`
-- c0151 ..> c0151: `validateKnowledgeReadRequest() calls checkOperation()`
-- c0151 ..> c0151: `validateKnowledgeReadRequest() calls record()`
-- c0151 ..> c0151: `validateKnowledgeReadRequest() calls validateReadIdentity()`
-- c0151 ..> c0151: `validateKnowledgeReadRequest() calls validateReadPagination()`
-- c0151 ..> c0151: `validateKnowledgeReadRequest() calls validateReadSearch()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls checkOperation()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls commit()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls need()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls optionalId()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls optionalIds()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls optionalImportance()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls optionalStrings()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls optionalText()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls record()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls requiredId()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls requiredIds()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls requiredStrings()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls requiredText()`
-- c0151 ..> c0151: `validateKnowledgeWriteRequest() calls validateEntityFields()`
-- c0151 ..> c0151: `validateReadIdentity() calls optionalId()`
-- c0151 ..> c0151: `validateReadIdentity() calls optionalText()`
-- c0151 ..> c0151: `validateReadIdentity() calls requiredId()`
-- c0151 ..> c0151: `validateReadPagination() calls boundedId()`
-- c0151 ..> c0151: `validateReadSearch() calls boundedId()`
-- c0151 ..> c0151: `validateReadSearch() calls boundedNonNegativeInteger()`
-- c0151 ..> c0151: `validateReadSearch() calls optionalId()`
-- c0151 ..> c0151: `validateReadSearch() calls requiredText()`
-- c0151 ..> c0151: `writeResult() calls compactWriteValue()`
-- c0151 ..> c0151: `writeResult() calls json()`
-- c0151 ..> c0172: `replacementMemory() calls replacementMemoryContext()`
-- c0151 ..> c0186: `containsSensitiveData() calls hasSensitiveData()`
-- c0151 ..> c0218: `requiredText() calls trim()`
-- c0151 ..> c0218: `resolveWriteProject() calls trim()`
-- c0153 --> c0066: `field input`
-- c0154 --> c0070: `field input`
-- c0156 --> c0073: `field input`
-- c0158 --> c0075: `field input`
-- c0161 --> c0153: `field codeArtifacts`
-- c0161 --> c0154: `field documents`
-- c0161 --> c0155: `field entityMemoryLinks`
-- c0161 --> c0156: `field entities`
-- c0161 --> c0158: `field relationships`
-- c0164 --> c0162: `field codeArtifacts`
-- c0164 --> c0162: `field documents`
-- c0164 --> c0162: `field entities`
-- c0164 --> c0162: `field relationships`
-- c0165 ..> c0065: `type in codeArtifactInProject`
-- c0165 ..> c0065: `type in writeCodeArtifact`
-- c0165 ..> c0069: `type in documentInProject`
-- c0165 ..> c0069: `type in writeDocument`
-- c0165 ..> c0072: `type in entityInProject`
-- c0165 ..> c0072: `type in writeEntity`
-- c0165 ..> c0074: `type in writeRelationship`
-- c0165 ..> c0082: `type in attachmentIds`
-- c0165 ..> c0082: `type in attachmentsDiffer`
-- c0165 ..> c0082: `type in currentMemory`
-- c0165 ..> c0082: `type in ensureMemoryCanReceiveAttachments`
-- c0165 ..> c0123: `codeArtifactInProject() calls getCodeArtifact()`
-- c0165 ..> c0123: `documentInProject() calls getDocument()`
-- c0165 ..> c0123: `entityInProject() calls getEntity()`
-- c0165 ..> c0123: `writeAttachments() calls updateMemory()`
-- c0165 ..> c0123: `writeCodeArtifact() calls createCodeArtifact()`
-- c0165 ..> c0123: `writeDocument() calls createDocument()`
-- c0165 ..> c0123: `writeEntity() calls createEntity()`
-- c0165 ..> c0123: `writeEntityMemoryLink() calls linkEntityMemory()`
-- c0165 ..> c0123: `writeLinkedMemory() calls linkMemories()`
-- c0165 ..> c0123: `writeRelationship() calls createRelationship()`
-- c0165 ..> c0123: `writeRelationship() calls getRelationships()`
-- c0165 ..> c0126: `createOnce() calls create()`
-- c0165 ..> c0136: `currentMemory() calls readMemory()`
-- c0165 ..> c0136: `writeLinkedMemory() calls readMemory()`
-- c0165 ..> c0152: `type in attachmentIds`
-- c0165 ..> c0152: `type in attachmentPatch`
-- c0165 ..> c0152: `type in attachmentsDiffer`
-- c0165 ..> c0152: `type in requestedAttachmentIds`
-- c0165 ..> c0153: `type in writeCodeArtifact`
-- c0165 ..> c0154: `type in writeDocument`
-- c0165 ..> c0155: `type in writeEntityMemoryLink`
-- c0165 ..> c0156: `type in writeEntity`
-- c0165 --> c0157: `field readMemory`
-- c0165 ..> c0157: `type in constructor`
-- c0165 ..> c0158: `type in writeRelationship`
-- c0165 ..> c0159: `type in execute`
-- c0165 ..> c0160: `type in createOnce`
-- c0165 ..> c0160: `type in execute`
-- c0165 ..> c0160: `type in writeAttachments`
-- c0165 ..> c0160: `type in writeCodeArtifact`
-- c0165 ..> c0160: `type in writeCodeArtifacts`
-- c0165 ..> c0160: `type in writeDocument`
-- c0165 ..> c0160: `type in writeDocuments`
-- c0165 ..> c0160: `type in writeEntities`
-- c0165 ..> c0160: `type in writeEntity`
-- c0165 ..> c0160: `type in writeEntityMemoryLink`
-- c0165 ..> c0160: `type in writeEntityMemoryLinks`
-- c0165 ..> c0160: `type in writeLinkedMemories`
-- c0165 ..> c0160: `type in writeLinkedMemory`
-- c0165 ..> c0160: `type in writeRelationship`
-- c0165 ..> c0160: `type in writeRelationships`
-- c0165 ..> c0161: `type in createOnce`
-- c0165 ..> c0161: `type in currentMemory`
-- c0165 ..> c0161: `type in execute`
-- c0165 ..> c0161: `type in requestedAttachmentIds`
-- c0165 ..> c0161: `type in validatePlan`
-- c0165 ..> c0161: `type in writeAttachments`
-- c0165 ..> c0161: `type in writeCodeArtifact`
-- c0165 ..> c0161: `type in writeCodeArtifacts`
-- c0165 ..> c0161: `type in writeDocument`
-- c0165 ..> c0161: `type in writeDocuments`
-- c0165 ..> c0161: `type in writeEntities`
-- c0165 ..> c0161: `type in writeEntity`
-- c0165 ..> c0161: `type in writeEntityMemoryLink`
-- c0165 ..> c0161: `type in writeEntityMemoryLinks`
-- c0165 ..> c0161: `type in writeLinkedMemories`
-- c0165 ..> c0161: `type in writeLinkedMemory`
-- c0165 ..> c0161: `type in writeRelationship`
-- c0165 ..> c0161: `type in writeRelationships`
-- c0165 ..> c0163: `type in createOnce`
-- c0165 ..> c0163: `type in writeAttachments`
-- c0165 ..> c0163: `type in writeCodeArtifact`
-- c0165 ..> c0163: `type in writeCodeArtifacts`
-- c0165 ..> c0163: `type in writeDocument`
-- c0165 ..> c0163: `type in writeDocuments`
-- c0165 ..> c0163: `type in writeEntities`
-- c0165 ..> c0163: `type in writeEntity`
-- c0165 ..> c0163: `type in writeEntityMemoryLink`
-- c0165 ..> c0163: `type in writeEntityMemoryLinks`
-- c0165 ..> c0163: `type in writeLinkedMemories`
-- c0165 ..> c0163: `type in writeLinkedMemory`
-- c0165 ..> c0163: `type in writeRelationship`
-- c0165 ..> c0163: `type in writeRelationships`
-- c0165 ..> c0164: `type in createOnce`
-- c0165 ..> c0164: `type in execute`
-- c0165 ..> c0164: `type in requestedAttachmentIds`
-- c0165 ..> c0164: `type in writeAttachments`
-- c0165 ..> c0164: `type in writeCodeArtifact`
-- c0165 ..> c0164: `type in writeCodeArtifacts`
-- c0165 ..> c0164: `type in writeDocument`
-- c0165 ..> c0164: `type in writeDocuments`
-- c0165 ..> c0164: `type in writeEntities`
-- c0165 ..> c0164: `type in writeEntity`
-- c0165 ..> c0164: `type in writeEntityMemoryLink`
-- c0165 ..> c0164: `type in writeEntityMemoryLinks`
-- c0165 ..> c0164: `type in writeLinkedMemories`
-- c0165 ..> c0164: `type in writeLinkedMemory`
-- c0165 ..> c0164: `type in writeRelationship`
-- c0165 ..> c0164: `type in writeRelationships`
-- c0165 ..> c0165: `createOnce() calls currentMemory()`
-- c0165 ..> c0165: `execute() calls currentMemory()`
-- c0165 ..> c0165: `execute() calls validatePlan()`
-- c0165 ..> c0165: `execute() calls writeAttachments()`
-- c0165 ..> c0165: `execute() calls writeCodeArtifacts()`
-- c0165 ..> c0165: `execute() calls writeDocuments()`
-- c0165 ..> c0165: `execute() calls writeEntities()`
-- c0165 ..> c0165: `execute() calls writeEntityMemoryLinks()`
-- c0165 ..> c0165: `execute() calls writeLinkedMemories()`
-- c0165 ..> c0165: `execute() calls writeRelationships()`
-- c0165 ..> c0165: `validateAttachments() calls codeArtifactInProject()`
-- c0165 ..> c0165: `validateAttachments() calls documentInProject()`
-- c0165 ..> c0165: `validatePlan() calls validateResourceKeys()`
-- c0165 ..> c0165: `writeAttachments() calls attachmentIds()`
-- c0165 ..> c0165: `writeAttachments() calls attachmentPatch()`
-- c0165 ..> c0165: `writeAttachments() calls attachmentsDiffer()`
-- c0165 ..> c0165: `writeAttachments() calls currentMemory()`
-- c0165 ..> c0165: `writeAttachments() calls ensureMemoryCanReceiveAttachments()`
-- c0165 ..> c0165: `writeAttachments() calls requestedAttachmentIds()`
-- c0165 ..> c0165: `writeAttachments() calls validateAttachments()`
-- c0165 ..> c0165: `writeCodeArtifact() calls codeArtifactInProject()`
-- c0165 ..> c0165: `writeCodeArtifact() calls createOnce()`
-- c0165 ..> c0165: `writeCodeArtifact() calls currentMemory()`
-- c0165 ..> c0165: `writeCodeArtifacts() calls writeCodeArtifact()`
-- c0165 ..> c0165: `writeDocument() calls createOnce()`
-- c0165 ..> c0165: `writeDocument() calls currentMemory()`
-- c0165 ..> c0165: `writeDocument() calls documentInProject()`
-- c0165 ..> c0165: `writeDocuments() calls writeDocument()`
-- c0165 ..> c0165: `writeEntities() calls writeEntity()`
-- c0165 ..> c0165: `writeEntity() calls createOnce()`
-- c0165 ..> c0165: `writeEntity() calls currentMemory()`
-- c0165 ..> c0165: `writeEntity() calls entityInProject()`
-- c0165 ..> c0165: `writeEntityMemoryLink() calls currentMemory()`
-- c0165 ..> c0165: `writeEntityMemoryLink() calls entityInProject()`
-- c0165 ..> c0165: `writeEntityMemoryLinks() calls writeEntityMemoryLink()`
-- c0165 ..> c0165: `writeLinkedMemories() calls writeLinkedMemory()`
-- c0165 ..> c0165: `writeLinkedMemory() calls currentMemory()`
-- c0165 ..> c0165: `writeRelationship() calls createOnce()`
-- c0165 ..> c0165: `writeRelationship() calls currentMemory()`
-- c0165 ..> c0165: `writeRelationships() calls writeRelationship()`
-- c0165 --> c0166: `field client`
-- c0165 ..> c0166: `type in constructor`
-- c0165 ..> c0167: `attachmentIds() calls uniqueIds()`
-- c0165 ..> c0167: `attachmentsDiffer() calls sameIds()`
-- c0165 ..> c0167: `createOnce() calls positiveId()`
-- c0165 ..> c0167: `execute() calls copyState()`
-- c0165 ..> c0167: `execute() calls instructionId()`
-- c0165 ..> c0167: `execute() calls normalizedState()`
-- c0165 ..> c0167: `requestedAttachmentIds() calls selectedIds()`
-- c0165 ..> c0167: `requestedAttachmentIds() calls uniqueIds()`
-- c0165 ..> c0167: `validatePlan() calls positiveId()`
-- c0165 ..> c0167: `writeCodeArtifact() calls positiveId()`
-- c0165 ..> c0167: `writeCodeArtifacts() calls positiveId()`
-- c0165 ..> c0167: `writeCodeArtifacts() calls stateId()`
-- c0165 ..> c0167: `writeCodeArtifacts() calls stateWithNumber()`
-- c0165 ..> c0167: `writeDocument() calls positiveId()`
-- c0165 ..> c0167: `writeDocuments() calls positiveId()`
-- c0165 ..> c0167: `writeDocuments() calls stateId()`
-- c0165 ..> c0167: `writeDocuments() calls stateWithNumber()`
-- c0165 ..> c0167: `writeEntities() calls positiveId()`
-- c0165 ..> c0167: `writeEntities() calls stateId()`
-- c0165 ..> c0167: `writeEntities() calls stateWithNumber()`
-- c0165 ..> c0167: `writeEntity() calls positiveId()`
-- c0165 ..> c0167: `writeEntityMemoryLink() calls hasValue()`
-- c0165 ..> c0167: `writeEntityMemoryLink() calls positiveId()`
-- c0165 ..> c0167: `writeEntityMemoryLink() calls stateId()`
-- c0165 ..> c0167: `writeLinkedMemory() calls hasValue()`
-- c0165 ..> c0167: `writeLinkedMemory() calls positiveId()`
-- c0165 ..> c0167: `writeRelationship() calls positiveId()`
-- c0165 ..> c0167: `writeRelationship() calls stateId()`
-- c0165 ..> c0167: `writeRelationships() calls positiveId()`
-- c0165 ..> c0167: `writeRelationships() calls stateId()`
-- c0165 ..> c0167: `writeRelationships() calls stateWithNumber()`
-- c0165 ..> c0218: `validatePlan() calls trim()`
-- c0167 ..> c0161: `type in instructionId`
-- c0167 ..> c0162: `type in receipts`
-- c0167 ..> c0162: `type in selectedIds`
-- c0167 ..> c0162: `type in stateId`
-- c0167 ..> c0162: `type in stateWithNumber`
-- c0167 ..> c0164: `type in copyState`
-- c0167 ..> c0164: `type in normalizedState`
-- c0167 ..> c0167: `normalizedState() calls receipts()`
-- c0167 ..> c0167: `receipts() calls positiveId()`
-- c0167 ..> c0167: `selectedIds() calls positiveId()`
-- c0167 ..> c0167: `selectedIds() calls stateId()`
-- c0167 ..> c0167: `stateWithNumber() calls positiveId()`
-- c0167 ..> c0167: `uniqueIds() calls positiveId()`
-- c0170 ..> c0040: `flush() calls resolve()`
-- c0170 ..|> c0168: `implements`
-- c0170 --> c0169: `field level`
-- c0170 --> c0169: `field options`
-- c0170 ..> c0169: `type in constructor`
-- c0170 ..> c0169: `type in setLevel`
-- c0170 ..> c0170: `close() calls flush()`
-- c0170 ..> c0170: `emit() calls enqueue()`
-- c0170 ..> c0170: `emit() calls warn()`
-- c0170 ..> c0170: `enqueue() calls rotate()`
-- c0170 ..> c0170: `enqueue() calls warn()`
-- c0170 ..> c0170: `flush() calls warn()`
-- c0170 ..> c0171: `constructor() calls limit()`
-- c0170 ..> c0171: `enqueue() calls excludeCredentials()`
-- c0170 ..> c0171: `enqueue() calls pruneDirectory()`
-- c0170 ..> c0186: `enqueue() calls sanitizeValue()`
-- c0171 ..> c0171: `pruneDirectory() calls listLogFiles()`
-- c0171 ..> c0171: `pruneDirectory() calls processExited()`
-- c0172 ..> c0084: `type in replacementMemoryInput`
-- c0172 ..> c0172: `replacementMemoryContext() calls storedMemoryContext()`
-- c0172 ..> c0172: `replacementMemoryInput() calls replacementMemoryContext()`
-- c0172 ..> c0186: `storedMemoryContext() calls sanitizeText()`
-- c0172 ..> c0218: `replacementMemoryContext() calls trim()`
-- c0175 --> c0177: `field complete`
-- c0176 ..> c0040: `applySummary() calls now()`
-- c0176 --> c0173: `field compactedHistory`
-- c0176 ..> c0173: `type in constructor`
-- c0176 ..> c0173: `type in getCompactedHistory`
-- c0176 ..> c0173: `type in prepare`
-- c0176 ..> c0173: `type in prepareCapture`
-- c0176 ..> c0173: `type in prepareContext`
-- c0176 ..> c0176: `prepare() calls prepareContext()`
-- c0176 ..> c0176: `prepareCapture() calls outputAllowance()`
-- c0176 ..> c0176: `prepareCapture() calls prepareContext()`
-- c0176 ..> c0176: `prepareContext() calls applySummary()`
-- c0176 ..> c0176: `prepareContext() calls getCompactedHistory()`
-- c0176 ..> c0176: `prepareContext() calls outputAllowance()`
-- c0176 ..> c0177: `type in prepare`
-- c0176 ..> c0177: `type in prepareCapture`
-- c0176 ..> c0177: `type in prepareContext`
-- c0176 ..> c0178: `applySummary() calls contextTokens()`
-- c0176 ..> c0178: `constructor() calls compactionSettings()`
-- c0176 ..> c0178: `constructor() calls privateContextWindow()`
-- c0176 ..> c0178: `outputAllowance() calls resolvedOutputAllowance()`
-- c0176 ..> c0178: `prepareContext() calls assertImageSupport()`
-- c0176 ..> c0178: `prepareContext() calls contextTokens()`
-- c0176 ..> c0178: `prepareContext() calls outputCeiling()`
-- c0176 ..> c0178: `prepareContext() calls recentCutIndex()`
-- c0176 ..> c0178: `prepareContext() calls summarizeMemoryHistory()`
-- c0176 ..> c0218: `applySummary() calls trim()`
-- c0178 ..> c0040: `summarizeMemoryHistory() calls now()`
-- c0178 ..> c0174: `assertFits() constructs ContextWindowError`
-- c0178 ..> c0174: `smallerSummaryBatch() constructs ContextWindowError`
-- c0178 ..> c0175: `type in summarizeMemoryHistory`
-- c0178 ..> c0178: `assertFits() calls contextTokens()`
-- c0178 ..> c0178: `contextTokens() calls textTokens()`
-- c0178 ..> c0178: `evidenceMessage() calls modelEvidence()`
-- c0178 ..> c0178: `modelEvidence() calls objectRecord()`
-- c0178 ..> c0178: `outputCeiling() calls validatePositiveSafeInteger()`
-- c0178 ..> c0178: `privateContextWindow() calls validatePositiveSafeInteger()`
-- c0178 ..> c0178: `recentCutIndex() calls entriesFor()`
-- c0178 ..> c0178: `resolvedOutputAllowance() calls assertFits()`
-- c0178 ..> c0178: `resolvedOutputAllowance() calls contextTokens()`
-- c0178 ..> c0178: `resolvedOutputAllowance() calls outputCeiling()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls assertImageSupport()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls compactionSettings()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls privateContextWindow()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls resolvedOutputAllowance()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls smallerSummaryBatch()`
-- c0178 ..> c0178: `summarizeMemoryHistory() calls summaryEvidence()`
-- c0178 ..> c0178: `summaryEvidence() calls evidenceMessage()`
-- c0178 ..> c0182: `summarizeMemoryHistory() calls complete()`
-- c0178 ..> c0186: `evidenceMessage() calls sanitizeValue()`
-- c0178 ..> c0186: `summarizeMemoryHistory() calls sanitizeText()`
-- c0180 --> c0181: `field modelRegistry`
-- c0182 ..> c0040: `complete() calls now()`
-- c0182 ..> c0040: `completeAttempt() calls now()`
-- c0182 ..> c0040: `completeRequest() calls now()`
-- c0182 ..> c0040: `completeWithSubmission() calls now()`
-- c0182 ..> c0040: `executeRead() calls now()`
-- c0182 ..> c0040: `prepareCapture() calls now()`
-- c0182 ..> c0049: `completeWithSubmission() calls mapConcurrent()`
-- c0182 --> c0054: `field selection`
-- c0182 ..> c0054: `type in constructor`
-- c0182 ..> c0061: `completeRequest() calls isRecallConcurrency()`
-- c0182 ..|> c0085: `implements`
-- c0182 ..> c0087: `type in executeRead`
-- c0182 ..> c0088: `type in complete`
-- c0182 ..> c0088: `type in completeAttempt`
-- c0182 ..> c0088: `type in completeRequest`
-- c0182 ..> c0088: `type in completeWithSubmission`
-- c0182 ..> c0088: `type in emit`
-- c0182 ..> c0088: `type in executeRead`
-- c0182 ..> c0088: `type in prepareCapture`
-- c0182 ..> c0089: `completeWithSubmission() constructs ModelSubmissionError`
-- c0182 ..> c0090: `type in validateSubmission`
-- c0182 ..> c0165: `executeRead() calls execute()`
-- c0182 --> c0168: `field logger`
-- c0182 ..> c0170: `complete() calls emit()`
-- c0182 ..> c0170: `completeAttempt() calls emit()`
-- c0182 ..> c0170: `completeRequest() calls emit()`
-- c0182 ..> c0170: `emit() calls emit()`
-- c0182 ..> c0170: `prepareCapture() calls emit()`
-- c0182 ..> c0176: `completeRequest() calls prepareCapture()`
-- c0182 ..> c0176: `completeRequest() constructs MemoryTaskContext`
-- c0182 ..> c0176: `completeWithSubmission() calls prepare()`
-- c0182 ..> c0178: `completeRequest() calls evidenceMessage()`
-- c0182 --> c0179: `field transformHeaders`
-- c0182 --> c0181: `field registry`
-- c0182 ..> c0181: `type in constructor`
-- c0182 ..> c0182: `complete() calls completeRequest()`
-- c0182 ..> c0182: `completeAttempt() calls complete()`
-- c0182 ..> c0182: `completeRequest() calls completeWithSubmission()`
-- c0182 ..> c0182: `completeWithSubmission() calls completeAttempt()`
-- c0182 ..> c0182: `completeWithSubmission() calls executeRead()`
-- c0182 ..> c0182: `completeWithSubmission() calls validateSubmission()`
-- c0182 ..> c0182: `prepareCapture() calls completeRequest()`
-- c0182 ..> c0183: `type in constructor`
-- c0182 ..> c0184: `type in completeAttempt`
-- c0182 ..> c0184: `type in completeWithSubmission`
-- c0182 ..> c0184: `type in executeRead`
-- c0182 ..> c0185: `complete() calls rejectionText()`
-- c0182 ..> c0185: `completeAttempt() calls rejectionText()`
-- c0182 ..> c0185: `completeRequest() calls modelLabel()`
-- c0182 ..> c0185: `completeRequest() calls requestDeadline()`
-- c0182 ..> c0185: `completeRequest() calls requestOptions()`
-- c0182 ..> c0185: `completeRequest() calls requestTimeout()`
-- c0182 ..> c0185: `completeRequest() calls serializeInput()`
-- c0182 ..> c0185: `completeRequest() calls submissionTool()`
-- c0182 ..> c0185: `completeRequest() calls throwRequestFailure()`
-- c0182 ..> c0185: `completeWithSubmission() calls appendCallCountCorrection()`
-- c0182 ..> c0185: `completeWithSubmission() calls ensureCompletionFinished()`
-- c0182 ..> c0185: `completeWithSubmission() calls errorToolResult()`
-- c0182 ..> c0185: `completeWithSubmission() calls rejectionText()`
-- c0182 ..> c0185: `completeWithSubmission() calls sanitizedAssistantForHistory()`
-- c0182 ..> c0185: `completeWithSubmission() calls serializeInput()`
-- c0182 ..> c0185: `completeWithSubmission() calls submissionTool()`
-- c0182 ..> c0185: `completeWithSubmission() calls toolCalls()`
-- c0182 ..> c0185: `constructor() calls modelLabel()`
-- c0182 ..> c0185: `executeRead() calls errorToolResult()`
-- c0182 ..> c0185: `executeRead() calls rejectionText()`
-- c0182 ..> c0185: `executeRead() calls serializeInput()`
-- c0182 ..> c0185: `executeRead() calls submissionTool()`
-- c0182 ..> c0185: `executeRead() calls textBlock()`
-- c0182 ..> c0185: `prepareCapture() calls rejectionText()`
-- c0182 ..> c0186: `completeRequest() calls sanitizeText()`
-- c0182 ..> c0186: `emit() calls sanitizeValue()`
-- c0183 --> c0168: `field logger`
-- c0183 --> c0179: `field transformHeaders`
-- c0185 ..> c0040: `appendCallCountCorrection() calls now()`
-- c0185 ..> c0040: `errorToolResult() calls now()`
-- c0185 ..> c0054: `type in modelLabel`
-- c0185 ..> c0054: `type in modelSelectionFromModel`
-- c0185 ..> c0054: `type in resolveMemoryModel`
-- c0185 ..> c0087: `type in submissionTool`
-- c0185 ..> c0088: `type in ensureCompletionFinished`
-- c0185 ..> c0088: `type in requestDeadline`
-- c0185 ..> c0088: `type in requestTimeout`
-- c0185 ..> c0088: `type in throwRequestFailure`
-- c0185 ..> c0090: `type in submissionTool`
-- c0185 ..> c0179: `type in requestOptions`
-- c0185 ..> c0180: `type in availableMemoryModels`
-- c0185 ..> c0181: `type in resolveMemoryModel`
-- c0185 ..> c0182: `requestOptions() calls transformHeaders()`
-- c0185 ..> c0182: `resolveMemoryModel() constructs PiMemoryModel`
-- c0185 ..> c0182: `type in resolveMemoryModel`
-- c0185 ..> c0183: `type in resolveMemoryModel`
-- c0185 ..> c0184: `type in requestDeadline`
-- c0185 ..> c0185: `appendCallCountCorrection() calls errorToolResult()`
-- c0185 ..> c0185: `appendCallCountCorrection() calls rejectionText()`
-- c0185 ..> c0185: `appendCallCountCorrection() calls sanitizedAssistantForHistory()`
-- c0185 ..> c0185: `errorToolResult() calls textBlock()`
-- c0185 ..> c0185: `openCodeSessionHeaders() calls isOpenCodeModel()`
-- c0185 ..> c0185: `requestOptions() calls openCodeSessionHeaders()`
-- c0185 ..> c0185: `sanitizedAssistantForHistory() calls textBlock()`
-- c0185 ..> c0186: `appendCallCountCorrection() calls sanitizeText()`
-- c0185 ..> c0186: `ensureCompletionFinished() calls sanitizeText()`
-- c0185 ..> c0186: `rejectionText() calls sanitizeText()`
-- c0185 ..> c0186: `sanitizedAssistantForHistory() calls sanitizeText()`
-- c0185 ..> c0186: `sanitizedAssistantForHistory() calls sanitizeValue()`
-- c0185 ..> c0186: `serializeInput() calls sanitizeText()`
-- c0185 ..> c0186: `serializeInput() calls sanitizeValue()`
-- c0185 ..> c0186: `throwRequestFailure() calls sanitizeText()`
-- c0186 ..> c0186: `hasSensitiveData() calls sanitizeText()`
-- c0186 ..> c0186: `sanitizeValue() calls sanitizeText()`
-- c0189 ..> c0079: `type in initialiseProject`
-- c0189 ..> c0079: `type in initialiseProjectForAgent`
-- c0189 ..> c0079: `type in promptExistingProject`
-- c0189 ..> c0091: `type in existingMapping`
-- c0189 ..> c0091: `type in initialiseProject`
-- c0189 ..> c0091: `type in initialiseProjectForAgent`
-- c0189 ..> c0091: `type in promptExistingProject`
-- c0189 ..> c0092: `type in promptNewProject`
-- c0189 ..> c0092: `type in validateAgentProjectDetails`
-- c0189 ..> c0121: `promptExistingProject() calls notify()`
-- c0189 ..> c0126: `initialiseProject() calls createProject()`
-- c0189 ..> c0126: `initialiseProject() calls linkProject()`
-- c0189 ..> c0126: `initialiseProject() calls listProjects()`
-- c0189 ..> c0126: `initialiseProjectForAgent() calls createProject()`
-- c0189 ..> c0126: `initialiseProjectForAgent() calls linkProject()`
-- c0189 ..> c0126: `initialiseProjectForAgent() calls listProjects()`
-- c0189 ..> c0126: `promptExistingProject() calls listProjects()`
-- c0189 ..> c0186: `promptExistingProject() calls sanitizeText()`
-- c0189 ..> c0186: `promptNewProject() calls sanitizeText()`
-- c0189 ..> c0187: `type in initialiseProjectForAgent`
-- c0189 ..> c0187: `type in validateAgentProjectDetails`
-- c0189 ..> c0188: `existingMapping() constructs ProjectInitError`
-- c0189 ..> c0188: `initialiseProject() constructs ProjectInitError`
-- c0189 ..> c0188: `initialiseProjectForAgent() constructs ProjectInitError`
-- c0189 ..> c0188: `promptExistingProject() constructs ProjectInitError`
-- c0189 ..> c0188: `promptNewProject() constructs ProjectInitError`
-- c0189 ..> c0188: `validateAgentProjectDetails() constructs ProjectInitError`
-- c0189 ..> c0189: `initialiseProject() calls existingMapping()`
-- c0189 ..> c0189: `initialiseProject() calls promptExistingProject()`
-- c0189 ..> c0189: `initialiseProject() calls promptNewProject()`
-- c0189 ..> c0189: `initialiseProjectForAgent() calls existingMapping()`
-- c0189 ..> c0189: `initialiseProjectForAgent() calls validateAgentProjectDetails()`
-- c0189 ..> c0218: `promptExistingProject() calls trim()`
-- c0189 ..> c0218: `promptNewProject() calls trim()`
-- c0189 ..> c0218: `validateAgentProjectDetails() calls trim()`
-- c0190 ..> c0004: `mutate() calls set()`
-- c0190 ..> c0064: `type in advanceWatermark`
-- c0190 ..> c0064: `type in enqueue`
-- c0190 ..> c0064: `type in enqueueSnapshot`
-- c0190 ..> c0068: `type in compactJobSnapshot`
-- c0190 ..> c0077: `type in appendInspections`
-- c0190 ..> c0091: `type in completeProjectDiscovery`
-- c0190 ..> c0097: `type in completeProjectDiscovery`
-- c0190 ..> c0097: `type in currentWatermark`
-- c0190 ..> c0126: `mutate() calls get()`
-- c0190 ..> c0126: `resolveBranchId() calls get()`
-- c0190 ..> c0151: `readSnapshot() calls readFile()`
-- c0190 ..> c0151: `readState() calls readFile()`
-- c0190 ..> c0151: `releaseFileLock() calls readFile()`
-- c0190 ..> c0151: `removeAbandonedLock() calls readFile()`
-- c0190 ..> c0186: `addConflict() calls sanitizeValue()`
-- c0190 ..> c0186: `appendInspections() calls sanitizeValue()`
-- c0190 ..> c0186: `applyCheckpointPatch() calls sanitizeValue()`
-- c0190 ..> c0186: `updateConflict() calls sanitizeValue()`
-- c0190 ..> c0190: `acquireFileLock() calls createFileLock()`
-- c0190 ..> c0190: `acquireFileLock() calls ensureDirectory()`
-- c0190 ..> c0190: `acquireFileLock() calls recoverExistingLock()`
-- c0190 ..> c0190: `addConflict() calls mutate()`
-- c0190 ..> c0190: `addConflict() calls prune()`
-- c0190 ..> c0190: `advanceWatermark() calls mutate()`
-- c0190 ..> c0190: `advanceWatermark() calls prune()`
-- c0190 ..> c0190: `advanceWatermark() calls updateWatermark()`
-- c0190 ..> c0190: `appendInspections() calls readSnapshot()`
-- c0190 ..> c0190: `appendInspections() calls storeSnapshot()`
-- c0190 ..> c0190: `cancel() calls mutate()`
-- c0190 ..> c0190: `checkpoint() calls appendInspections()`
-- c0190 ..> c0190: `checkpoint() calls applyCheckpointPatch()`
-- c0190 ..> c0190: `checkpoint() calls compactJobSnapshot()`
-- c0190 ..> c0190: `checkpoint() calls hydrateJob()`
-- c0190 ..> c0190: `checkpoint() calls mutate()`
-- c0190 ..> c0190: `checkpoint() calls pruneFailedJobs()`
-- c0190 ..> c0190: `checkpoint() calls recordCompletedCapture()`
-- c0190 ..> c0190: `checkpoint() calls releaseTerminalSnapshot()`
-- c0190 ..> c0190: `claimNext() calls claimJob()`
-- c0190 ..> c0190: `claimNext() calls defaultIdentity()`
-- c0190 ..> c0190: `claimNext() calls hydrateJob()`
-- c0190 ..> c0190: `claimNext() calls matchesBranch()`
-- c0190 ..> c0190: `claimNext() calls now()`
-- c0190 ..> c0190: `claimNext() calls runningJobCanBeRecovered()`
-- c0190 ..> c0190: `collectSnapshots() calls now()`
-- c0190 ..> c0190: `collectSnapshots() calls snapshotPath()`
-- c0190 ..> c0190: `collectSnapshots() calls syncDirectory()`
-- c0190 ..> c0190: `compactJobSnapshot() calls hydrateJob()`
-- c0190 ..> c0190: `compactJobSnapshot() calls storeSnapshot()`
-- c0190 ..> c0190: `complete() calls checkpoint()`
-- c0190 ..> c0190: `completeProjectDiscovery() calls defaultIdentity()`
-- c0190 ..> c0190: `completeProjectDiscovery() calls mutate()`
-- c0190 ..> c0190: `createFileLock() calls close()`
-- c0190 ..> c0190: `createFileLock() calls releaseFileLock()`
-- c0190 ..> c0190: `currentWatermark() calls getWatermark()`
-- c0190 ..> c0190: `enqueue() calls mutate()`
-- c0190 ..> c0190: `enqueue() calls prune()`
-- c0190 ..> c0190: `enqueue() calls readSnapshot()`
-- c0190 ..> c0190: `enqueue() calls updateWatermark()`
-- c0190 ..> c0190: `enqueueSnapshot() calls enqueue()`
-- c0190 ..> c0190: `getConflict() calls readState()`
-- c0190 ..> c0190: `getJob() calls hydrateJob()`
-- c0190 ..> c0190: `getJob() calls mutate()`
-- c0190 ..> c0190: `getWatermark() calls readState()`
-- c0190 ..> c0190: `hasClaimableWork() calls matchesBranch()`
-- c0190 ..> c0190: `hasClaimableWork() calls mutate()`
-- c0190 ..> c0190: `hasClaimableWork() calls now()`
-- c0190 ..> c0190: `hasClaimableWork() calls runningJobCanBeRecovered()`
-- c0190 ..> c0190: `hydrateJob() calls readSnapshot()`
-- c0190 ..> c0190: `listJobMetadata() calls mutate()`
-- c0190 ..> c0190: `listJobs() calls hydrateJob()`
-- c0190 ..> c0190: `listJobs() calls mutate()`
-- c0190 ..> c0190: `listPending() calls defaultIdentity()`
-- c0190 ..> c0190: `listPending() calls hydrateJob()`
-- c0190 ..> c0190: `listPending() calls mutate()`
-- c0190 ..> c0190: `listPendingConflicts() calls pendingConflicts()`
-- c0190 ..> c0190: `mutate() calls pruneFailedJobs()`
-- c0190 ..> c0190: `mutate() calls readState()`
-- c0190 ..> c0190: `mutate() calls withMutationFileLock()`
-- c0190 ..> c0190: `mutate() calls writeState()`
-- c0190 ..> c0190: `pendingConflicts() calls readState()`
-- c0190 ..> c0190: `prune() calls now()`
-- c0190 ..> c0190: `readSnapshot() calls close()`
-- c0190 ..> c0190: `readSnapshot() calls snapshotPath()`
-- c0190 ..> c0190: `recordCompletedCapture() calls hydrateJob()`
-- c0190 ..> c0190: `recordCompletedCapture() calls storeSnapshot()`
-- c0190 ..> c0190: `recoverExistingLock() calls removeAbandonedLock()`
-- c0190 ..> c0190: `releaseProgress() calls mutate()`
-- c0190 ..> c0190: `removeAbandonedLock() calls now()`
-- c0190 ..> c0190: `resolveBranchId() calls readState()`
-- c0190 ..> c0190: `storeSnapshot() calls close()`
-- c0190 ..> c0190: `storeSnapshot() calls readSnapshot()`
-- c0190 ..> c0190: `storeSnapshot() calls snapshotPath()`
-- c0190 ..> c0190: `storeSnapshot() calls syncDirectory()`
-- c0190 ..> c0190: `syncDirectory() calls close()`
-- c0190 ..> c0190: `updateConflict() calls mutate()`
-- c0190 ..> c0190: `withFileLock() calls acquireFileLock()`
-- c0190 ..> c0190: `withMutationFileLock() calls withFileLock()`
-- c0190 ..> c0190: `withWorkerLock() calls acquireFileLock()`
-- c0190 ..> c0190: `writeState() calls close()`
-- c0190 ..> c0190: `writeState() calls collectSnapshots()`
-- c0190 ..> c0190: `writeState() calls ensureDirectory()`
-- c0190 ..> c0190: `writeState() calls pruneFailedJobs()`
-- c0190 ..> c0190: `writeState() calls releaseTerminalSnapshot()`
-- c0190 ..> c0190: `writeState() calls storeSnapshot()`
-- c0190 ..> c0190: `writeState() calls syncDirectory()`
-- c0190 ..> c0191: `type in constructor`
-- c0190 ..> c0192: `type in acquireFileLock`
-- c0190 ..> c0192: `type in createFileLock`
-- c0190 ..> c0193: `type in addConflict`
-- c0190 ..> c0193: `type in getConflict`
-- c0190 ..> c0193: `type in listPendingConflicts`
-- c0190 ..> c0193: `type in pendingConflicts`
-- c0190 ..> c0193: `type in updateConflict`
-- c0190 ..> c0194: `acquireFileLock() constructs QueueBusyError`
-- c0190 ..> c0194: `removeAbandonedLock() constructs QueueBusyError`
-- c0190 ..> c0194: `withMutationFileLock() constructs QueueBusyError`
-- c0190 ..> c0195: `type in applyCheckpointPatch`
-- c0190 ..> c0195: `type in checkpoint`
-- c0190 ..> c0196: `type in enqueue`
-- c0190 ..> c0196: `type in enqueueSnapshot`
-- c0190 ..> c0197: `type in claimNext`
-- c0190 ..> c0197: `type in defaultIdentity`
-- c0190 ..> c0197: `type in hasClaimableWork`
-- c0190 ..> c0197: `type in listJobMetadata`
-- c0190 ..> c0197: `type in listJobs`
-- c0190 ..> c0197: `type in listPending`
-- c0190 ..> c0197: `type in listPendingConflicts`
-- c0190 ..> c0197: `type in pendingConflicts`
-- c0190 ..> c0197: `type in withWorkerLock`
-- c0190 ..> c0198: `type in checkpoint`
-- c0190 ..> c0198: `type in claimJob`
-- c0190 ..> c0198: `type in claimNext`
-- c0190 ..> c0198: `type in complete`
-- c0190 ..> c0198: `type in getJob`
-- c0190 ..> c0198: `type in hydrateJob`
-- c0190 ..> c0198: `type in listJobs`
-- c0190 ..> c0198: `type in listPending`
-- c0190 ..> c0198: `type in matchesBranch`
-- c0190 ..> c0198: `type in runningJobCanBeRecovered`
-- c0190 ..> c0199: `type in listJobMetadata`
-- c0190 ..> c0201: `type in collectSnapshots`
-- c0190 ..> c0201: `type in mutate`
-- c0190 ..> c0201: `type in prune`
-- c0190 ..> c0201: `type in pruneFailedJobs`
-- c0190 ..> c0201: `type in readState`
-- c0190 ..> c0201: `type in recordCompletedCapture`
-- c0190 ..> c0201: `type in releaseTerminalSnapshot`
-- c0190 ..> c0201: `type in updateWatermark`
-- c0190 ..> c0201: `type in writeState`
-- c0190 ..> c0202: `type in advanceWatermark`
-- c0190 ..> c0202: `type in currentWatermark`
-- c0190 ..> c0202: `type in getWatermark`
-- c0190 ..> c0202: `type in updateWatermark`
-- c0190 ..> c0203: `type in readSnapshot`
-- c0190 ..> c0203: `type in storeSnapshot`
-- c0190 ..> c0204: `type in appendInspections`
-- c0190 ..> c0204: `type in applyCheckpointPatch`
-- c0190 ..> c0204: `type in compactJobSnapshot`
-- c0190 ..> c0204: `type in hydrateJob`
-- c0190 ..> c0204: `type in recordCompletedCapture`
-- c0190 ..> c0204: `type in releaseTerminalSnapshot`
-- c0190 ..> c0206: `type in advanceWatermark`
-- c0190 ..> c0206: `type in updateWatermark`
-- c0190 ..> c0207: `addConflict() calls jsonSnapshot()`
-- c0190 ..> c0207: `addConflict() calls nowIso()`
-- c0190 ..> c0207: `addConflict() calls scrubDiagnostic()`
-- c0190 ..> c0207: `advanceWatermark() calls dedupeKey()`
-- c0190 ..> c0207: `advanceWatermark() calls jsonSnapshot()`
-- c0190 ..> c0207: `appendInspections() calls jsonSnapshot()`
-- c0190 ..> c0207: `appendInspections() calls validateInspectionEntry()`
-- c0190 ..> c0207: `applyCheckpointPatch() calls jsonSnapshot()`
-- c0190 ..> c0207: `applyCheckpointPatch() calls nowIso()`
-- c0190 ..> c0207: `applyCheckpointPatch() calls sanitizeOutcomeMap()`
-- c0190 ..> c0207: `applyCheckpointPatch() calls scrubDiagnostic()`
-- c0190 ..> c0207: `cancel() calls nowIso()`
-- c0190 ..> c0207: `cancel() calls scrubDiagnostic()`
-- c0190 ..> c0207: `checkpoint() calls releaseCompletedArtifacts()`
-- c0190 ..> c0207: `claimJob() calls nowIso()`
-- c0190 ..> c0207: `claimNext() calls identityMatches()`
-- c0190 ..> c0207: `claimNext() calls interruptedWrite()`
-- c0190 ..> c0207: `completeProjectDiscovery() calls identityMatches()`
-- c0190 ..> c0207: `createFileLock() calls nowIso()`
-- c0190 ..> c0207: `enqueue() calls clearHistoryCache()`
-- c0190 ..> c0207: `enqueue() calls contextKey()`
-- c0190 ..> c0207: `enqueue() calls dedupeKey()`
-- c0190 ..> c0207: `enqueue() calls diagnosticError()`
-- c0190 ..> c0207: `enqueue() calls jobIdFor()`
-- c0190 ..> c0207: `enqueue() calls jsonSnapshot()`
-- c0190 ..> c0207: `enqueue() calls nowIso()`
-- c0190 ..> c0207: `getConflict() calls jsonSnapshot()`
-- c0190 ..> c0207: `getWatermark() calls contextKey()`
-- c0190 ..> c0207: `getWatermark() calls jsonSnapshot()`
-- c0190 ..> c0207: `getWatermark() calls nowIso()`
-- c0190 ..> c0207: `hasClaimableWork() calls identityMatches()`
-- c0190 ..> c0207: `hasClaimableWork() calls interruptedWrite()`
-- c0190 ..> c0207: `hydrateJob() calls jsonSnapshot()`
-- c0190 ..> c0207: `listJobMetadata() calls identityMatches()`
-- c0190 ..> c0207: `listJobs() calls identityMatches()`
-- c0190 ..> c0207: `listPending() calls identityMatches()`
-- c0190 ..> c0207: `pendingConflicts() calls conflictIdentityMatches()`
-- c0190 ..> c0207: `pendingConflicts() calls jsonSnapshot()`
-- c0190 ..> c0207: `prune() calls clearHistoryCache()`
-- c0190 ..> c0207: `prune() calls contextKey()`
-- c0190 ..> c0207: `prune() calls shouldRetain()`
-- c0190 ..> c0207: `readState() calls normaliseState()`
-- c0190 ..> c0207: `recordCompletedCapture() calls contextKey()`
-- c0190 ..> c0207: `recordCompletedCapture() calls cursorComparison()`
-- c0190 ..> c0207: `recordCompletedCapture() calls nowIso()`
-- c0190 ..> c0207: `recordCompletedCapture() calls orderedSourceEntryIds()`
-- c0190 ..> c0207: `recordCompletedCapture() calls summaryCursor()`
-- c0190 ..> c0207: `releaseProgress() calls nowIso()`
-- c0190 ..> c0207: `removeAbandonedLock() calls isProcessAlive()`
-- c0190 ..> c0207: `resolveBranchId() calls contextKey()`
-- c0190 ..> c0207: `runningJobCanBeRecovered() calls isProcessAlive()`
-- c0190 ..> c0207: `updateConflict() calls jsonSnapshot()`
-- c0190 ..> c0207: `updateConflict() calls nowIso()`
-- c0190 ..> c0207: `updateWatermark() calls contextKey()`
-- c0190 ..> c0207: `updateWatermark() calls nowIso()`
-- c0190 ..> c0207: `writeState() calls releaseCompletedArtifacts()`
-- c0190 ..> c0225: `compactJobSnapshot() calls compactCaptureSnapshot()`
-- c0190 ..> c0225: `enqueue() calls reuseCaptureHistory()`
-- c0190 ..> c0225: `enqueue() calls sanitizeCaptureSnapshot()`
-- c0190 ..> c0225: `writeState() calls sanitizeCaptureSnapshot()`
-- c0193 --> c0077: `field replacement`
-- c0193 --> c0084: `field replacement`
-- c0193 --> c0097: `field context`
-- c0193 --> c0197: `field binding`
-- c0193 --> c0205: `field supersession`
-- c0195 --> c0068: `field compactedConversation`
-- c0195 --> c0077: `field inspectionEntries`
-- c0195 --> c0200: `field status`
-- c0195 --> c0205: `field supersession`
-- c0198 --> c0064: `field snapshot`
-- c0198 --> c0197: `field binding`
-- c0198 --> c0200: `field status`
-- c0198 --> c0205: `field supersession`
-- c0199 --> c0064: `field snapshot`
-- c0201 --> c0193: `field conflicts`
-- c0201 --> c0202: `field watermarks`
-- c0201 --> c0204: `field jobs`
-- c0204 --|> c0198: `inherits`
-- c0207 ..> c0064: `type in dedupeKey`
-- c0207 ..> c0064: `type in orderedSourceEntryIds`
-- c0207 ..> c0064: `type in summaryCursor`
-- c0207 ..> c0077: `type in validateInspectionEntry`
-- c0207 ..> c0126: `releaseCompletedArtifacts() calls get()`
-- c0207 ..> c0186: `sanitizeOutcomeMap() calls sanitizeValue()`
-- c0207 ..> c0186: `scrubDiagnostic() calls sanitizeText()`
-- c0207 ..> c0190: `nowIso() calls now()`
-- c0207 ..> c0193: `type in conflictIdentityMatches`
-- c0207 ..> c0197: `type in conflictIdentityMatches`
-- c0207 ..> c0197: `type in identityMatches`
-- c0207 ..> c0198: `type in identityMatches`
-- c0207 ..> c0198: `type in interruptedWrite`
-- c0207 ..> c0201: `type in normaliseState`
-- c0207 ..> c0202: `type in clearHistoryCache`
-- c0207 ..> c0204: `type in releaseCompletedArtifacts`
-- c0207 ..> c0207: `conflictIdentityMatches() calls identityMatches()`
-- c0207 ..> c0207: `interruptedWrite() calls outcomeRecord()`
-- c0207 ..> c0207: `releaseCompletedArtifacts() calls outcomeRecord()`
-- c0207 ..> c0207: `releaseCompletedArtifacts() calls scrubDiagnostic()`
-- c0207 ..> c0207: `summaryCursor() calls orderedSourceEntryIds()`
-- c0209 --> c0091: `field projects`
-- c0209 --> c0094: `field scope`
-- c0209 --> c0097: `field context`
-- c0211 --> c0077: `field sessionContext`
-- c0211 --> c0088: `field diagnosticContext`
-- c0211 --> c0091: `field projects`
-- c0211 --> c0094: `field scope`
-- c0211 --> c0097: `field context`
-- c0211 --> c0210: `field onPlan`
-- c0212 --> c0094: `field scope`
-- c0213 ..> c0049: `searchMemories() calls mapConcurrent()`
-- c0213 ..> c0061: `constructor() calls isRecallConcurrency()`
-- c0213 ..> c0061: `deeper() calls resolveScope()`
-- c0213 ..> c0061: `recall() calls resolveScope()`
-- c0213 --> c0079: `field client`
-- c0213 ..> c0079: `type in constructor`
-- c0213 ..> c0082: `type in memoryInScope`
-- c0213 ..> c0082: `type in optionalKnowledge`
-- c0213 --> c0085: `field model`
-- c0213 ..> c0085: `type in constructor`
-- c0213 ..> c0087: `type in recallReadTool`
-- c0213 ..> c0091: `type in matchResolution`
-- c0213 ..> c0091: `type in resolveScope`
-- c0213 ..> c0094: `type in empty`
-- c0213 ..> c0094: `type in memoryInScope`
-- c0213 ..> c0094: `type in optionalKnowledge`
-- c0213 ..> c0094: `type in requestsDifferentProject`
-- c0213 ..> c0094: `type in resolveScope`
-- c0213 ..> c0094: `type in searchMemories`
-- c0213 ..> c0094: `type in searchRequest`
-- c0213 ..> c0095: `type in searchRequest`
-- c0213 ..> c0097: `type in contextProjectResolution`
-- c0213 ..> c0097: `type in resolveScope`
-- c0213 ..> c0097: `type in searchRequest`
-- c0213 ..> c0126: `deeper() calls search()`
-- c0213 ..> c0126: `resolveScope() calls listProjects()`
-- c0213 ..> c0126: `searchMemories() calls search()`
-- c0213 ..> c0135: `type in optionalKnowledge`
-- c0213 ..> c0135: `type in resultWithKnowledge`
-- c0213 --> c0136: `field knowledge`
-- c0213 ..> c0136: `constructor() constructs KnowledgeReadService`
-- c0213 ..> c0136: `optionalKnowledge() calls expand()`
-- c0213 ..> c0151: `recallReadTool() calls executeKnowledgeRead()`
-- c0213 ..> c0182: `recall() calls complete()`
-- c0213 ..> c0186: `deeper() calls sanitizeText()`
-- c0213 ..> c0186: `finishReview() calls sanitizeText()`
-- c0213 ..> c0186: `plannerInput() calls sanitizeText()`
-- c0213 ..> c0186: `queryContext() calls sanitizeText()`
-- c0213 ..> c0186: `recall() calls sanitizeText()`
-- c0213 ..> c0186: `recall() calls sanitizeValue()`
-- c0213 ..> c0186: `searchFailure() calls sanitizeValue()`
-- c0213 ..> c0208: `type in authorizeProjectSelection`
-- c0213 ..> c0208: `type in ensureLive`
-- c0213 ..> c0208: `type in finishFailure`
-- c0213 ..> c0208: `type in searchMemories`
-- c0213 ..> c0209: `type in deeper`
-- c0213 ..> c0210: `type in authorizeProjectSelection`
-- c0213 ..> c0210: `type in queryContext`
-- c0213 ..> c0210: `type in requestsDifferentProject`
-- c0213 ..> c0210: `type in searchMemories`
-- c0213 ..> c0210: `type in searchRequest`
-- c0213 ..> c0211: `type in authorizeProjectSelection`
-- c0213 ..> c0211: `type in finishFailure`
-- c0213 ..> c0211: `type in plannerInput`
-- c0213 ..> c0211: `type in recall`
-- c0213 ..> c0211: `type in recallReadTool`
-- c0213 ..> c0211: `type in requestsDifferentProject`
-- c0213 ..> c0211: `type in searchMemories`
-- c0213 ..> c0212: `type in deeper`
-- c0213 ..> c0212: `type in empty`
-- c0213 ..> c0212: `type in finishFailure`
-- c0213 ..> c0212: `type in finishReview`
-- c0213 ..> c0212: `type in recall`
-- c0213 ..> c0212: `type in recallReadTool`
-- c0213 ..> c0212: `type in resultWithKnowledge`
-- c0213 ..> c0213: `authorizeProjectSelection() calls requestsDifferentProject()`
-- c0213 ..> c0213: `circuitOpen() calls now()`
-- c0213 ..> c0213: `deeper() calls circuitOpen()`
-- c0213 ..> c0213: `deeper() calls empty()`
-- c0213 ..> c0213: `deeper() calls memoryInScope()`
-- c0213 ..> c0213: `deeper() calls optionalKnowledge()`
-- c0213 ..> c0213: `deeper() calls recordFailure()`
-- c0213 ..> c0213: `deeper() calls recordSuccess()`
-- c0213 ..> c0213: `deeper() calls resultWithKnowledge()`
-- c0213 ..> c0213: `finishFailure() calls empty()`
-- c0213 ..> c0213: `finishFailure() calls recordFailure()`
-- c0213 ..> c0213: `finishReview() calls recordFailure()`
-- c0213 ..> c0213: `finishReview() calls recordSuccess()`
-- c0213 ..> c0213: `recall() calls authorizeProjectSelection()`
-- c0213 ..> c0213: `recall() calls circuitOpen()`
-- c0213 ..> c0213: `recall() calls empty()`
-- c0213 ..> c0213: `recall() calls ensureLive()`
-- c0213 ..> c0213: `recall() calls finishFailure()`
-- c0213 ..> c0213: `recall() calls finishReview()`
-- c0213 ..> c0213: `recall() calls memoryInScope()`
-- c0213 ..> c0213: `recall() calls optionalKnowledge()`
-- c0213 ..> c0213: `recall() calls plannerInput()`
-- c0213 ..> c0213: `recall() calls recallReadTool()`
-- c0213 ..> c0213: `recall() calls recordSuccess()`
-- c0213 ..> c0213: `recall() calls resultWithKnowledge()`
-- c0213 ..> c0213: `recall() calls searchMemories()`
-- c0213 ..> c0213: `recall() calls searchRequest()`
-- c0213 ..> c0213: `recordFailure() calls now()`
-- c0213 ..> c0213: `resolveScope() calls contextProjectResolution()`
-- c0213 ..> c0213: `resolveScope() calls matchResolution()`
-- c0213 ..> c0213: `searchMemories() calls ensureLive()`
-- c0213 ..> c0213: `searchMemories() calls searchFailure()`
-- c0213 ..> c0213: `searchMemories() calls searchRequest()`
-- c0213 ..> c0213: `searchRequest() calls queryContext()`
-- c0213 ..> c0214: `type in constructor`
-- c0213 ..> c0215: `finishReview() constructs ReviewValidationError`
-- c0213 ..> c0216: `type in contextProjectResolution`
-- c0213 ..> c0216: `type in matchResolution`
-- c0213 ..> c0216: `type in recallReadTool`
-- c0213 ..> c0216: `type in resolveScope`
-- c0213 ..> c0216: `type in searchMemories`
-- c0213 ..> c0216: `type in searchRequest`
-- c0213 ..> c0217: `type in searchMemories`
-- c0213 ..> c0218: `authorizeProjectSelection() calls raceAbort()`
-- c0213 ..> c0218: `deeper() calls createDeadlineSignal()`
-- c0213 ..> c0218: `deeper() calls failureReason()`
-- c0213 ..> c0218: `deeper() calls formatRecall()`
-- c0213 ..> c0218: `deeper() calls isForgetfulResponseError()`
-- c0213 ..> c0218: `deeper() calls raceAbort()`
-- c0213 ..> c0218: `deeper() calls trim()`
-- c0213 ..> c0218: `ensureLive() calls abortError()`
-- c0213 ..> c0218: `finishFailure() calls failureReason()`
-- c0213 ..> c0218: `finishFailure() calls submissionAttemptTrace()`
-- c0213 ..> c0218: `finishReview() calls parseReview()`
-- c0213 ..> c0218: `finishReview() calls reviewMismatchDirection()`
-- c0213 ..> c0218: `finishReview() calls reviewSources()`
-- c0213 ..> c0218: `finishReview() calls reviewValidationDebug()`
-- c0213 ..> c0218: `finishReview() calls sourceLabels()`
-- c0213 ..> c0218: `finishReview() calls submissionAttemptTrace()`
-- c0213 ..> c0218: `optionalKnowledge() calls raceAbort()`
-- c0213 ..> c0218: `plannerInput() calls availableProjects()`
-- c0213 ..> c0218: `recall() calls boundDebugText()`
-- c0213 ..> c0218: `recall() calls createDeadlineSignal()`
-- c0213 ..> c0218: `recall() calls formatRecall()`
-- c0213 ..> c0218: `recall() calls parsePlan()`
-- c0213 ..> c0218: `recall() calls raceAbort()`
-- c0213 ..> c0218: `recall() calls recallReviewSubmission()`
-- c0213 ..> c0218: `recall() calls reviewSources()`
-- c0213 ..> c0218: `recall() calls sanitizePolicy()`
-- c0213 ..> c0218: `recall() calls submissionAttemptTrace()`
-- c0213 ..> c0218: `recall() calls trim()`
-- c0213 ..> c0218: `recallReadTool() calls abortError()`
-- c0213 ..> c0218: `recallReadTool() calls reviewSources()`
-- c0213 ..> c0218: `resolveScope() calls availableProjects()`
-- c0213 ..> c0218: `searchMemories() calls exceptionDiagnostic()`
-- c0213 ..> c0218: `searchMemories() calls isAbort()`
-- c0213 ..> c0218: `searchMemories() calls raceAbort()`
-- c0213 ..> c0218: `searchRequest() calls repoAwareQuery()`
-- c0216 --> c0091: `field project`
-- c0217 --> c0082: `field memories`
-- c0218 ..> c0004: `availableProjects() calls set()`
-- c0218 ..> c0082: `type in formatRecall`
-- c0218 ..> c0082: `type in validateMemory`
-- c0218 ..> c0090: `type in recallReviewSubmission`
-- c0218 ..> c0091: `type in availableProjects`
-- c0218 ..> c0097: `type in availableProjects`
-- c0218 ..> c0097: `type in repoAwareQuery`
-- c0218 ..> c0097: `type in repositoryIdentity`
-- c0218 ..> c0135: `type in formatRecall`
-- c0218 ..> c0186: `exceptionDiagnostic() calls sanitizeText()`
-- c0218 ..> c0186: `formatRecall() calls sanitizeText()`
-- c0218 ..> c0186: `parseReview() calls sanitizeText()`
-- c0218 ..> c0186: `plannerString() calls sanitizeText()`
-- c0218 ..> c0186: `repoAwareQuery() calls sanitizeText()`
-- c0218 ..> c0186: `repositoryIdentity() calls sanitizeText()`
-- c0218 ..> c0186: `reviewMismatchDirection() calls sanitizeText()`
-- c0218 ..> c0186: `reviewerOutputText() calls sanitizeText()`
-- c0218 ..> c0186: `reviewerOutputText() calls sanitizeValue()`
-- c0218 ..> c0186: `sanitizePolicy() calls sanitizeText()`
-- c0218 ..> c0186: `submissionAttemptTrace() calls sanitizeText()`
-- c0218 ..> c0208: `type in createDeadlineSignal`
-- c0218 ..> c0208: `type in failureReason`
-- c0218 ..> c0210: `type in parsePlan`
-- c0218 ..> c0212: `type in parseReview`
-- c0218 ..> c0212: `type in recallReviewSubmission`
-- c0218 ..> c0212: `type in reviewSources`
-- c0218 ..> c0212: `type in reviewValidationDebug`
-- c0218 ..> c0213: `createDeadlineSignal() calls now()`
-- c0218 ..> c0218: `createDeadlineSignal() calls exceptionDiagnostic()`
-- c0218 ..> c0218: `formatRecall() calls trim()`
-- c0218 ..> c0218: `parseEntities() calls plannerString()`
-- c0218 ..> c0218: `parsePlan() calls isObject()`
-- c0218 ..> c0218: `parsePlan() calls parseEntities()`
-- c0218 ..> c0218: `parsePlan() calls parseQueries()`
-- c0218 ..> c0218: `parsePlan() calls plannerString()`
-- c0218 ..> c0218: `parsePlan() calls positiveInteger()`
-- c0218 ..> c0218: `parseQueries() calls plannerString()`
-- c0218 ..> c0218: `parseReview() calls isObject()`
-- c0218 ..> c0218: `parseReview() calls reviewSources()`
-- c0218 ..> c0218: `parseReview() calls sourceLabels()`
-- c0218 ..> c0218: `parseReview() calls trim()`
-- c0218 ..> c0218: `plannerString() calls trim()`
-- c0218 ..> c0218: `raceAbort() calls abortError()`
-- c0218 ..> c0218: `repoAwareQuery() calls repositoryIdentity()`
-- c0218 ..> c0218: `repoAwareQuery() calls trim()`
-- c0218 ..> c0218: `repositoryIdentity() calls trim()`
-- c0218 ..> c0218: `reviewMismatchDirection() calls isObject()`
-- c0218 ..> c0218: `reviewMismatchDirection() calls trim()`
-- c0218 ..> c0218: `reviewValidationDebug() calls boundDebugText()`
-- c0218 ..> c0218: `reviewValidationDebug() calls reviewSources()`
-- c0218 ..> c0218: `reviewValidationDebug() calls reviewerOutputText()`
-- c0218 ..> c0218: `reviewValidationDebug() calls sourceLabels()`
-- c0218 ..> c0218: `submissionAttemptTrace() calls trim()`
-- c0218 ..> c0218: `validateMemory() calls isObject()`
-- c0219 ..> c0218: `repositoryName() calls trim()`
-- c0220 --|> c0064: `inherits`
-- c0222 --> c0063: `field mode`
-- c0222 --> c0094: `field scope`
-- c0222 --> c0097: `field context`
-- c0222 --> c0224: `field session`
-- c0223 --> c0220: `field snapshot`
-- c0225 ..> c0062: `type in captureSummaryRecord`
-- c0225 ..> c0062: `type in reuseCaptureHistory`
-- c0225 ..> c0064: `type in compactCaptureSnapshot`
-- c0225 ..> c0064: `type in reuseCaptureHistory`
-- c0225 ..> c0064: `type in sanitizeCaptureSnapshot`
-- c0225 ..> c0068: `type in compactCaptureSnapshot`
-- c0225 ..> c0077: `type in collectEvidence`
-- c0225 ..> c0077: `type in evidenceForEntry`
-- c0225 ..> c0077: `type in toolEvidence`
-- c0225 ..> c0186: `captureSummaryRecord() calls sanitizeText()`
-- c0225 ..> c0186: `compactCaptureSnapshot() calls sanitizeText()`
-- c0225 ..> c0186: `conversationForEntry() calls isMemoryOperation()`
-- c0225 ..> c0186: `safeText() calls sanitizeText()`
-- c0225 ..> c0186: `sanitizeCaptureSnapshot() calls sanitizeValue()`
-- c0225 ..> c0186: `sanitizeConversation() calls sanitizeText()`
-- c0225 ..> c0186: `sanitizeConversation() calls sanitizeValue()`
-- c0225 ..> c0186: `toolEvidence() calls isMemoryOperation()`
-- c0225 ..> c0186: `toolEvidence() calls sanitizeValue()`
-- c0225 ..> c0218: `compactCaptureSnapshot() calls trim()`
-- c0225 ..> c0218: `safeText() calls trim()`
-- c0225 ..> c0221: `type in asMessage`
-- c0225 ..> c0221: `type in lastAssistantEntry`
-- c0225 ..> c0221: `type in toolEvidence`
-- c0225 ..> c0222: `type in buildCaptureSnapshot`
-- c0225 ..> c0222: `type in collectEvidence`
-- c0225 ..> c0222: `type in toolEvidence`
-- c0225 ..> c0223: `type in buildCaptureSnapshot`
-- c0225 ..> c0225: `asMessage() calls isRecord()`
-- c0225 ..> c0225: `buildCaptureSnapshot() calls collectEvidence()`
-- c0225 ..> c0225: `buildCaptureSnapshot() calls deltaStartIndex()`
-- c0225 ..> c0225: `buildCaptureSnapshot() calls lastAssistantEntry()`
-- c0225 ..> c0225: `buildCaptureSnapshot() calls rootId()`
-- c0225 ..> c0225: `buildCaptureSnapshot() calls snapshotId()`
-- c0225 ..> c0225: `collectEvidence() calls evidenceForEntry()`
-- c0225 ..> c0225: `compactCaptureSnapshot() calls captureSummaryRecord()`
-- c0225 ..> c0225: `compactCaptureSnapshot() calls isRecord()`
-- c0225 ..> c0225: `contentText() calls isRecord()`
-- c0225 ..> c0225: `conversationForEntry() calls asMessage()`
-- c0225 ..> c0225: `conversationForEntry() calls isRecord()`
-- c0225 ..> c0225: `conversationForEntry() calls sanitizeConversation()`
-- c0225 ..> c0225: `evidenceForEntry() calls asMessage()`
-- c0225 ..> c0225: `evidenceForEntry() calls contentText()`
-- c0225 ..> c0225: `evidenceForEntry() calls isRecord()`
-- c0225 ..> c0225: `evidenceForEntry() calls safeText()`
-- c0225 ..> c0225: `evidenceForEntry() calls toolEvidence()`
-- c0225 ..> c0225: `lastAssistantEntry() calls asMessage()`
-- c0225 ..> c0225: `reuseCaptureHistory() calls captureSummaryRecord()`
-- c0225 ..> c0225: `reuseCaptureHistory() calls isRecord()`
-- c0225 ..> c0225: `sanitizeCaptureSnapshot() calls sanitizeCaptureConversation()`
-- c0225 ..> c0225: `sanitizeConversation() calls isRecord()`
-- c0225 ..> c0225: `toolEvidence() calls contentText()`
-- c0225 ..> c0225: `toolEvidence() calls safeText()`
-- c0228 --> c0226: `field error`
-- c0228 --> c0226: `field provenanceError`
-- c0229 ..> c0004: `readFile() calls close()`
-- c0229 ..> c0040: `getUrl() calls resolve()`
-- c0229 ..> c0040: `git() calls resolve()`
-- c0229 ..> c0040: `inspect() calls resolve()`
-- c0229 ..> c0126: `getUrl() calls get()`
-- c0229 ..> c0151: `readFile() calls readFile()`
-- c0229 ..> c0165: `git() calls execute()`
-- c0229 ..> c0186: `inspect() calls sanitizeValue()`
-- c0229 ..> c0186: `inspectUrl() calls sanitizeText()`
-- c0229 ..> c0186: `inspectUrl() calls sanitizeValue()`
-- c0229 ..> c0218: `provenance() calls trim()`
-- c0229 ..> c0227: `type in inspectUrl`
-- c0229 ..> c0228: `type in inspect`
-- c0229 ..> c0228: `type in inspectUrl`
-- c0229 ..> c0229: `getUrl() calls check()`
-- c0229 ..> c0229: `git() calls check()`
-- c0229 ..> c0229: `inspect() calls check()`
-- c0229 ..> c0229: `inspect() calls inspectUrl()`
-- c0229 ..> c0229: `inspect() calls provenance()`
-- c0229 ..> c0229: `inspect() calls readFile()`
-- c0229 ..> c0229: `inspectUrl() calls check()`
-- c0229 ..> c0229: `inspectUrl() calls getUrl()`
-- c0229 ..> c0229: `provenance() calls git()`
-- c0229 ..> c0229: `readFile() calls check()`
-- c0229 --> c0230: `field options`
-- c0229 ..> c0230: `type in constructor`
-- c0229 ..> c0231: `getUrl() calls validateAddress()`
-- c0229 ..> c0231: `getUrl() calls validateUrl()`
-- c0229 ..> c0231: `git() calls requireInside()`
-- c0229 ..> c0231: `inspect() calls errorDetails()`
-- c0229 ..> c0231: `inspect() calls requireInside()`
-- c0229 ..> c0231: `inspect() calls sourceContent()`
-- c0229 ..> c0231: `inspectUrl() calls loopback()`
-- c0229 ..> c0231: `inspectUrl() calls sourceContent()`
-- c0229 ..> c0231: `inspectUrl() calls validateUrl()`
-- c0229 ..> c0231: `provenance() calls errorDetails()`
-- c0229 ..> c0231: `readFile() calls requireInside()`
-- c0231 ..> c0186: `errorDetails() calls sanitizeText()`
-- c0231 ..> c0186: `sourceContent() calls sanitizeText()`
-- c0231 ..> c0186: `validateUrl() calls sanitizeText()`
-- c0231 ..> c0186: `validateUrl() calls sanitizeValue()`
-- c0231 ..> c0226: `type in errorDetails`
-- c0231 ..> c0227: `type in sourceContent`
-- c0231 ..> c0229: `validateAddress() calls check()`
-- c0231 ..> c0231: `validateAddress() calls loopback()`
+- c0073 --|> c0103: `inherits`
+- c0076 --|> c0077: `inherits`
+- c0077 --|> c0103: `inherits`
+- c0079 --|> c0080: `inherits`
+- c0080 --> c0083: `field entity_type`
+- c0080 --|> c0103: `inherits`
+- c0081 --|> c0082: `inherits`
+- c0082 --|> c0103: `inherits`
+- c0086 --> c0087: `field knowledge`
+- c0086 ..> c0089: `type in get`
+- c0086 ..> c0089: `type in search`
+- c0086 ..> c0090: `type in create`
+- c0086 ..> c0091: `type in create`
+- c0086 ..> c0093: `type in queryMemory`
+- c0086 ..> c0101: `type in createProject`
+- c0086 ..> c0101: `type in linkProject`
+- c0086 ..> c0101: `type in listProjects`
+- c0086 ..> c0102: `type in createProject`
+- c0086 ..> c0105: `type in queryMemory`
+- c0086 ..> c0105: `type in search`
+- c0087 ..> c0072: `type in createCodeArtifact`
+- c0087 ..> c0072: `type in getCodeArtifact`
+- c0087 ..> c0072: `type in updateCodeArtifact`
+- c0087 ..> c0073: `type in createCodeArtifact`
+- c0087 ..> c0073: `type in updateCodeArtifact`
+- c0087 ..> c0074: `type in listCodeArtifacts`
+- c0087 ..> c0076: `type in createDocument`
+- c0087 ..> c0076: `type in getDocument`
+- c0087 ..> c0076: `type in updateDocument`
+- c0087 ..> c0077: `type in createDocument`
+- c0087 ..> c0077: `type in updateDocument`
+- c0087 ..> c0078: `type in listDocuments`
+- c0087 ..> c0079: `type in createEntity`
+- c0087 ..> c0079: `type in getEntity`
+- c0087 ..> c0079: `type in searchEntities`
+- c0087 ..> c0079: `type in updateEntity`
+- c0087 ..> c0080: `type in createEntity`
+- c0087 ..> c0080: `type in updateEntity`
+- c0087 ..> c0081: `type in createRelationship`
+- c0087 ..> c0081: `type in getRelationships`
+- c0087 ..> c0082: `type in createRelationship`
+- c0087 ..> c0085: `type in listFiles`
+- c0087 ..> c0089: `type in updateMemory`
+- c0087 ..> c0091: `type in updateMemory`
+- c0087 ..> c0106: `type in getFile`
+- c0088 --> c0089: `field memory`
+- c0089 --|> c0091: `inherits`
+- c0092 ..> c0097: `type in complete`
+- c0092 ..> c0097: `type in prepareCapture`
+- c0093 --> c0088: `field linked_memories`
+- c0093 --> c0089: `field primary_memories`
+- c0097 --> c0075: `field onConversationCompacted`
+- c0097 --> c0096: `field readTools`
+- c0097 --> c0099: `field submission`
+- c0106 --|> c0085: `inherits`
+- c0107 --> c0101: `field project`
+- c0111 --> c0108: `field outcome`
+- c0111 --> c0112: `field state`
+- c0113 ..> c0027: `type in checkpoint`
+- c0113 ..> c0028: `type in checkpoint`
+- c0113 ..> c0071: `type in enqueue`
+- c0113 ..> c0084: `type in resolveConflict`
+- c0116 --> c0101: `field projects`
+- c0116 --|> c0107: `inherits`
+- c0117 --> c0057: `field createCapture`
+- c0117 --> c0057: `field createRecall`
+- c0117 --> c0086: `field client`
+- c0117 --> c0086: `field createCapture`
+- c0117 --> c0086: `field createClient`
+- c0117 --> c0086: `field createRecall`
+- c0117 --> c0113: `field capture`
+- c0117 --> c0113: `field createCapture`
+- c0117 --> c0116: `field resolveWorkContext`
+- c0117 --> c0125: `field createRecall`
+- c0117 --> c0125: `field recall`
+- c0117 --> c0192: `field createCapture`
+- c0117 --> c0192: `field createRecall`
+- c0118 --> c0060: `field config`
+- c0118 --> c0117: `field dependencies`
+- c0118 --> c0120: `field policies`
+- c0121 --> c0057: `field config`
+- c0121 --> c0086: `field client`
+- c0121 --> c0116: `field context`
+- c0121 --> c0125: `field recall`
+- c0121 --> c0180: `field logger`
+- c0121 --> c0192: `field model`
+- c0122 --> c0104: `field scope`
+- c0124 --> c0126: `field runtime`
+- c0124 --> c0223: `field promise`
+- c0124 --> c0223: `field result`
+- c0125 ..> c0084: `type in recall`
+- c0125 ..> c0220: `type in deeper`
+- c0125 ..> c0222: `type in recall`
+- c0125 ..> c0223: `type in deeper`
+- c0125 ..> c0223: `type in recall`
+- c0126 --> c0004: `field activity`
+- c0126 --> c0025: `field captureDeferrals`
+- c0126 --> c0028: `field recoveryResult`
+- c0126 --> c0057: `field config`
+- c0126 --> c0086: `field client`
+- c0126 --> c0112: `field pendingCaptureJobs`
+- c0126 --> c0113: `field capture`
+- c0126 --> c0116: `field context`
+- c0126 --> c0122: `field lastRecall`
+- c0126 --> c0125: `field recall`
+- c0126 --> c0180: `field logger`
+- c0126 --> c0192: `field model`
+- c0126 --> c0200: `field queue`
+- c0128 --> c0109: `field automaticRecalls`
+- c0128 --> c0119: `field pendingQueuedRecall`
+- c0128 --> c0124: `field recallJobs`
+- c0128 --> c0126: `field loading`
+- c0128 --> c0126: `field runtime`
+- c0129 ..> c0004: `collectCaptureFeedback() calls set()`
+- c0129 ..> c0004: `diagnosticCandidateDetail() calls set()`
+- c0129 ..> c0004: `pickMemoryModel() calls refresh()`
+- c0129 ..> c0028: `type in captureProcessedJobIds`
+- c0129 ..> c0028: `type in readCaptureOutcome`
+- c0129 ..> c0047: `log() calls emit()`
+- c0129 ..> c0047: `logFailure() calls emit()`
+- c0129 ..> c0047: `readCaptureOutcome() calls diagnostics()`
+- c0129 ..> c0047: `recordRecallActivity() calls emit()`
+- c0129 ..> c0047: `textMessage() calls now()`
+- c0129 ..> c0057: `type in log`
+- c0129 ..> c0057: `type in logFailure`
+- c0129 ..> c0057: `type in makeInstanceId`
+- c0129 ..> c0057: `type in policyText`
+- c0129 ..> c0057: `type in promptSetupEndpoint`
+- c0129 ..> c0061: `type in parseSelection`
+- c0129 ..> c0067: `type in log`
+- c0129 ..> c0084: `type in recallContextEntries`
+- c0129 ..> c0108: `type in automaticCaptureJobOutcome`
+- c0129 ..> c0108: `type in readCaptureOutcome`
+- c0129 ..> c0108: `type in recordCaptureRetry`
+- c0129 ..> c0110: `type in boundedWait`
+- c0129 ..> c0111: `type in automaticCaptureFeedback`
+- c0129 ..> c0111: `type in collectCaptureFeedback`
+- c0129 ..> c0111: `type in recordCaptureRetry`
+- c0129 ..> c0113: `type in readCaptureOutcome`
+- c0129 ..> c0115: `type in collectDiagnosticParts`
+- c0129 ..> c0116: `type in defaultWorkContext`
+- c0129 ..> c0116: `type in discoverWorkContext`
+- c0129 ..> c0116: `type in snapshotWorkContext`
+- c0129 ..> c0118: `type in createForgetfulExtension`
+- c0129 ..> c0120: `type in policyText`
+- c0129 ..> c0122: `type in recallActivitySummary`
+- c0129 ..> c0126: `type in conflictBelongsToActiveBranch`
+- c0129 ..> c0126: `type in readCaptureOutcome`
+- c0129 ..> c0126: `type in recordRecallActivity`
+- c0129 ..> c0127: `type in promptSetupAuthentication`
+- c0129 ..> c0129: `automaticCaptureFeedback() calls captureCount()`
+- c0129 ..> c0129: `automaticCaptureFeedback() calls captureFeedbackParts()`
+- c0129 ..> c0129: `automaticCaptureFeedback() calls collectCaptureFeedback()`
+- c0129 ..> c0129: `automaticCaptureJobOutcome() calls boundedErrorDiagnostic()`
+- c0129 ..> c0129: `automaticCaptureJobOutcome() calls captureFeedbackReason()`
+- c0129 ..> c0129: `automaticRecallTerminalText() calls usefulRecallText()`
+- c0129 ..> c0129: `canonicalRepository() calls qualifiedRepository()`
+- c0129 ..> c0129: `captureFailurePart() calls captureCount()`
+- c0129 ..> c0129: `captureFeedbackParts() calls captureCount()`
+- c0129 ..> c0129: `captureFeedbackParts() calls captureFailurePart()`
+- c0129 ..> c0129: `captureFeedbackParts() calls skippedReasonBreakdown()`
+- c0129 ..> c0129: `collectCaptureFeedback() calls recordCaptureRetry()`
+- c0129 ..> c0129: `collectDiagnosticParts() calls diagnosticCandidateDetail()`
+- c0129 ..> c0129: `createForgetfulExtension() calls logFailure()`
+- c0129 ..> c0129: `createForgetfulExtension() calls notify()`
+- c0129 ..> c0129: `createForgetfulExtension() calls sessionKey()`
+- c0129 ..> c0129: `diagnosticCandidateDetail() calls diagnosticSourceIds()`
+- c0129 ..> c0129: `diagnosticSummary() calls collectDiagnosticParts()`
+- c0129 ..> c0129: `discoverWorkContext() calls canonicalRepository()`
+- c0129 ..> c0129: `discoverWorkContext() calls defaultWorkContext()`
+- c0129 ..> c0129: `latestBranchUserEntry() calls messageContentText()`
+- c0129 ..> c0129: `latestContextUserPrompt() calls messageContentText()`
+- c0129 ..> c0129: `log() calls notify()`
+- c0129 ..> c0129: `logFailure() calls boundedErrorDiagnostic()`
+- c0129 ..> c0129: `logFailure() calls log()`
+- c0129 ..> c0129: `pickMemoryModel() calls parseSelection()`
+- c0129 ..> c0129: `promptSetupAuthentication() calls notify()`
+- c0129 ..> c0129: `promptSetupEndpoint() calls notify()`
+- c0129 ..> c0129: `promptSetupEndpoint() calls setupEndpointSuggestion()`
+- c0129 ..> c0129: `readCaptureOutcome() calls automaticCaptureJobOutcome()`
+- c0129 ..> c0129: `recallContextEntries() calls messageContentText()`
+- c0129 ..> c0129: `recordRecallActivity() calls log()`
+- c0129 ..> c0129: `recordRecallActivity() calls recallActivitySummary()`
+- c0129 ..> c0129: `savedRecallResultText() calls usefulRecallText()`
+- c0129 ..> c0130: `createForgetfulExtension() calls registerForegroundTool()`
+- c0129 ..> c0134: `collectCaptureFeedback() calls get()`
+- c0129 ..> c0134: `diagnosticCandidateDetail() calls get()`
+- c0129 ..> c0134: `log() calls get()`
+- c0129 ..> c0134: `logFailure() calls get()`
+- c0129 ..> c0195: `pickMemoryModel() calls availableMemoryModels()`
+- c0129 ..> c0195: `pickMemoryModel() calls modelLabel()`
+- c0129 ..> c0195: `pickMemoryModel() calls modelSelectionFromModel()`
+- c0129 ..> c0196: `automaticCaptureJobOutcome() calls sanitizeText()`
+- c0129 ..> c0196: `automaticRecallTerminalText() calls sanitizeText()`
+- c0129 ..> c0196: `boundedErrorDiagnostic() calls sanitizeText()`
+- c0129 ..> c0196: `captureFeedbackReason() calls sanitizeText()`
+- c0129 ..> c0196: `captureJobId() calls sanitizeText()`
+- c0129 ..> c0196: `captureProcessedJobIds() calls sanitizeText()`
+- c0129 ..> c0196: `diagnosticCandidateDetail() calls sanitizeText()`
+- c0129 ..> c0196: `diagnosticSourceIds() calls sanitizeText()`
+- c0129 ..> c0196: `log() calls sanitizeText()`
+- c0129 ..> c0196: `recallActivitySummary() calls sanitizeText()`
+- c0129 ..> c0196: `recallContextEntries() calls sanitizeText()`
+- c0129 ..> c0196: `recordRecallActivity() calls sanitizeText()`
+- c0129 ..> c0196: `usefulRecallText() calls sanitizeText()`
+- c0129 ..> c0223: `type in automaticRecallResultStatus`
+- c0129 ..> c0223: `type in automaticRecallTerminalText`
+- c0129 ..> c0223: `type in recordRecallActivity`
+- c0129 ..> c0223: `type in savedRecallResultText`
+- c0129 ..> c0223: `type in usefulRecallText`
+- c0129 ..> c0229: `canonicalRepository() calls trim()`
+- c0129 ..> c0229: `captureFeedbackReason() calls trim()`
+- c0129 ..> c0229: `createForgetfulExtension() calls trim()`
+- c0129 ..> c0229: `promptSetupAuthentication() calls trim()`
+- c0129 ..> c0229: `promptSetupEndpoint() calls trim()`
+- c0129 ..> c0229: `recallContextEntries() calls trim()`
+- c0129 ..> c0229: `setupEndpointSuggestion() calls trim()`
+- c0129 ..> c0229: `usefulRecallText() calls trim()`
+- c0129 ..> c0230: `qualifiedRepository() calls repositoryName()`
+- c0131 ..> c0072: `type in createCodeArtifact`
+- c0131 ..> c0072: `type in getCodeArtifact`
+- c0131 ..> c0073: `type in createCodeArtifact`
+- c0131 ..> c0073: `type in updateCodeArtifact`
+- c0131 ..> c0074: `type in listCodeArtifacts`
+- c0131 ..> c0076: `type in createDocument`
+- c0131 ..> c0076: `type in getDocument`
+- c0131 ..> c0077: `type in createDocument`
+- c0131 ..> c0077: `type in updateDocument`
+- c0131 ..> c0078: `type in listDocuments`
+- c0131 ..> c0079: `type in createEntity`
+- c0131 ..> c0079: `type in getEntity`
+- c0131 ..> c0079: `type in searchEntities`
+- c0131 ..> c0080: `type in createEntity`
+- c0131 ..> c0080: `type in updateEntity`
+- c0131 ..> c0081: `type in getRelationships`
+- c0131 ..> c0082: `type in createRelationship`
+- c0131 ..> c0085: `type in listFiles`
+- c0131 ..|> c0087: `implements`
+- c0131 --> c0089: `field parseMemory`
+- c0131 ..> c0089: `type in constructor`
+- c0131 ..> c0091: `type in updateMemory`
+- c0131 ..> c0106: `type in getFile`
+- c0131 --> c0132: `field request`
+- c0131 ..> c0132: `type in constructor`
+- c0131 ..> c0133: `createCodeArtifact() calls artifact()`
+- c0131 ..> c0133: `createDocument() calls document()`
+- c0131 ..> c0133: `createEntity() calls entity()`
+- c0131 ..> c0133: `createRelationship() calls relationship()`
+- c0131 ..> c0133: `createRelationship() calls requestSegment()`
+- c0131 ..> c0133: `getCodeArtifact() calls artifact()`
+- c0131 ..> c0133: `getCodeArtifact() calls requestSegment()`
+- c0131 ..> c0133: `getDocument() calls document()`
+- c0131 ..> c0133: `getDocument() calls requestSegment()`
+- c0131 ..> c0133: `getEntity() calls entity()`
+- c0131 ..> c0133: `getEntity() calls requestSegment()`
+- c0131 ..> c0133: `getEntityMemories() calls id()`
+- c0131 ..> c0133: `getEntityMemories() calls object()`
+- c0131 ..> c0133: `getEntityMemories() calls records()`
+- c0131 ..> c0133: `getEntityMemories() calls requestSegment()`
+- c0131 ..> c0133: `getEntityMemories() calls text()`
+- c0131 ..> c0133: `getFile() calls fileSummary()`
+- c0131 ..> c0133: `getFile() calls object()`
+- c0131 ..> c0133: `getFile() calls requestSegment()`
+- c0131 ..> c0133: `getFile() calls text()`
+- c0131 ..> c0133: `getRelationships() calls records()`
+- c0131 ..> c0133: `getRelationships() calls requestSegment()`
+- c0131 ..> c0133: `linkEntityMemory() calls object()`
+- c0131 ..> c0133: `linkEntityMemory() calls requestSegment()`
+- c0131 ..> c0133: `linkMemories() calls ids()`
+- c0131 ..> c0133: `linkMemories() calls object()`
+- c0131 ..> c0133: `linkMemories() calls requestSegment()`
+- c0131 ..> c0133: `listCodeArtifacts() calls projectPath()`
+- c0131 ..> c0133: `listCodeArtifacts() calls records()`
+- c0131 ..> c0133: `listCodeArtifacts() calls summary()`
+- c0131 ..> c0133: `listDocuments() calls projectPath()`
+- c0131 ..> c0133: `listDocuments() calls records()`
+- c0131 ..> c0133: `listDocuments() calls summary()`
+- c0131 ..> c0133: `listFiles() calls projectPath()`
+- c0131 ..> c0133: `listFiles() calls records()`
+- c0131 ..> c0133: `searchEntities() calls records()`
+- c0131 ..> c0133: `unlinkMemories() calls object()`
+- c0131 ..> c0133: `unlinkMemories() calls requestSegment()`
+- c0131 ..> c0133: `updateCodeArtifact() calls artifact()`
+- c0131 ..> c0133: `updateCodeArtifact() calls requestSegment()`
+- c0131 ..> c0133: `updateDocument() calls document()`
+- c0131 ..> c0133: `updateDocument() calls requestSegment()`
+- c0131 ..> c0133: `updateEntity() calls entity()`
+- c0131 ..> c0133: `updateEntity() calls requestSegment()`
+- c0131 ..> c0133: `updateMemory() calls requestSegment()`
+- c0131 ..> c0134: `createCodeArtifact() calls request()`
+- c0131 ..> c0134: `createDocument() calls request()`
+- c0131 ..> c0134: `createEntity() calls request()`
+- c0131 ..> c0134: `createRelationship() calls request()`
+- c0131 ..> c0134: `getCodeArtifact() calls request()`
+- c0131 ..> c0134: `getDocument() calls request()`
+- c0131 ..> c0134: `getEntity() calls request()`
+- c0131 ..> c0134: `getEntityMemories() calls request()`
+- c0131 ..> c0134: `getFile() calls request()`
+- c0131 ..> c0134: `getRelationships() calls request()`
+- c0131 ..> c0134: `linkEntityMemory() calls request()`
+- c0131 ..> c0134: `linkMemories() calls request()`
+- c0131 ..> c0134: `listCodeArtifacts() calls request()`
+- c0131 ..> c0134: `listDocuments() calls request()`
+- c0131 ..> c0134: `listFiles() calls request()`
+- c0131 ..> c0134: `searchEntities() calls request()`
+- c0131 ..> c0134: `unlinkMemories() calls request()`
+- c0131 ..> c0134: `updateCodeArtifact() calls request()`
+- c0131 ..> c0134: `updateDocument() calls request()`
+- c0131 ..> c0134: `updateEntity() calls request()`
+- c0131 ..> c0134: `updateMemory() calls request()`
+- c0131 ..> c0138: `getFile() constructs ForgetfulSchemaError`
+- c0131 ..> c0138: `linkEntityMemory() constructs ForgetfulSchemaError`
+- c0131 ..> c0138: `linkMemories() constructs ForgetfulSchemaError`
+- c0131 ..> c0138: `unlinkMemories() constructs ForgetfulSchemaError`
+- c0131 ..> c0140: `linkMemories() calls parseMemory()`
+- c0131 ..> c0140: `updateMemory() calls parseMemory()`
+- c0133 ..> c0072: `type in artifact`
+- c0133 ..> c0073: `type in resourceBody`
+- c0133 ..> c0074: `type in summary`
+- c0133 ..> c0076: `type in document`
+- c0133 ..> c0077: `type in resourceBody`
+- c0133 ..> c0078: `type in summary`
+- c0133 ..> c0079: `type in entity`
+- c0133 ..> c0080: `type in entityBody`
+- c0133 ..> c0081: `type in relationship`
+- c0133 ..> c0082: `type in relationshipBody`
+- c0133 ..> c0085: `type in fileSummary`
+- c0133 ..> c0103: `type in provenance`
+- c0133 ..> c0133: `artifact() calls id()`
+- c0133 ..> c0133: `artifact() calls object()`
+- c0133 ..> c0133: `artifact() calls resourceBody()`
+- c0133 ..> c0133: `document() calls id()`
+- c0133 ..> c0133: `document() calls object()`
+- c0133 ..> c0133: `document() calls resourceBody()`
+- c0133 ..> c0133: `entity() calls entityBody()`
+- c0133 ..> c0133: `entity() calls id()`
+- c0133 ..> c0133: `entity() calls object()`
+- c0133 ..> c0133: `entityBody() calls ids()`
+- c0133 ..> c0133: `entityBody() calls object()`
+- c0133 ..> c0133: `entityBody() calls provenance()`
+- c0133 ..> c0133: `entityBody() calls strings()`
+- c0133 ..> c0133: `entityBody() calls text()`
+- c0133 ..> c0133: `fileSummary() calls id()`
+- c0133 ..> c0133: `fileSummary() calls object()`
+- c0133 ..> c0133: `fileSummary() calls strings()`
+- c0133 ..> c0133: `fileSummary() calls text()`
+- c0133 ..> c0133: `memoryMetadata() calls ids()`
+- c0133 ..> c0133: `memoryMetadata() calls provenance()`
+- c0133 ..> c0133: `provenance() calls strings()`
+- c0133 ..> c0133: `provenance() calls text()`
+- c0133 ..> c0133: `records() calls object()`
+- c0133 ..> c0133: `relationship() calls id()`
+- c0133 ..> c0133: `relationship() calls object()`
+- c0133 ..> c0133: `relationship() calls relationshipBody()`
+- c0133 ..> c0133: `relationshipBody() calls id()`
+- c0133 ..> c0133: `relationshipBody() calls object()`
+- c0133 ..> c0133: `relationshipBody() calls provenance()`
+- c0133 ..> c0133: `relationshipBody() calls text()`
+- c0133 ..> c0133: `resourceBody() calls id()`
+- c0133 ..> c0133: `resourceBody() calls object()`
+- c0133 ..> c0133: `resourceBody() calls provenance()`
+- c0133 ..> c0133: `resourceBody() calls strings()`
+- c0133 ..> c0133: `resourceBody() calls text()`
+- c0133 ..> c0133: `summary() calls id()`
+- c0133 ..> c0133: `summary() calls object()`
+- c0133 ..> c0133: `summary() calls provenance()`
+- c0133 ..> c0133: `summary() calls strings()`
+- c0133 ..> c0133: `summary() calls text()`
+- c0133 ..> c0138: `entityBody() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `fileSummary() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `id() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `ids() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `object() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `records() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `strings() constructs ForgetfulSchemaError`
+- c0133 ..> c0138: `text() constructs ForgetfulSchemaError`
+- c0133 ..> c0229: `text() calls trim()`
+- c0134 ..> c0004: `listProjects() calls set()`
+- c0134 ..> c0004: `readResponse() calls set()`
+- c0134 ..> c0047: `readResponse() calls read()`
+- c0134 ..|> c0086: `implements`
+- c0134 ..> c0089: `type in get`
+- c0134 ..> c0089: `type in search`
+- c0134 ..> c0090: `type in create`
+- c0134 ..> c0091: `type in create`
+- c0134 ..> c0093: `type in queryMemory`
+- c0134 ..> c0101: `type in createProject`
+- c0134 ..> c0101: `type in linkProject`
+- c0134 ..> c0101: `type in listProjects`
+- c0134 ..> c0102: `type in createProject`
+- c0134 ..> c0105: `type in queryMemory`
+- c0134 ..> c0105: `type in search`
+- c0134 ..> c0133: `get() calls requestSegment()`
+- c0134 ..> c0133: `getMemoryEntityIds() calls requestSegment()`
+- c0134 ..> c0133: `obsolete() calls requestSegment()`
+- c0134 ..> c0134: `create() calls request()`
+- c0134 ..> c0134: `createProject() calls request()`
+- c0134 ..> c0134: `get() calls request()`
+- c0134 ..> c0134: `getMemoryEntityIds() calls request()`
+- c0134 ..> c0134: `linkProject() calls request()`
+- c0134 ..> c0134: `linkProject() calls validId()`
+- c0134 ..> c0134: `listProjects() calls endpoint()`
+- c0134 ..> c0134: `listProjects() calls request()`
+- c0134 ..> c0134: `obsolete() calls request()`
+- c0134 ..> c0134: `queryMemory() calls request()`
+- c0134 ..> c0134: `readResponse() calls get()`
+- c0134 ..> c0134: `request() calls endpoint()`
+- c0134 ..> c0134: `request() calls fetchImpl()`
+- c0134 ..> c0134: `request() calls readResponse()`
+- c0134 ..> c0134: `request() calls responseByteLimit()`
+- c0134 ..> c0134: `request() calls throwResponseError()`
+- c0134 ..> c0134: `search() calls request()`
+- c0134 ..> c0134: `supersede() calls obsolete()`
+- c0134 ..> c0134: `throwResponseError() calls readResponse()`
+- c0134 ..> c0135: `type in constructor`
+- c0134 ..> c0137: `throwResponseError() constructs ForgetfulHttpError`
+- c0134 ..> c0138: `create() constructs ForgetfulSchemaError`
+- c0134 ..> c0138: `getMemoryEntityIds() constructs ForgetfulSchemaError`
+- c0134 ..> c0138: `listProjects() constructs ForgetfulSchemaError`
+- c0134 ..> c0138: `obsolete() constructs ForgetfulSchemaError`
+- c0134 ..> c0138: `readResponse() constructs ForgetfulSchemaError`
+- c0134 ..> c0139: `request() constructs ForgetfulTimeoutError`
+- c0134 ..> c0140: `constructor() calls localHost()`
+- c0134 ..> c0140: `constructor() calls trimTrailingSlashes()`
+- c0134 ..> c0140: `create() calls integerArray()`
+- c0134 ..> c0140: `create() calls isObject()`
+- c0134 ..> c0140: `create() calls requiredInteger()`
+- c0134 ..> c0140: `createProject() calls parseProject()`
+- c0134 ..> c0140: `createProject() calls projectText()`
+- c0134 ..> c0140: `get() calls parseMemory()`
+- c0134 ..> c0140: `getMemoryEntityIds() calls directEntityId()`
+- c0134 ..> c0140: `getMemoryEntityIds() calls isObject()`
+- c0134 ..> c0140: `linkProject() calls parseProject()`
+- c0134 ..> c0140: `listProjects() calls isObject()`
+- c0134 ..> c0140: `listProjects() calls parseProject()`
+- c0134 ..> c0140: `obsolete() calls isObject()`
+- c0134 ..> c0140: `queryMemory() calls defaultWhenOmitted()`
+- c0134 ..> c0140: `queryMemory() calls parseSearchPayload()`
+- c0134 ..> c0140: `queryMemory() calls searchBody()`
+- c0134 ..> c0140: `request() calls makeAbortError()`
+- c0134 ..> c0140: `request() calls parseJson()`
+- c0134 ..> c0140: `search() calls flattenSearchResult()`
+- c0134 ..> c0140: `search() calls parseSearchPayload()`
+- c0134 ..> c0140: `search() calls searchBody()`
+- c0134 ..> c0200: `readResponse() calls cancel()`
+- c0134 ..> c0230: `createProject() calls repositoryName()`
+- c0134 ..> c0230: `linkProject() calls repositoryName()`
+- c0140 ..> c0004: `uniqueMemories() calls set()`
+- c0140 ..> c0088: `type in parseLinkedMemories`
+- c0140 ..> c0089: `type in flattenSearchResult`
+- c0140 ..> c0089: `type in parseMemory`
+- c0140 ..> c0089: `type in uniqueMemories`
+- c0140 ..> c0093: `type in flattenSearchResult`
+- c0140 ..> c0093: `type in parseSearchPayload`
+- c0140 ..> c0101: `type in parseProject`
+- c0140 ..> c0105: `type in searchBody`
+- c0140 ..> c0133: `parseMemory() calls memoryMetadata()`
+- c0140 ..> c0136: `makeAbortError() constructs ForgetfulAbortError`
+- c0140 ..> c0136: `type in makeAbortError`
+- c0140 ..> c0138: `directEntityId() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `integerArray() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `nonNegativeInteger() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `optionalString() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `parseJson() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `parseLinkedMemories() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `parseMemory() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `parseProject() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `parseSearchPayload() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `requiredInteger() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `requiredString() constructs ForgetfulSchemaError`
+- c0140 ..> c0138: `stringArray() constructs ForgetfulSchemaError`
+- c0140 ..> c0140: `directEntityId() calls isObject()`
+- c0140 ..> c0140: `directEntityId() calls requiredInteger()`
+- c0140 ..> c0140: `flattenSearchResult() calls uniqueMemories()`
+- c0140 ..> c0140: `parseLinkedMemories() calls isObject()`
+- c0140 ..> c0140: `parseLinkedMemories() calls parseMemory()`
+- c0140 ..> c0140: `parseLinkedMemories() calls requiredInteger()`
+- c0140 ..> c0140: `parseMemory() calls integerArray()`
+- c0140 ..> c0140: `parseMemory() calls isObject()`
+- c0140 ..> c0140: `parseMemory() calls nonNegativeInteger()`
+- c0140 ..> c0140: `parseMemory() calls optionalString()`
+- c0140 ..> c0140: `parseMemory() calls requiredInteger()`
+- c0140 ..> c0140: `parseMemory() calls requiredString()`
+- c0140 ..> c0140: `parseMemory() calls stringArray()`
+- c0140 ..> c0140: `parseProject() calls isObject()`
+- c0140 ..> c0140: `parseProject() calls optionalString()`
+- c0140 ..> c0140: `parseProject() calls requiredInteger()`
+- c0140 ..> c0140: `parseProject() calls requiredString()`
+- c0140 ..> c0140: `parseSearchPayload() calls isObject()`
+- c0140 ..> c0140: `parseSearchPayload() calls nonNegativeInteger()`
+- c0140 ..> c0140: `parseSearchPayload() calls parseLinkedMemories()`
+- c0140 ..> c0140: `parseSearchPayload() calls parseMemory()`
+- c0140 ..> c0140: `parseSearchPayload() calls requiredString()`
+- c0140 ..> c0140: `searchBody() calls defaultWhenOmitted()`
+- c0140 ..> c0229: `projectText() calls trim()`
+- c0141 --> c0072: `field artifacts`
+- c0141 --> c0076: `field documents`
+- c0141 --> c0085: `field files`
+- c0142 --|> c0143: `inherits`
+- c0142 --> c0144: `field failures`
+- c0143 --> c0089: `field memories`
+- c0143 --> c0104: `field scope`
+- c0145 ..> c0004: `collectRelationships() calls set()`
+- c0145 ..> c0004: `findEntities() calls set()`
+- c0145 ..> c0004: `resolveRelationshipEndpoints() calls set()`
+- c0145 ..> c0072: `type in appendArtifactLines`
+- c0145 ..> c0076: `type in appendDocumentLines`
+- c0145 ..> c0079: `type in appendEntityLines`
+- c0145 ..> c0079: `type in collectEntityMemories`
+- c0145 ..> c0079: `type in collectRelationships`
+- c0145 ..> c0079: `type in findEntities`
+- c0145 ..> c0079: `type in findEntityMemories`
+- c0145 ..> c0079: `type in findRelationships`
+- c0145 ..> c0079: `type in formatExpansion`
+- c0145 ..> c0079: `type in formatRelationships`
+- c0145 ..> c0079: `type in resolveRelationshipEndpoints`
+- c0145 ..> c0081: `type in collectRelationships`
+- c0145 ..> c0081: `type in formatRelationships`
+- c0145 ..> c0081: `type in resolveRelationshipEndpoints`
+- c0145 ..> c0085: `type in appendFileLines`
+- c0145 --> c0087: `field client`
+- c0145 ..> c0087: `type in constructor`
+- c0145 ..> c0131: `collectRelationships() calls getRelationships()`
+- c0145 ..> c0131: `findAttachments() calls getCodeArtifact()`
+- c0145 ..> c0131: `findAttachments() calls getDocument()`
+- c0145 ..> c0131: `findAttachments() calls listFiles()`
+- c0145 ..> c0131: `findEntities() calls getEntity()`
+- c0145 ..> c0131: `findEntities() calls searchEntities()`
+- c0145 ..> c0131: `findEntityMemories() calls getEntityMemories()`
+- c0145 ..> c0131: `resolveRelationshipEndpoints() calls getEntity()`
+- c0145 ..> c0134: `formatRelationships() calls get()`
+- c0145 ..> c0141: `type in findAttachments`
+- c0145 ..> c0141: `type in formatExpansion`
+- c0145 ..> c0142: `type in collectEntityMemories`
+- c0145 ..> c0142: `type in collectRelationships`
+- c0145 ..> c0142: `type in findAttachments`
+- c0145 ..> c0142: `type in findEntities`
+- c0145 ..> c0142: `type in findEntityMemories`
+- c0145 ..> c0142: `type in findRelationships`
+- c0145 ..> c0142: `type in isAllowedEntityMemory`
+- c0145 ..> c0142: `type in resolveRelationshipEndpoints`
+- c0145 ..> c0143: `type in expand`
+- c0145 ..> c0143: `type in formatRelationships`
+- c0145 ..> c0144: `type in emptyExpansion`
+- c0145 ..> c0144: `type in expand`
+- c0145 ..> c0144: `type in formatExpansion`
+- c0145 ..> c0145: `collectEntityMemories() calls isAllowedEntityMemory()`
+- c0145 ..> c0145: `expand() calls emptyExpansion()`
+- c0145 ..> c0145: `expand() calls findAttachments()`
+- c0145 ..> c0145: `expand() calls findEntities()`
+- c0145 ..> c0145: `expand() calls findEntityMemories()`
+- c0145 ..> c0145: `expand() calls findRelationships()`
+- c0145 ..> c0145: `expand() calls formatExpansion()`
+- c0145 ..> c0145: `findEntityMemories() calls collectEntityMemories()`
+- c0145 ..> c0145: `findRelationships() calls collectRelationships()`
+- c0145 ..> c0145: `findRelationships() calls formatRelationships()`
+- c0145 ..> c0145: `findRelationships() calls resolveRelationshipEndpoints()`
+- c0145 ..> c0145: `formatExpansion() calls appendArtifactLines()`
+- c0145 ..> c0145: `formatExpansion() calls appendDocumentLines()`
+- c0145 ..> c0145: `formatExpansion() calls appendEntityLines()`
+- c0145 ..> c0145: `formatExpansion() calls appendFileLines()`
+- c0145 ..> c0145: `formatExpansion() calls appendLinkedMemoryLines()`
+- c0145 ..> c0145: `formatExpansion() calls appendRelationshipLines()`
+- c0145 ..> c0146: `type in constructor`
+- c0145 ..> c0147: `type in appendLinkedMemoryLines`
+- c0145 ..> c0147: `type in collectEntityMemories`
+- c0145 ..> c0147: `type in findEntityMemories`
+- c0145 ..> c0147: `type in formatExpansion`
+- c0145 --> c0148: `field readMemory`
+- c0145 ..> c0148: `type in constructor`
+- c0145 ..> c0149: `type in appendRelationshipLines`
+- c0145 ..> c0149: `type in findRelationships`
+- c0145 ..> c0149: `type in formatExpansion`
+- c0145 ..> c0149: `type in formatRelationships`
+- c0145 ..> c0150: `appendArtifactLines() calls clean()`
+- c0145 ..> c0150: `appendDocumentLines() calls clean()`
+- c0145 ..> c0150: `appendEntityLines() calls clean()`
+- c0145 ..> c0150: `appendFileLines() calls clean()`
+- c0145 ..> c0150: `appendLinkedMemoryLines() calls clean()`
+- c0145 ..> c0150: `appendRelationshipLines() calls clean()`
+- c0145 ..> c0150: `collectEntityMemories() calls validId()`
+- c0145 ..> c0150: `collectRelationships() calls safeCall()`
+- c0145 ..> c0150: `collectRelationships() calls validRelationship()`
+- c0145 ..> c0150: `expand() calls safeCall()`
+- c0145 ..> c0150: `findAttachments() calls inProjectScope()`
+- c0145 ..> c0150: `findAttachments() calls safeCall()`
+- c0145 ..> c0150: `findAttachments() calls validId()`
+- c0145 ..> c0150: `findEntities() calls inEntityScope()`
+- c0145 ..> c0150: `findEntities() calls safeCall()`
+- c0145 ..> c0150: `findEntities() calls validEntity()`
+- c0145 ..> c0150: `findEntityMemories() calls safeCall()`
+- c0145 ..> c0150: `formatRelationships() calls inEntityScope()`
+- c0145 ..> c0150: `isAllowedEntityMemory() calls safeCall()`
+- c0145 ..> c0150: `isAllowedEntityMemory() calls validMemory()`
+- c0145 ..> c0150: `resolveRelationshipEndpoints() calls safeCall()`
+- c0145 ..> c0150: `resolveRelationshipEndpoints() calls validEntity()`
+- c0145 ..> c0196: `expand() calls errorMessage()`
+- c0145 ..> c0229: `findEntities() calls trim()`
+- c0146 --> c0148: `field readMemory`
+- c0147 --> c0079: `field entity`
+- c0149 --> c0079: `field source`
+- c0149 --> c0079: `field target`
+- c0149 --> c0081: `field relationship`
+- c0150 ..> c0079: `type in inEntityScope`
+- c0150 ..> c0079: `type in validEntity`
+- c0150 ..> c0081: `type in validRelationship`
+- c0150 ..> c0089: `type in validMemory`
+- c0150 ..> c0104: `type in inEntityScope`
+- c0150 ..> c0104: `type in inProjectScope`
+- c0150 ..> c0142: `type in safeCall`
+- c0150 ..> c0150: `inEntityScope() calls validId()`
+- c0150 ..> c0150: `inProjectScope() calls validId()`
+- c0150 ..> c0150: `validEntity() calls validId()`
+- c0150 ..> c0150: `validMemory() calls validId()`
+- c0150 ..> c0150: `validRelationship() calls validId()`
+- c0150 ..> c0196: `clean() calls sanitizeText()`
+- c0150 ..> c0196: `safeCall() calls errorMessage()`
+- c0150 ..> c0196: `safeCall() calls sanitizeText()`
+- c0150 ..> c0229: `validRelationship() calls trim()`
+- c0151 --> c0086: `field client`
+- c0151 --> c0087: `field knowledge`
+- c0151 --> c0152: `field request`
+- c0151 --> c0153: `field context`
+- c0153 --> c0104: `field scope`
+- c0154 --> c0106: `field file`
+- c0154 --> c0158: `field content`
+- c0154 --> c0159: `field content`
+- c0155 --> c0086: `field client`
+- c0155 --> c0087: `field knowledge`
+- c0155 --> c0153: `field context`
+- c0155 --> c0156: `field request`
+- c0160 ..> c0072: `type in page`
+- c0160 ..> c0076: `type in page`
+- c0160 ..> c0079: `type in assertReadEntity`
+- c0160 ..> c0079: `type in entityInProject`
+- c0160 ..> c0079: `type in hydrateEntities`
+- c0160 ..> c0079: `type in inEntityProject`
+- c0160 ..> c0083: `type in isEntityType`
+- c0160 ..> c0086: `type in assertReadMemory`
+- c0160 ..> c0086: `type in createMemory`
+- c0160 ..> c0086: `type in executeKnowledgeRead`
+- c0160 ..> c0086: `type in executeKnowledgeWrite`
+- c0160 ..> c0086: `type in memoryInProject`
+- c0160 ..> c0086: `type in resolveWriteProject`
+- c0160 ..> c0086: `type in rich`
+- c0160 ..> c0087: `type in assertReadEntity`
+- c0160 ..> c0087: `type in createCodeArtifact`
+- c0160 ..> c0087: `type in createDocument`
+- c0160 ..> c0087: `type in createEntity`
+- c0160 ..> c0087: `type in entityInProject`
+- c0160 ..> c0087: `type in hydrateEntities`
+- c0160 ..> c0087: `type in requireReadKnowledge`
+- c0160 ..> c0087: `type in rich`
+- c0160 ..> c0087: `type in validateAttachments`
+- c0160 ..> c0089: `type in assertReadMemory`
+- c0160 ..> c0089: `type in inMemoryProject`
+- c0160 ..> c0089: `type in memoryInProject`
+- c0160 ..> c0089: `type in replacementMemory`
+- c0160 ..> c0103: `type in updateProvenance`
+- c0160 ..> c0106: `type in fileContent`
+- c0160 ..> c0131: `assertReadEntity() calls getEntity()`
+- c0160 ..> c0131: `createCodeArtifact() calls createCodeArtifact()`
+- c0160 ..> c0131: `createDocument() calls createDocument()`
+- c0160 ..> c0131: `createEntity() calls createEntity()`
+- c0160 ..> c0131: `createRelationship() calls createRelationship()`
+- c0160 ..> c0131: `entityInProject() calls getEntity()`
+- c0160 ..> c0131: `hydrateEntities() calls getEntity()`
+- c0160 ..> c0131: `linkEntityMemory() calls linkEntityMemory()`
+- c0160 ..> c0131: `linkMemories() calls linkMemories()`
+- c0160 ..> c0131: `readCodeArtifact() calls getCodeArtifact()`
+- c0160 ..> c0131: `readCodeArtifacts() calls listCodeArtifacts()`
+- c0160 ..> c0131: `readDocument() calls getDocument()`
+- c0160 ..> c0131: `readDocuments() calls listDocuments()`
+- c0160 ..> c0131: `readEntities() calls searchEntities()`
+- c0160 ..> c0131: `readEntityMemories() calls getEntityMemories()`
+- c0160 ..> c0131: `readFile() calls getFile()`
+- c0160 ..> c0131: `readFiles() calls listFiles()`
+- c0160 ..> c0131: `readRelationships() calls getEntity()`
+- c0160 ..> c0131: `readRelationships() calls getRelationships()`
+- c0160 ..> c0131: `updateCodeArtifact() calls getCodeArtifact()`
+- c0160 ..> c0131: `updateCodeArtifact() calls updateCodeArtifact()`
+- c0160 ..> c0131: `updateDocument() calls getDocument()`
+- c0160 ..> c0131: `updateDocument() calls updateDocument()`
+- c0160 ..> c0131: `updateEntity() calls updateEntity()`
+- c0160 ..> c0131: `updateMemory() calls updateMemory()`
+- c0160 ..> c0131: `validateAttachments() calls getCodeArtifact()`
+- c0160 ..> c0131: `validateAttachments() calls getDocument()`
+- c0160 ..> c0131: `validateAttachments() calls getFile()`
+- c0160 ..> c0134: `assertReadMemory() calls get()`
+- c0160 ..> c0134: `createMemory() calls create()`
+- c0160 ..> c0134: `memoryInProject() calls get()`
+- c0160 ..> c0134: `readEntityMemories() calls get()`
+- c0160 ..> c0134: `readMemories() calls queryMemory()`
+- c0160 ..> c0134: `readProjects() calls listProjects()`
+- c0160 ..> c0134: `replacementMemory() calls create()`
+- c0160 ..> c0134: `replacementMemory() calls get()`
+- c0160 ..> c0134: `resolveWriteProject() calls listProjects()`
+- c0160 ..> c0134: `supersedeMemory() calls supersede()`
+- c0160 ..> c0151: `type in readCodeArtifact`
+- c0160 ..> c0151: `type in readCodeArtifacts`
+- c0160 ..> c0151: `type in readDocument`
+- c0160 ..> c0151: `type in readDocuments`
+- c0160 ..> c0151: `type in readEntities`
+- c0160 ..> c0151: `type in readEntity`
+- c0160 ..> c0151: `type in readEntityMemories`
+- c0160 ..> c0151: `type in readFile`
+- c0160 ..> c0151: `type in readFiles`
+- c0160 ..> c0151: `type in readMemories`
+- c0160 ..> c0151: `type in readMemory`
+- c0160 ..> c0151: `type in readProjects`
+- c0160 ..> c0151: `type in readRelationships`
+- c0160 ..> c0151: `type in requestedReadProject`
+- c0160 ..> c0151: `type in requireReadKnowledge`
+- c0160 ..> c0152: `type in executeKnowledgeRead`
+- c0160 ..> c0152: `type in validateKnowledgeReadRequest`
+- c0160 ..> c0153: `type in assertReadEntity`
+- c0160 ..> c0153: `type in assertReadMemory`
+- c0160 ..> c0153: `type in createCodeArtifact`
+- c0160 ..> c0153: `type in createDocument`
+- c0160 ..> c0153: `type in createEntity`
+- c0160 ..> c0153: `type in createMemory`
+- c0160 ..> c0153: `type in currentProject`
+- c0160 ..> c0153: `type in effectiveCommit`
+- c0160 ..> c0153: `type in executeKnowledgeRead`
+- c0160 ..> c0153: `type in executeKnowledgeWrite`
+- c0160 ..> c0153: `type in provenance`
+- c0160 ..> c0153: `type in resolveWriteProject`
+- c0160 ..> c0153: `type in updateProvenance`
+- c0160 ..> c0154: `type in createCodeArtifact`
+- c0160 ..> c0154: `type in createDocument`
+- c0160 ..> c0154: `type in createEntity`
+- c0160 ..> c0154: `type in createMemory`
+- c0160 ..> c0154: `type in createRelationship`
+- c0160 ..> c0154: `type in executeKnowledgeRead`
+- c0160 ..> c0154: `type in executeKnowledgeWrite`
+- c0160 ..> c0154: `type in linkEntityMemory`
+- c0160 ..> c0154: `type in linkMemories`
+- c0160 ..> c0154: `type in readCodeArtifact`
+- c0160 ..> c0154: `type in readCodeArtifacts`
+- c0160 ..> c0154: `type in readDocument`
+- c0160 ..> c0154: `type in readDocuments`
+- c0160 ..> c0154: `type in readEntities`
+- c0160 ..> c0154: `type in readEntity`
+- c0160 ..> c0154: `type in readEntityMemories`
+- c0160 ..> c0154: `type in readFile`
+- c0160 ..> c0154: `type in readFiles`
+- c0160 ..> c0154: `type in readMemories`
+- c0160 ..> c0154: `type in readMemory`
+- c0160 ..> c0154: `type in readProjects`
+- c0160 ..> c0154: `type in readRelationships`
+- c0160 ..> c0154: `type in readResult`
+- c0160 ..> c0154: `type in supersedeMemory`
+- c0160 ..> c0154: `type in updateCodeArtifact`
+- c0160 ..> c0154: `type in updateDocument`
+- c0160 ..> c0154: `type in updateEntity`
+- c0160 ..> c0154: `type in updateMemory`
+- c0160 ..> c0154: `type in writeResult`
+- c0160 ..> c0155: `type in createRelationship`
+- c0160 ..> c0155: `type in linkEntityMemory`
+- c0160 ..> c0155: `type in linkMemories`
+- c0160 ..> c0155: `type in replacementMemory`
+- c0160 ..> c0155: `type in supersedeMemory`
+- c0160 ..> c0155: `type in updateCodeArtifact`
+- c0160 ..> c0155: `type in updateDocument`
+- c0160 ..> c0155: `type in updateEntity`
+- c0160 ..> c0155: `type in updateMemory`
+- c0160 ..> c0156: `type in executeKnowledgeWrite`
+- c0160 ..> c0156: `type in validateKnowledgeWriteRequest`
+- c0160 ..> c0157: `type in resolveWriteProject`
+- c0160 ..> c0158: `type in fileContent`
+- c0160 ..> c0159: `type in fileContent`
+- c0160 ..> c0160: `assertReadEntity() calls currentProject()`
+- c0160 ..> c0160: `assertReadEntity() calls inEntityProject()`
+- c0160 ..> c0160: `assertReadMemory() calls currentProject()`
+- c0160 ..> c0160: `assertReadMemory() calls inMemoryProject()`
+- c0160 ..> c0160: `boundedId() calls optionalId()`
+- c0160 ..> c0160: `boundedListPage() calls compactWriteValue()`
+- c0160 ..> c0160: `boundedListPage() calls json()`
+- c0160 ..> c0160: `boundedListPage() calls listPage()`
+- c0160 ..> c0160: `commit() calls optionalText()`
+- c0160 ..> c0160: `compactObjectEntry() calls compactWriteValue()`
+- c0160 ..> c0160: `compactWriteValue() calls compactObjectEntry()`
+- c0160 ..> c0160: `compactWriteValue() calls compactString()`
+- c0160 ..> c0160: `createCodeArtifact() calls beforeMutation()`
+- c0160 ..> c0160: `createCodeArtifact() calls provenance()`
+- c0160 ..> c0160: `createCodeArtifact() calls writeResult()`
+- c0160 ..> c0160: `createDocument() calls beforeMutation()`
+- c0160 ..> c0160: `createDocument() calls provenance()`
+- c0160 ..> c0160: `createDocument() calls writeResult()`
+- c0160 ..> c0160: `createEntity() calls beforeMutation()`
+- c0160 ..> c0160: `createEntity() calls provenance()`
+- c0160 ..> c0160: `createEntity() calls writeResult()`
+- c0160 ..> c0160: `createMemory() calls beforeMutation()`
+- c0160 ..> c0160: `createMemory() calls provenance()`
+- c0160 ..> c0160: `createMemory() calls rich()`
+- c0160 ..> c0160: `createMemory() calls validateAttachments()`
+- c0160 ..> c0160: `createMemory() calls writeResult()`
+- c0160 ..> c0160: `createRelationship() calls beforeMutation()`
+- c0160 ..> c0160: `createRelationship() calls entityInProject()`
+- c0160 ..> c0160: `createRelationship() calls provenance()`
+- c0160 ..> c0160: `createRelationship() calls writeResult()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls currentProject()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readCodeArtifact()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readCodeArtifacts()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readDocument()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readDocuments()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readEntities()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readEntity()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readEntityMemories()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readFile()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readFiles()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readMemories()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readMemory()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readProjects()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls readRelationships()`
+- c0160 ..> c0160: `executeKnowledgeRead() calls validateKnowledgeReadRequest()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls createCodeArtifact()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls createDocument()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls createEntity()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls createMemory()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls createRelationship()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls effectiveCommit()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls linkEntityMemory()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls linkMemories()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls rejectSensitiveInput()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls resolveWriteProject()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls rich()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls supersedeMemory()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls updateCodeArtifact()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls updateDocument()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls updateEntity()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls updateMemory()`
+- c0160 ..> c0160: `executeKnowledgeWrite() calls validateKnowledgeWriteRequest()`
+- c0160 ..> c0160: `fileContent() calls json()`
+- c0160 ..> c0160: `linkEntityMemory() calls beforeMutation()`
+- c0160 ..> c0160: `linkEntityMemory() calls entityInProject()`
+- c0160 ..> c0160: `linkEntityMemory() calls memoryInProject()`
+- c0160 ..> c0160: `linkEntityMemory() calls writeResult()`
+- c0160 ..> c0160: `linkMemories() calls beforeMutation()`
+- c0160 ..> c0160: `linkMemories() calls memoryInProject()`
+- c0160 ..> c0160: `linkMemories() calls writeResult()`
+- c0160 ..> c0160: `need() calls requiredText()`
+- c0160 ..> c0160: `optionalId() calls requiredId()`
+- c0160 ..> c0160: `optionalIds() calls requiredIds()`
+- c0160 ..> c0160: `optionalStrings() calls requiredStrings()`
+- c0160 ..> c0160: `optionalText() calls requiredText()`
+- c0160 ..> c0160: `provenance() calls effectiveCommit()`
+- c0160 ..> c0160: `readCodeArtifact() calls page()`
+- c0160 ..> c0160: `readCodeArtifact() calls readResult()`
+- c0160 ..> c0160: `readCodeArtifact() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readCodeArtifacts() calls boundedListPage()`
+- c0160 ..> c0160: `readCodeArtifacts() calls readResult()`
+- c0160 ..> c0160: `readCodeArtifacts() calls requestedReadProject()`
+- c0160 ..> c0160: `readCodeArtifacts() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readDocument() calls page()`
+- c0160 ..> c0160: `readDocument() calls readResult()`
+- c0160 ..> c0160: `readDocument() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readDocuments() calls boundedListPage()`
+- c0160 ..> c0160: `readDocuments() calls readResult()`
+- c0160 ..> c0160: `readDocuments() calls requestedReadProject()`
+- c0160 ..> c0160: `readDocuments() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readEntities() calls boundedListPage()`
+- c0160 ..> c0160: `readEntities() calls hydrateEntities()`
+- c0160 ..> c0160: `readEntities() calls inEntityProject()`
+- c0160 ..> c0160: `readEntities() calls readResult()`
+- c0160 ..> c0160: `readEntities() calls requestedReadProject()`
+- c0160 ..> c0160: `readEntities() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readEntity() calls assertReadEntity()`
+- c0160 ..> c0160: `readEntity() calls readResult()`
+- c0160 ..> c0160: `readEntity() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readEntityMemories() calls assertReadEntity()`
+- c0160 ..> c0160: `readEntityMemories() calls compactWriteValue()`
+- c0160 ..> c0160: `readEntityMemories() calls inMemoryProject()`
+- c0160 ..> c0160: `readEntityMemories() calls listPage()`
+- c0160 ..> c0160: `readEntityMemories() calls readResult()`
+- c0160 ..> c0160: `readEntityMemories() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readFile() calls fileContent()`
+- c0160 ..> c0160: `readFile() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readFiles() calls boundedListPage()`
+- c0160 ..> c0160: `readFiles() calls readResult()`
+- c0160 ..> c0160: `readFiles() calls requestedReadProject()`
+- c0160 ..> c0160: `readFiles() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readMemories() calls inMemoryProject()`
+- c0160 ..> c0160: `readMemories() calls readResult()`
+- c0160 ..> c0160: `readMemories() calls requestedReadProject()`
+- c0160 ..> c0160: `readMemory() calls assertReadMemory()`
+- c0160 ..> c0160: `readMemory() calls readResult()`
+- c0160 ..> c0160: `readProjects() calls boundedListPage()`
+- c0160 ..> c0160: `readProjects() calls readResult()`
+- c0160 ..> c0160: `readRelationships() calls assertReadEntity()`
+- c0160 ..> c0160: `readRelationships() calls inEntityProject()`
+- c0160 ..> c0160: `readRelationships() calls listPage()`
+- c0160 ..> c0160: `readRelationships() calls readResult()`
+- c0160 ..> c0160: `readRelationships() calls requireReadKnowledge()`
+- c0160 ..> c0160: `readResult() calls json()`
+- c0160 ..> c0160: `rejectSensitiveInput() calls containsSensitiveData()`
+- c0160 ..> c0160: `replacementMemory() calls beforeMutation()`
+- c0160 ..> c0160: `replacementMemory() calls memoryInProject()`
+- c0160 ..> c0160: `replacementMemory() calls provenance()`
+- c0160 ..> c0160: `replacementMemory() calls validateAttachments()`
+- c0160 ..> c0160: `requestedReadProject() calls currentProject()`
+- c0160 ..> c0160: `requiredIds() calls requiredId()`
+- c0160 ..> c0160: `requiredStrings() calls requiredText()`
+- c0160 ..> c0160: `resolveWriteProject() calls currentProject()`
+- c0160 ..> c0160: `supersedeMemory() calls beforeMutation()`
+- c0160 ..> c0160: `supersedeMemory() calls memoryInProject()`
+- c0160 ..> c0160: `supersedeMemory() calls replacementMemory()`
+- c0160 ..> c0160: `supersedeMemory() calls writeResult()`
+- c0160 ..> c0160: `updateCodeArtifact() calls beforeMutation()`
+- c0160 ..> c0160: `updateCodeArtifact() calls updateProvenance()`
+- c0160 ..> c0160: `updateCodeArtifact() calls writeResult()`
+- c0160 ..> c0160: `updateDocument() calls beforeMutation()`
+- c0160 ..> c0160: `updateDocument() calls updateProvenance()`
+- c0160 ..> c0160: `updateDocument() calls writeResult()`
+- c0160 ..> c0160: `updateEntity() calls beforeMutation()`
+- c0160 ..> c0160: `updateEntity() calls entityInProject()`
+- c0160 ..> c0160: `updateEntity() calls updateProvenance()`
+- c0160 ..> c0160: `updateEntity() calls writeResult()`
+- c0160 ..> c0160: `updateMemory() calls beforeMutation()`
+- c0160 ..> c0160: `updateMemory() calls memoryInProject()`
+- c0160 ..> c0160: `updateMemory() calls updateProvenance()`
+- c0160 ..> c0160: `updateMemory() calls validateAttachments()`
+- c0160 ..> c0160: `updateMemory() calls writeResult()`
+- c0160 ..> c0160: `updateProvenance() calls effectiveCommit()`
+- c0160 ..> c0160: `validateEntityFields() calls isEntityType()`
+- c0160 ..> c0160: `validateEntityFields() calls optionalText()`
+- c0160 ..> c0160: `validateKnowledgeReadRequest() calls checkOperation()`
+- c0160 ..> c0160: `validateKnowledgeReadRequest() calls record()`
+- c0160 ..> c0160: `validateKnowledgeReadRequest() calls validateReadPagination()`
+- c0160 ..> c0160: `validateKnowledgeReadRequest() calls validateReadSearch()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls checkOperation()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls commit()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls need()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls optionalId()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls optionalIds()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls optionalImportance()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls optionalStrings()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls optionalText()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls record()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls requiredId()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls requiredIds()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls requiredStrings()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls requiredText()`
+- c0160 ..> c0160: `validateKnowledgeWriteRequest() calls validateEntityFields()`
+- c0160 ..> c0160: `validateReadPagination() calls boundedId()`
+- c0160 ..> c0160: `writeResult() calls compactWriteValue()`
+- c0160 ..> c0160: `writeResult() calls json()`
+- c0160 ..> c0182: `replacementMemory() calls replacementMemoryContext()`
+- c0160 ..> c0196: `containsSensitiveData() calls hasSensitiveData()`
+- c0160 ..> c0229: `requiredText() calls trim()`
+- c0160 ..> c0229: `resolveWriteProject() calls trim()`
+- c0162 --> c0073: `field input`
+- c0163 --> c0077: `field input`
+- c0165 --> c0080: `field input`
+- c0167 --> c0082: `field input`
+- c0170 --> c0162: `field codeArtifacts`
+- c0170 --> c0163: `field documents`
+- c0170 --> c0164: `field entityMemoryLinks`
+- c0170 --> c0165: `field entities`
+- c0170 --> c0167: `field relationships`
+- c0173 --> c0171: `field codeArtifacts`
+- c0173 --> c0171: `field documents`
+- c0173 --> c0171: `field entities`
+- c0173 --> c0171: `field relationships`
+- c0174 ..> c0072: `type in writeCodeArtifact`
+- c0174 ..> c0076: `type in writeDocument`
+- c0174 ..> c0079: `type in writeEntity`
+- c0174 ..> c0081: `type in writeRelationship`
+- c0174 ..> c0089: `type in attachmentIds`
+- c0174 ..> c0089: `type in attachmentMemory`
+- c0174 ..> c0089: `type in attachmentsDiffer`
+- c0174 ..> c0131: `writeAttachments() calls updateMemory()`
+- c0174 ..> c0131: `writeCodeArtifact() calls createCodeArtifact()`
+- c0174 ..> c0131: `writeCodeArtifact() calls getCodeArtifact()`
+- c0174 ..> c0131: `writeDocument() calls createDocument()`
+- c0174 ..> c0131: `writeDocument() calls getDocument()`
+- c0174 ..> c0131: `writeEntity() calls createEntity()`
+- c0174 ..> c0131: `writeEntity() calls getEntity()`
+- c0174 ..> c0131: `writeEntityMemoryLink() calls linkEntityMemory()`
+- c0174 ..> c0131: `writeLinkedMemory() calls linkMemories()`
+- c0174 ..> c0131: `writeRelationship() calls createRelationship()`
+- c0174 ..> c0134: `createOnce() calls create()`
+- c0174 ..> c0145: `attachmentMemory() calls readMemory()`
+- c0174 ..> c0161: `type in attachmentIds`
+- c0174 ..> c0161: `type in attachmentPatch`
+- c0174 ..> c0161: `type in attachmentsDiffer`
+- c0174 ..> c0161: `type in requestedAttachmentIds`
+- c0174 ..> c0162: `type in writeCodeArtifact`
+- c0174 ..> c0163: `type in writeDocument`
+- c0174 ..> c0164: `type in writeEntityMemoryLink`
+- c0174 ..> c0165: `type in writeEntity`
+- c0174 --> c0166: `field readMemory`
+- c0174 ..> c0166: `type in constructor`
+- c0174 ..> c0167: `type in writeRelationship`
+- c0174 ..> c0168: `type in execute`
+- c0174 ..> c0169: `type in createOnce`
+- c0174 ..> c0169: `type in execute`
+- c0174 ..> c0169: `type in writeAttachments`
+- c0174 ..> c0169: `type in writeCodeArtifact`
+- c0174 ..> c0169: `type in writeCodeArtifacts`
+- c0174 ..> c0169: `type in writeConnection`
+- c0174 ..> c0169: `type in writeDocument`
+- c0174 ..> c0169: `type in writeDocuments`
+- c0174 ..> c0169: `type in writeEntities`
+- c0174 ..> c0169: `type in writeEntity`
+- c0174 ..> c0169: `type in writeEntityMemoryLink`
+- c0174 ..> c0169: `type in writeEntityMemoryLinks`
+- c0174 ..> c0169: `type in writeLinkedMemories`
+- c0174 ..> c0169: `type in writeLinkedMemory`
+- c0174 ..> c0169: `type in writeRelationship`
+- c0174 ..> c0169: `type in writeRelationships`
+- c0174 ..> c0170: `type in attachmentMemory`
+- c0174 ..> c0170: `type in createOnce`
+- c0174 ..> c0170: `type in execute`
+- c0174 ..> c0170: `type in requestedAttachmentIds`
+- c0174 ..> c0170: `type in writeAttachments`
+- c0174 ..> c0170: `type in writeCodeArtifact`
+- c0174 ..> c0170: `type in writeCodeArtifacts`
+- c0174 ..> c0170: `type in writeConnection`
+- c0174 ..> c0170: `type in writeDocument`
+- c0174 ..> c0170: `type in writeDocuments`
+- c0174 ..> c0170: `type in writeEntities`
+- c0174 ..> c0170: `type in writeEntity`
+- c0174 ..> c0170: `type in writeEntityMemoryLink`
+- c0174 ..> c0170: `type in writeEntityMemoryLinks`
+- c0174 ..> c0170: `type in writeLinkedMemories`
+- c0174 ..> c0170: `type in writeLinkedMemory`
+- c0174 ..> c0170: `type in writeRelationship`
+- c0174 ..> c0170: `type in writeRelationships`
+- c0174 ..> c0172: `type in createOnce`
+- c0174 ..> c0172: `type in recordCreateFailure`
+- c0174 ..> c0172: `type in writeAttachments`
+- c0174 ..> c0172: `type in writeCodeArtifact`
+- c0174 ..> c0172: `type in writeCodeArtifacts`
+- c0174 ..> c0172: `type in writeConnection`
+- c0174 ..> c0172: `type in writeDocument`
+- c0174 ..> c0172: `type in writeDocuments`
+- c0174 ..> c0172: `type in writeEntities`
+- c0174 ..> c0172: `type in writeEntity`
+- c0174 ..> c0172: `type in writeEntityMemoryLink`
+- c0174 ..> c0172: `type in writeEntityMemoryLinks`
+- c0174 ..> c0172: `type in writeLinkedMemories`
+- c0174 ..> c0172: `type in writeLinkedMemory`
+- c0174 ..> c0172: `type in writeRelationship`
+- c0174 ..> c0172: `type in writeRelationships`
+- c0174 ..> c0173: `type in createOnce`
+- c0174 ..> c0173: `type in execute`
+- c0174 ..> c0173: `type in recordCreateFailure`
+- c0174 ..> c0173: `type in requestedAttachmentIds`
+- c0174 ..> c0173: `type in writeAttachments`
+- c0174 ..> c0173: `type in writeCodeArtifact`
+- c0174 ..> c0173: `type in writeCodeArtifacts`
+- c0174 ..> c0173: `type in writeConnection`
+- c0174 ..> c0173: `type in writeDocument`
+- c0174 ..> c0173: `type in writeDocuments`
+- c0174 ..> c0173: `type in writeEntities`
+- c0174 ..> c0173: `type in writeEntity`
+- c0174 ..> c0173: `type in writeEntityMemoryLink`
+- c0174 ..> c0173: `type in writeEntityMemoryLinks`
+- c0174 ..> c0173: `type in writeLinkedMemories`
+- c0174 ..> c0173: `type in writeLinkedMemory`
+- c0174 ..> c0173: `type in writeRelationship`
+- c0174 ..> c0173: `type in writeRelationships`
+- c0174 ..> c0174: `createOnce() calls recordCreateFailure()`
+- c0174 ..> c0174: `execute() calls writeAttachments()`
+- c0174 ..> c0174: `execute() calls writeCodeArtifacts()`
+- c0174 ..> c0174: `execute() calls writeDocuments()`
+- c0174 ..> c0174: `execute() calls writeEntities()`
+- c0174 ..> c0174: `execute() calls writeEntityMemoryLinks()`
+- c0174 ..> c0174: `execute() calls writeLinkedMemories()`
+- c0174 ..> c0174: `execute() calls writeRelationships()`
+- c0174 ..> c0174: `writeAttachments() calls attachmentIds()`
+- c0174 ..> c0174: `writeAttachments() calls attachmentMemory()`
+- c0174 ..> c0174: `writeAttachments() calls attachmentPatch()`
+- c0174 ..> c0174: `writeAttachments() calls attachmentsDiffer()`
+- c0174 ..> c0174: `writeAttachments() calls requestedAttachmentIds()`
+- c0174 ..> c0174: `writeAttachments() calls writeConnection()`
+- c0174 ..> c0174: `writeCodeArtifact() calls createOnce()`
+- c0174 ..> c0174: `writeCodeArtifacts() calls writeCodeArtifact()`
+- c0174 ..> c0174: `writeConnection() calls execute()`
+- c0174 ..> c0174: `writeDocument() calls createOnce()`
+- c0174 ..> c0174: `writeDocuments() calls writeDocument()`
+- c0174 ..> c0174: `writeEntities() calls writeEntity()`
+- c0174 ..> c0174: `writeEntity() calls createOnce()`
+- c0174 ..> c0174: `writeEntityMemoryLink() calls writeConnection()`
+- c0174 ..> c0174: `writeEntityMemoryLinks() calls writeEntityMemoryLink()`
+- c0174 ..> c0174: `writeLinkedMemories() calls writeLinkedMemory()`
+- c0174 ..> c0174: `writeLinkedMemory() calls writeConnection()`
+- c0174 ..> c0174: `writeRelationship() calls createOnce()`
+- c0174 ..> c0174: `writeRelationships() calls writeRelationship()`
+- c0174 ..> c0175: `type in writeCodeArtifact`
+- c0174 ..> c0175: `type in writeDocument`
+- c0174 ..> c0175: `type in writeEntity`
+- c0174 ..> c0175: `type in writeRelationship`
+- c0174 --> c0176: `field client`
+- c0174 ..> c0176: `type in constructor`
+- c0174 ..> c0177: `attachmentIds() calls uniqueIds()`
+- c0174 ..> c0177: `attachmentsDiffer() calls sameIds()`
+- c0174 ..> c0177: `createOnce() calls positiveId()`
+- c0174 ..> c0177: `execute() calls copyState()`
+- c0174 ..> c0177: `execute() calls instructionId()`
+- c0174 ..> c0177: `execute() calls normalizedState()`
+- c0174 ..> c0177: `recordCreateFailure() calls rejectedCreate()`
+- c0174 ..> c0177: `requestedAttachmentIds() calls selectedIds()`
+- c0174 ..> c0177: `requestedAttachmentIds() calls uniqueIds()`
+- c0174 ..> c0177: `writeCodeArtifacts() calls positiveId()`
+- c0174 ..> c0177: `writeCodeArtifacts() calls resourceSlots()`
+- c0174 ..> c0177: `writeCodeArtifacts() calls stateId()`
+- c0174 ..> c0177: `writeCodeArtifacts() calls stateWithNumber()`
+- c0174 ..> c0177: `writeConnection() calls rejectedCreate()`
+- c0174 ..> c0177: `writeDocuments() calls positiveId()`
+- c0174 ..> c0177: `writeDocuments() calls resourceSlots()`
+- c0174 ..> c0177: `writeDocuments() calls stateId()`
+- c0174 ..> c0177: `writeDocuments() calls stateWithNumber()`
+- c0174 ..> c0177: `writeEntities() calls positiveId()`
+- c0174 ..> c0177: `writeEntities() calls resourceSlots()`
+- c0174 ..> c0177: `writeEntities() calls stateId()`
+- c0174 ..> c0177: `writeEntities() calls stateWithNumber()`
+- c0174 ..> c0177: `writeEntityMemoryLink() calls hasValue()`
+- c0174 ..> c0177: `writeEntityMemoryLink() calls stateId()`
+- c0174 ..> c0177: `writeLinkedMemory() calls hasValue()`
+- c0174 ..> c0177: `writeRelationship() calls stateId()`
+- c0174 ..> c0177: `writeRelationships() calls positiveId()`
+- c0174 ..> c0177: `writeRelationships() calls resourceSlots()`
+- c0174 ..> c0177: `writeRelationships() calls stateId()`
+- c0174 ..> c0177: `writeRelationships() calls stateWithNumber()`
+- c0174 ..> c0196: `createOnce() calls errorMessage()`
+- c0174 ..> c0196: `writeConnection() calls errorMessage()`
+- c0174 ..> c0242: `createOnce() calls inspect()`
+- c0174 ..> c0242: `writeConnection() calls inspect()`
+- c0177 ..> c0004: `resourceSlots() calls set()`
+- c0177 ..> c0134: `resourceSlots() calls get()`
+- c0177 ..> c0170: `type in instructionId`
+- c0177 ..> c0171: `type in receipts`
+- c0177 ..> c0171: `type in selectedIds`
+- c0177 ..> c0171: `type in stateId`
+- c0177 ..> c0171: `type in stateWithNumber`
+- c0177 ..> c0173: `type in copyState`
+- c0177 ..> c0173: `type in normalizedState`
+- c0177 ..> c0175: `type in resourceSlots`
+- c0177 ..> c0177: `normalizedState() calls receipts()`
+- c0177 ..> c0177: `receipts() calls positiveId()`
+- c0177 ..> c0177: `selectedIds() calls positiveId()`
+- c0177 ..> c0177: `selectedIds() calls resourceSlots()`
+- c0177 ..> c0177: `selectedIds() calls stateId()`
+- c0177 ..> c0177: `stateWithNumber() calls positiveId()`
+- c0180 ..> c0047: `flush() calls resolve()`
+- c0180 ..|> c0178: `implements`
+- c0180 --> c0179: `field level`
+- c0180 --> c0179: `field options`
+- c0180 ..> c0179: `type in constructor`
+- c0180 ..> c0179: `type in setLevel`
+- c0180 ..> c0180: `close() calls flush()`
+- c0180 ..> c0180: `emit() calls enqueue()`
+- c0180 ..> c0180: `emit() calls warn()`
+- c0180 ..> c0180: `enqueue() calls rotate()`
+- c0180 ..> c0180: `enqueue() calls warn()`
+- c0180 ..> c0180: `flush() calls warn()`
+- c0180 ..> c0181: `constructor() calls limit()`
+- c0180 ..> c0181: `enqueue() calls excludeCredentials()`
+- c0180 ..> c0181: `enqueue() calls pruneDirectory()`
+- c0180 ..> c0196: `enqueue() calls sanitizeValue()`
+- c0181 ..> c0181: `pruneDirectory() calls listLogFiles()`
+- c0181 ..> c0181: `pruneDirectory() calls processExited()`
+- c0182 ..> c0091: `type in replacementMemoryInput`
+- c0182 ..> c0182: `replacementMemoryInput() calls replacementMemoryContext()`
+- c0182 ..> c0196: `storedMemoryContext() calls sanitizeText()`
+- c0185 --> c0187: `field complete`
+- c0186 ..> c0047: `applySummary() calls now()`
+- c0186 --> c0183: `field compactedHistory`
+- c0186 ..> c0183: `type in constructor`
+- c0186 ..> c0183: `type in getCompactedHistory`
+- c0186 ..> c0183: `type in prepare`
+- c0186 ..> c0183: `type in prepareCapture`
+- c0186 ..> c0183: `type in prepareContext`
+- c0186 ..> c0186: `prepare() calls prepareContext()`
+- c0186 ..> c0186: `prepareCapture() calls outputAllowance()`
+- c0186 ..> c0186: `prepareCapture() calls prepareContext()`
+- c0186 ..> c0186: `prepareContext() calls applySummary()`
+- c0186 ..> c0186: `prepareContext() calls getCompactedHistory()`
+- c0186 ..> c0186: `prepareContext() calls outputAllowance()`
+- c0186 ..> c0187: `type in prepare`
+- c0186 ..> c0187: `type in prepareCapture`
+- c0186 ..> c0187: `type in prepareContext`
+- c0186 ..> c0188: `applySummary() calls contextTokens()`
+- c0186 ..> c0188: `constructor() calls compactionSettings()`
+- c0186 ..> c0188: `constructor() calls privateContextWindow()`
+- c0186 ..> c0188: `outputAllowance() calls resolvedOutputAllowance()`
+- c0186 ..> c0188: `prepareContext() calls assertImageSupport()`
+- c0186 ..> c0188: `prepareContext() calls contextTokens()`
+- c0186 ..> c0188: `prepareContext() calls outputCeiling()`
+- c0186 ..> c0188: `prepareContext() calls recentCutIndex()`
+- c0186 ..> c0188: `prepareContext() calls summarizeMemoryHistory()`
+- c0186 ..> c0229: `applySummary() calls trim()`
+- c0188 ..> c0047: `summarizeMemoryHistory() calls now()`
+- c0188 ..> c0094: `type in evidencePageContent`
+- c0188 ..> c0184: `assertFits() constructs ContextWindowError`
+- c0188 ..> c0184: `smallerSummaryBatch() constructs ContextWindowError`
+- c0188 ..> c0185: `type in summarizeMemoryHistory`
+- c0188 ..> c0188: `assertFits() calls contextTokens()`
+- c0188 ..> c0188: `contextTokens() calls textTokens()`
+- c0188 ..> c0188: `evidenceMessage() calls modelEvidence()`
+- c0188 ..> c0188: `evidencePageContent() calls evidenceMessage()`
+- c0188 ..> c0188: `modelEvidence() calls objectRecord()`
+- c0188 ..> c0188: `outputCeiling() calls validatePositiveSafeInteger()`
+- c0188 ..> c0188: `privateContextWindow() calls validatePositiveSafeInteger()`
+- c0188 ..> c0188: `recentCutIndex() calls entriesFor()`
+- c0188 ..> c0188: `resolvedOutputAllowance() calls assertFits()`
+- c0188 ..> c0188: `resolvedOutputAllowance() calls contextTokens()`
+- c0188 ..> c0188: `resolvedOutputAllowance() calls outputCeiling()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls assertImageSupport()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls compactionSettings()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls privateContextWindow()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls resolvedOutputAllowance()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls smallerSummaryBatch()`
+- c0188 ..> c0188: `summarizeMemoryHistory() calls summaryEvidence()`
+- c0188 ..> c0188: `summaryEvidence() calls evidenceMessage()`
+- c0188 ..> c0192: `summarizeMemoryHistory() calls complete()`
+- c0188 ..> c0196: `evidenceMessage() calls sanitizeValue()`
+- c0188 ..> c0196: `summarizeMemoryHistory() calls sanitizeText()`
+- c0190 --> c0191: `field modelRegistry`
+- c0192 ..> c0047: `complete() calls now()`
+- c0192 ..> c0047: `completeAttempt() calls now()`
+- c0192 ..> c0047: `completeRequest() calls now()`
+- c0192 ..> c0047: `completeWithSubmission() calls now()`
+- c0192 ..> c0047: `executeRead() calls now()`
+- c0192 ..> c0047: `prepareCapture() calls now()`
+- c0192 ..> c0056: `completeWithSubmission() calls mapConcurrent()`
+- c0192 --> c0061: `field selection`
+- c0192 ..> c0061: `type in constructor`
+- c0192 ..> c0068: `completeRequest() calls isRecallConcurrency()`
+- c0192 ..|> c0092: `implements`
+- c0192 ..> c0096: `type in executeRead`
+- c0192 ..> c0097: `type in complete`
+- c0192 ..> c0097: `type in completeAttempt`
+- c0192 ..> c0097: `type in completeRequest`
+- c0192 ..> c0097: `type in completeWithSubmission`
+- c0192 ..> c0097: `type in emit`
+- c0192 ..> c0097: `type in executeRead`
+- c0192 ..> c0097: `type in prepareCapture`
+- c0192 ..> c0098: `completeWithSubmission() constructs ModelSubmissionError`
+- c0192 ..> c0099: `type in validateSubmission`
+- c0192 ..> c0174: `executeRead() calls execute()`
+- c0192 --> c0178: `field logger`
+- c0192 ..> c0180: `complete() calls emit()`
+- c0192 ..> c0180: `completeAttempt() calls emit()`
+- c0192 ..> c0180: `completeRequest() calls emit()`
+- c0192 ..> c0180: `emit() calls emit()`
+- c0192 ..> c0180: `prepareCapture() calls emit()`
+- c0192 ..> c0186: `completeRequest() calls prepareCapture()`
+- c0192 ..> c0186: `completeRequest() constructs MemoryTaskContext`
+- c0192 ..> c0186: `completeWithSubmission() calls prepare()`
+- c0192 ..> c0188: `completeRequest() calls evidenceMessage()`
+- c0192 ..> c0188: `executeRead() calls evidencePageContent()`
+- c0192 --> c0189: `field transformHeaders`
+- c0192 --> c0191: `field registry`
+- c0192 ..> c0191: `type in constructor`
+- c0192 ..> c0192: `complete() calls completeRequest()`
+- c0192 ..> c0192: `completeAttempt() calls complete()`
+- c0192 ..> c0192: `completeRequest() calls completeWithSubmission()`
+- c0192 ..> c0192: `completeWithSubmission() calls completeAttempt()`
+- c0192 ..> c0192: `completeWithSubmission() calls executeRead()`
+- c0192 ..> c0192: `completeWithSubmission() calls validateSubmission()`
+- c0192 ..> c0192: `prepareCapture() calls completeRequest()`
+- c0192 ..> c0193: `type in constructor`
+- c0192 ..> c0194: `type in completeAttempt`
+- c0192 ..> c0194: `type in completeWithSubmission`
+- c0192 ..> c0194: `type in executeRead`
+- c0192 ..> c0195: `complete() calls rejectionText()`
+- c0192 ..> c0195: `completeAttempt() calls rejectionText()`
+- c0192 ..> c0195: `completeRequest() calls modelLabel()`
+- c0192 ..> c0195: `completeRequest() calls requestDeadline()`
+- c0192 ..> c0195: `completeRequest() calls requestOptions()`
+- c0192 ..> c0195: `completeRequest() calls requestTimeout()`
+- c0192 ..> c0195: `completeRequest() calls serializeInput()`
+- c0192 ..> c0195: `completeRequest() calls submissionTool()`
+- c0192 ..> c0195: `completeRequest() calls throwRequestFailure()`
+- c0192 ..> c0195: `completeWithSubmission() calls appendCallCountCorrection()`
+- c0192 ..> c0195: `completeWithSubmission() calls ensureCompletionFinished()`
+- c0192 ..> c0195: `completeWithSubmission() calls errorToolResult()`
+- c0192 ..> c0195: `completeWithSubmission() calls rejectionText()`
+- c0192 ..> c0195: `completeWithSubmission() calls sanitizedAssistantForHistory()`
+- c0192 ..> c0195: `completeWithSubmission() calls serializeInput()`
+- c0192 ..> c0195: `completeWithSubmission() calls submissionTool()`
+- c0192 ..> c0195: `completeWithSubmission() calls toolCalls()`
+- c0192 ..> c0195: `constructor() calls modelLabel()`
+- c0192 ..> c0195: `executeRead() calls errorToolResult()`
+- c0192 ..> c0195: `executeRead() calls rejectionText()`
+- c0192 ..> c0195: `executeRead() calls serializeInput()`
+- c0192 ..> c0195: `executeRead() calls submissionTool()`
+- c0192 ..> c0195: `executeRead() calls textBlock()`
+- c0192 ..> c0195: `prepareCapture() calls rejectionText()`
+- c0192 ..> c0196: `completeRequest() calls sanitizeText()`
+- c0192 ..> c0196: `emit() calls sanitizeValue()`
+- c0193 --> c0178: `field logger`
+- c0193 --> c0189: `field transformHeaders`
+- c0195 ..> c0047: `appendCallCountCorrection() calls now()`
+- c0195 ..> c0047: `errorToolResult() calls now()`
+- c0195 ..> c0061: `type in modelLabel`
+- c0195 ..> c0061: `type in modelSelectionFromModel`
+- c0195 ..> c0061: `type in resolveMemoryModel`
+- c0195 ..> c0096: `type in submissionTool`
+- c0195 ..> c0097: `type in ensureCompletionFinished`
+- c0195 ..> c0097: `type in requestDeadline`
+- c0195 ..> c0097: `type in requestTimeout`
+- c0195 ..> c0097: `type in throwRequestFailure`
+- c0195 ..> c0099: `type in submissionTool`
+- c0195 ..> c0189: `type in requestOptions`
+- c0195 ..> c0190: `type in availableMemoryModels`
+- c0195 ..> c0191: `type in resolveMemoryModel`
+- c0195 ..> c0192: `requestOptions() calls transformHeaders()`
+- c0195 ..> c0192: `resolveMemoryModel() constructs PiMemoryModel`
+- c0195 ..> c0192: `type in resolveMemoryModel`
+- c0195 ..> c0193: `type in resolveMemoryModel`
+- c0195 ..> c0194: `type in requestDeadline`
+- c0195 ..> c0195: `appendCallCountCorrection() calls errorToolResult()`
+- c0195 ..> c0195: `appendCallCountCorrection() calls rejectionText()`
+- c0195 ..> c0195: `appendCallCountCorrection() calls sanitizedAssistantForHistory()`
+- c0195 ..> c0195: `errorToolResult() calls textBlock()`
+- c0195 ..> c0195: `openCodeSessionHeaders() calls isOpenCodeModel()`
+- c0195 ..> c0195: `requestOptions() calls openCodeSessionHeaders()`
+- c0195 ..> c0195: `sanitizedAssistantForHistory() calls textBlock()`
+- c0195 ..> c0196: `appendCallCountCorrection() calls sanitizeText()`
+- c0195 ..> c0196: `ensureCompletionFinished() calls sanitizeText()`
+- c0195 ..> c0196: `rejectionText() calls errorMessage()`
+- c0195 ..> c0196: `sanitizedAssistantForHistory() calls sanitizeText()`
+- c0195 ..> c0196: `sanitizedAssistantForHistory() calls sanitizeValue()`
+- c0195 ..> c0196: `serializeInput() calls sanitizeText()`
+- c0195 ..> c0196: `serializeInput() calls sanitizeValue()`
+- c0195 ..> c0196: `throwRequestFailure() calls sanitizeText()`
+- c0196 ..> c0196: `errorMessage() calls diagnosticMessage()`
+- c0196 ..> c0196: `errorMessage() calls sanitizeText()`
+- c0196 ..> c0196: `hasSensitiveData() calls sanitizeText()`
+- c0196 ..> c0196: `sanitizeValue() calls sanitizeText()`
+- c0196 ..> c0242: `diagnosticMessage() calls inspect()`
+- c0199 ..> c0086: `type in initialiseProject`
+- c0199 ..> c0086: `type in initialiseProjectForAgent`
+- c0199 ..> c0086: `type in promptExistingProject`
+- c0199 ..> c0101: `type in existingMapping`
+- c0199 ..> c0101: `type in initialiseProject`
+- c0199 ..> c0101: `type in initialiseProjectForAgent`
+- c0199 ..> c0101: `type in promptExistingProject`
+- c0199 ..> c0102: `type in promptNewProject`
+- c0199 ..> c0102: `type in validateAgentProjectDetails`
+- c0199 ..> c0129: `promptExistingProject() calls notify()`
+- c0199 ..> c0134: `initialiseProject() calls createProject()`
+- c0199 ..> c0134: `initialiseProject() calls linkProject()`
+- c0199 ..> c0134: `initialiseProject() calls listProjects()`
+- c0199 ..> c0134: `initialiseProjectForAgent() calls createProject()`
+- c0199 ..> c0134: `initialiseProjectForAgent() calls linkProject()`
+- c0199 ..> c0134: `initialiseProjectForAgent() calls listProjects()`
+- c0199 ..> c0134: `promptExistingProject() calls listProjects()`
+- c0199 ..> c0196: `promptExistingProject() calls sanitizeText()`
+- c0199 ..> c0196: `promptNewProject() calls sanitizeText()`
+- c0199 ..> c0197: `type in initialiseProjectForAgent`
+- c0199 ..> c0197: `type in validateAgentProjectDetails`
+- c0199 ..> c0198: `existingMapping() constructs ProjectInitError`
+- c0199 ..> c0198: `initialiseProject() constructs ProjectInitError`
+- c0199 ..> c0198: `initialiseProjectForAgent() constructs ProjectInitError`
+- c0199 ..> c0198: `promptExistingProject() constructs ProjectInitError`
+- c0199 ..> c0198: `promptNewProject() constructs ProjectInitError`
+- c0199 ..> c0198: `validateAgentProjectDetails() constructs ProjectInitError`
+- c0199 ..> c0199: `initialiseProject() calls existingMapping()`
+- c0199 ..> c0199: `initialiseProject() calls promptExistingProject()`
+- c0199 ..> c0199: `initialiseProject() calls promptNewProject()`
+- c0199 ..> c0199: `initialiseProjectForAgent() calls existingMapping()`
+- c0199 ..> c0199: `initialiseProjectForAgent() calls validateAgentProjectDetails()`
+- c0199 ..> c0229: `promptExistingProject() calls trim()`
+- c0199 ..> c0229: `promptNewProject() calls trim()`
+- c0199 ..> c0229: `validateAgentProjectDetails() calls trim()`
+- c0200 ..> c0004: `mutate() calls set()`
+- c0200 ..> c0071: `type in advanceWatermark`
+- c0200 ..> c0071: `type in enqueue`
+- c0200 ..> c0071: `type in enqueueSnapshot`
+- c0200 ..> c0071: `type in reusableHistory`
+- c0200 ..> c0075: `type in compactJobSnapshot`
+- c0200 ..> c0084: `type in appendInspections`
+- c0200 ..> c0101: `type in completeProjectDiscovery`
+- c0200 ..> c0107: `type in completeProjectDiscovery`
+- c0200 ..> c0107: `type in currentWatermark`
+- c0200 ..> c0134: `mutate() calls get()`
+- c0200 ..> c0134: `resolveBranchId() calls get()`
+- c0200 ..> c0160: `readSnapshot() calls readFile()`
+- c0200 ..> c0160: `readState() calls readFile()`
+- c0200 ..> c0160: `releaseFileLock() calls readFile()`
+- c0200 ..> c0160: `removeAbandonedLock() calls readFile()`
+- c0200 ..> c0196: `addConflict() calls sanitizeValue()`
+- c0200 ..> c0196: `appendInspections() calls sanitizeValue()`
+- c0200 ..> c0200: `acquireFileLock() calls createFileLock()`
+- c0200 ..> c0200: `acquireFileLock() calls ensureDirectory()`
+- c0200 ..> c0200: `acquireFileLock() calls recoverExistingLock()`
+- c0200 ..> c0200: `addConflict() calls mutate()`
+- c0200 ..> c0200: `addConflict() calls prune()`
+- c0200 ..> c0200: `advanceWatermark() calls mutate()`
+- c0200 ..> c0200: `advanceWatermark() calls prune()`
+- c0200 ..> c0200: `advanceWatermark() calls updateWatermark()`
+- c0200 ..> c0200: `appendInspections() calls readSnapshot()`
+- c0200 ..> c0200: `appendInspections() calls storeSnapshot()`
+- c0200 ..> c0200: `cancel() calls mutate()`
+- c0200 ..> c0200: `checkpoint() calls appendInspections()`
+- c0200 ..> c0200: `checkpoint() calls applyCheckpointPatch()`
+- c0200 ..> c0200: `checkpoint() calls compactJobSnapshot()`
+- c0200 ..> c0200: `checkpoint() calls hydrateJob()`
+- c0200 ..> c0200: `checkpoint() calls mutate()`
+- c0200 ..> c0200: `checkpoint() calls pruneFailedJobs()`
+- c0200 ..> c0200: `checkpoint() calls recordCompletedCapture()`
+- c0200 ..> c0200: `checkpoint() calls releaseTerminalSnapshot()`
+- c0200 ..> c0200: `claimNext() calls claimJob()`
+- c0200 ..> c0200: `claimNext() calls defaultIdentity()`
+- c0200 ..> c0200: `claimNext() calls hydrateJob()`
+- c0200 ..> c0200: `claimNext() calls matchesBranch()`
+- c0200 ..> c0200: `claimNext() calls now()`
+- c0200 ..> c0200: `claimNext() calls runningJobCanBeRecovered()`
+- c0200 ..> c0200: `collectSnapshots() calls now()`
+- c0200 ..> c0200: `collectSnapshots() calls snapshotPath()`
+- c0200 ..> c0200: `collectSnapshots() calls syncDirectory()`
+- c0200 ..> c0200: `compactJobSnapshot() calls hydrateJob()`
+- c0200 ..> c0200: `compactJobSnapshot() calls storeSnapshot()`
+- c0200 ..> c0200: `complete() calls checkpoint()`
+- c0200 ..> c0200: `completeProjectDiscovery() calls defaultIdentity()`
+- c0200 ..> c0200: `completeProjectDiscovery() calls mutate()`
+- c0200 ..> c0200: `createFileLock() calls close()`
+- c0200 ..> c0200: `createFileLock() calls releaseFileLock()`
+- c0200 ..> c0200: `currentWatermark() calls getWatermark()`
+- c0200 ..> c0200: `enqueue() calls mutate()`
+- c0200 ..> c0200: `enqueue() calls prune()`
+- c0200 ..> c0200: `enqueue() calls reusableHistory()`
+- c0200 ..> c0200: `enqueue() calls updateWatermark()`
+- c0200 ..> c0200: `enqueueSnapshot() calls enqueue()`
+- c0200 ..> c0200: `getConflict() calls readState()`
+- c0200 ..> c0200: `getJob() calls hydrateJob()`
+- c0200 ..> c0200: `getJob() calls mutate()`
+- c0200 ..> c0200: `getWatermark() calls readState()`
+- c0200 ..> c0200: `hasClaimableWork() calls matchesBranch()`
+- c0200 ..> c0200: `hasClaimableWork() calls mutate()`
+- c0200 ..> c0200: `hasClaimableWork() calls now()`
+- c0200 ..> c0200: `hasClaimableWork() calls runningJobCanBeRecovered()`
+- c0200 ..> c0200: `hydrateJob() calls readSnapshot()`
+- c0200 ..> c0200: `listJobMetadata() calls mutate()`
+- c0200 ..> c0200: `listJobs() calls hydrateJob()`
+- c0200 ..> c0200: `listJobs() calls mutate()`
+- c0200 ..> c0200: `listPending() calls defaultIdentity()`
+- c0200 ..> c0200: `listPending() calls hydrateJob()`
+- c0200 ..> c0200: `listPending() calls mutate()`
+- c0200 ..> c0200: `listPendingConflicts() calls pendingConflicts()`
+- c0200 ..> c0200: `markConflictHandedOff() calls defaultIdentity()`
+- c0200 ..> c0200: `markConflictHandedOff() calls getConflict()`
+- c0200 ..> c0200: `markConflictHandedOff() calls mutate()`
+- c0200 ..> c0200: `markConflictHandedOff() calls withWorkerLock()`
+- c0200 ..> c0200: `mutate() calls pruneFailedJobs()`
+- c0200 ..> c0200: `mutate() calls readState()`
+- c0200 ..> c0200: `mutate() calls withMutationFileLock()`
+- c0200 ..> c0200: `mutate() calls writeState()`
+- c0200 ..> c0200: `pendingConflicts() calls readState()`
+- c0200 ..> c0200: `prune() calls now()`
+- c0200 ..> c0200: `readSnapshot() calls close()`
+- c0200 ..> c0200: `readSnapshot() calls snapshotPath()`
+- c0200 ..> c0200: `recordCompletedCapture() calls hydrateJob()`
+- c0200 ..> c0200: `recordCompletedCapture() calls readSnapshot()`
+- c0200 ..> c0200: `recordCompletedCapture() calls storeSnapshot()`
+- c0200 ..> c0200: `recoverExistingLock() calls removeAbandonedLock()`
+- c0200 ..> c0200: `refreshCaptureHistory() calls compactJobSnapshot()`
+- c0200 ..> c0200: `refreshCaptureHistory() calls hydrateJob()`
+- c0200 ..> c0200: `refreshCaptureHistory() calls mutate()`
+- c0200 ..> c0200: `refreshCaptureHistory() calls reusableHistory()`
+- c0200 ..> c0200: `releaseProgress() calls mutate()`
+- c0200 ..> c0200: `removeAbandonedLock() calls now()`
+- c0200 ..> c0200: `resolveBranchId() calls readState()`
+- c0200 ..> c0200: `reusableHistory() calls readSnapshot()`
+- c0200 ..> c0200: `storeSnapshot() calls close()`
+- c0200 ..> c0200: `storeSnapshot() calls readSnapshot()`
+- c0200 ..> c0200: `storeSnapshot() calls snapshotPath()`
+- c0200 ..> c0200: `storeSnapshot() calls syncDirectory()`
+- c0200 ..> c0200: `syncDirectory() calls close()`
+- c0200 ..> c0200: `updateConflict() calls mutate()`
+- c0200 ..> c0200: `withFileLock() calls acquireFileLock()`
+- c0200 ..> c0200: `withMutationFileLock() calls withFileLock()`
+- c0200 ..> c0200: `withWorkerLock() calls acquireFileLock()`
+- c0200 ..> c0200: `writeState() calls close()`
+- c0200 ..> c0200: `writeState() calls collectSnapshots()`
+- c0200 ..> c0200: `writeState() calls ensureDirectory()`
+- c0200 ..> c0200: `writeState() calls pruneFailedJobs()`
+- c0200 ..> c0200: `writeState() calls releaseTerminalSnapshot()`
+- c0200 ..> c0200: `writeState() calls storeSnapshot()`
+- c0200 ..> c0200: `writeState() calls syncDirectory()`
+- c0200 ..> c0201: `type in constructor`
+- c0200 ..> c0202: `type in acquireFileLock`
+- c0200 ..> c0202: `type in createFileLock`
+- c0200 ..> c0204: `type in addConflict`
+- c0200 ..> c0204: `type in getConflict`
+- c0200 ..> c0204: `type in listPendingConflicts`
+- c0200 ..> c0204: `type in pendingConflicts`
+- c0200 ..> c0204: `type in updateConflict`
+- c0200 ..> c0205: `acquireFileLock() constructs QueueBusyError`
+- c0200 ..> c0205: `removeAbandonedLock() constructs QueueBusyError`
+- c0200 ..> c0205: `withMutationFileLock() constructs QueueBusyError`
+- c0200 ..> c0206: `type in applyCheckpointPatch`
+- c0200 ..> c0206: `type in checkpoint`
+- c0200 ..> c0207: `type in enqueue`
+- c0200 ..> c0207: `type in enqueueSnapshot`
+- c0200 ..> c0208: `type in claimNext`
+- c0200 ..> c0208: `type in defaultIdentity`
+- c0200 ..> c0208: `type in hasClaimableWork`
+- c0200 ..> c0208: `type in listJobMetadata`
+- c0200 ..> c0208: `type in listJobs`
+- c0200 ..> c0208: `type in listPending`
+- c0200 ..> c0208: `type in listPendingConflicts`
+- c0200 ..> c0208: `type in pendingConflicts`
+- c0200 ..> c0208: `type in withWorkerLock`
+- c0200 ..> c0209: `type in checkpoint`
+- c0200 ..> c0209: `type in claimJob`
+- c0200 ..> c0209: `type in claimNext`
+- c0200 ..> c0209: `type in complete`
+- c0200 ..> c0209: `type in getJob`
+- c0200 ..> c0209: `type in hydrateJob`
+- c0200 ..> c0209: `type in listJobs`
+- c0200 ..> c0209: `type in listPending`
+- c0200 ..> c0209: `type in matchesBranch`
+- c0200 ..> c0209: `type in refreshCaptureHistory`
+- c0200 ..> c0209: `type in runningJobCanBeRecovered`
+- c0200 ..> c0210: `type in listJobMetadata`
+- c0200 ..> c0212: `type in collectSnapshots`
+- c0200 ..> c0212: `type in mutate`
+- c0200 ..> c0212: `type in prune`
+- c0200 ..> c0212: `type in pruneFailedJobs`
+- c0200 ..> c0212: `type in readState`
+- c0200 ..> c0212: `type in recordCompletedCapture`
+- c0200 ..> c0212: `type in releaseTerminalSnapshot`
+- c0200 ..> c0212: `type in updateWatermark`
+- c0200 ..> c0212: `type in writeState`
+- c0200 ..> c0213: `type in advanceWatermark`
+- c0200 ..> c0213: `type in currentWatermark`
+- c0200 ..> c0213: `type in getWatermark`
+- c0200 ..> c0213: `type in reusableHistory`
+- c0200 ..> c0213: `type in updateWatermark`
+- c0200 ..> c0214: `type in readSnapshot`
+- c0200 ..> c0214: `type in reusableHistory`
+- c0200 ..> c0214: `type in storeSnapshot`
+- c0200 ..> c0215: `type in appendInspections`
+- c0200 ..> c0215: `type in applyCheckpointPatch`
+- c0200 ..> c0215: `type in compactJobSnapshot`
+- c0200 ..> c0215: `type in hydrateJob`
+- c0200 ..> c0215: `type in recordCompletedCapture`
+- c0200 ..> c0215: `type in releaseTerminalSnapshot`
+- c0200 ..> c0217: `type in advanceWatermark`
+- c0200 ..> c0217: `type in updateWatermark`
+- c0200 ..> c0218: `addConflict() calls jsonSnapshot()`
+- c0200 ..> c0218: `addConflict() calls nowIso()`
+- c0200 ..> c0218: `addConflict() calls scrubDiagnostic()`
+- c0200 ..> c0218: `advanceWatermark() calls dedupeKey()`
+- c0200 ..> c0218: `advanceWatermark() calls jsonSnapshot()`
+- c0200 ..> c0218: `appendInspections() calls jsonSnapshot()`
+- c0200 ..> c0218: `appendInspections() calls validateInspectionEntry()`
+- c0200 ..> c0218: `applyCheckpointPatch() calls jsonSnapshot()`
+- c0200 ..> c0218: `applyCheckpointPatch() calls nowIso()`
+- c0200 ..> c0218: `applyCheckpointPatch() calls scrubDiagnostic()`
+- c0200 ..> c0218: `cancel() calls nowIso()`
+- c0200 ..> c0218: `cancel() calls scrubDiagnostic()`
+- c0200 ..> c0218: `checkpoint() calls releaseCompletedArtifacts()`
+- c0200 ..> c0218: `claimJob() calls nowIso()`
+- c0200 ..> c0218: `claimNext() calls identityMatches()`
+- c0200 ..> c0218: `claimNext() calls interruptedWrite()`
+- c0200 ..> c0218: `collectSnapshots() calls historyCaches()`
+- c0200 ..> c0218: `completeProjectDiscovery() calls identityMatches()`
+- c0200 ..> c0218: `createFileLock() calls nowIso()`
+- c0200 ..> c0218: `enqueue() calls contextKey()`
+- c0200 ..> c0218: `enqueue() calls dedupeKey()`
+- c0200 ..> c0218: `enqueue() calls jobIdFor()`
+- c0200 ..> c0218: `enqueue() calls jsonSnapshot()`
+- c0200 ..> c0218: `enqueue() calls nowIso()`
+- c0200 ..> c0218: `getConflict() calls jsonSnapshot()`
+- c0200 ..> c0218: `getWatermark() calls contextKey()`
+- c0200 ..> c0218: `getWatermark() calls jsonSnapshot()`
+- c0200 ..> c0218: `getWatermark() calls nowIso()`
+- c0200 ..> c0218: `hasClaimableWork() calls identityMatches()`
+- c0200 ..> c0218: `hasClaimableWork() calls interruptedWrite()`
+- c0200 ..> c0218: `hydrateJob() calls jsonSnapshot()`
+- c0200 ..> c0218: `listJobMetadata() calls identityMatches()`
+- c0200 ..> c0218: `listJobs() calls identityMatches()`
+- c0200 ..> c0218: `listPending() calls identityMatches()`
+- c0200 ..> c0218: `markConflictHandedOff() calls conflictIdentityMatches()`
+- c0200 ..> c0218: `markConflictHandedOff() calls interruptedWrite()`
+- c0200 ..> c0218: `markConflictHandedOff() calls nowIso()`
+- c0200 ..> c0218: `pendingConflicts() calls conflictIdentityMatches()`
+- c0200 ..> c0218: `pendingConflicts() calls jsonSnapshot()`
+- c0200 ..> c0218: `prune() calls clearHistoryCache()`
+- c0200 ..> c0218: `prune() calls contextKey()`
+- c0200 ..> c0218: `prune() calls historyCaches()`
+- c0200 ..> c0218: `prune() calls setHistoryCaches()`
+- c0200 ..> c0218: `prune() calls shouldRetain()`
+- c0200 ..> c0218: `readState() calls normaliseState()`
+- c0200 ..> c0218: `recordCompletedCapture() calls contextKey()`
+- c0200 ..> c0218: `recordCompletedCapture() calls cursorComparison()`
+- c0200 ..> c0218: `recordCompletedCapture() calls historyCaches()`
+- c0200 ..> c0218: `recordCompletedCapture() calls nowIso()`
+- c0200 ..> c0218: `recordCompletedCapture() calls orderedSourceEntryIds()`
+- c0200 ..> c0218: `recordCompletedCapture() calls setHistoryCaches()`
+- c0200 ..> c0218: `recordCompletedCapture() calls summaryCursor()`
+- c0200 ..> c0218: `refreshCaptureHistory() calls contextKey()`
+- c0200 ..> c0218: `refreshCaptureHistory() calls cursorComparison()`
+- c0200 ..> c0218: `refreshCaptureHistory() calls interruptedWrite()`
+- c0200 ..> c0218: `refreshCaptureHistory() calls orderedSourceEntryIds()`
+- c0200 ..> c0218: `refreshCaptureHistory() calls recordId()`
+- c0200 ..> c0218: `releaseProgress() calls nowIso()`
+- c0200 ..> c0218: `removeAbandonedLock() calls isProcessAlive()`
+- c0200 ..> c0218: `resolveBranchId() calls contextKey()`
+- c0200 ..> c0218: `reusableHistory() calls diagnosticError()`
+- c0200 ..> c0218: `reusableHistory() calls historyCaches()`
+- c0200 ..> c0218: `reusableHistory() calls orderedSourceEntryIds()`
+- c0200 ..> c0218: `reusableHistory() calls setHistoryCaches()`
+- c0200 ..> c0218: `runningJobCanBeRecovered() calls isProcessAlive()`
+- c0200 ..> c0218: `updateConflict() calls jsonSnapshot()`
+- c0200 ..> c0218: `updateConflict() calls nowIso()`
+- c0200 ..> c0218: `updateWatermark() calls contextKey()`
+- c0200 ..> c0218: `updateWatermark() calls nowIso()`
+- c0200 ..> c0218: `writeState() calls releaseCompletedArtifacts()`
+- c0200 ..> c0229: `reusableHistory() calls trim()`
+- c0200 ..> c0238: `compactJobSnapshot() calls compactCaptureSnapshot()`
+- c0200 ..> c0238: `enqueue() calls reuseCaptureHistory()`
+- c0200 ..> c0238: `enqueue() calls sanitizeCaptureSnapshot()`
+- c0200 ..> c0238: `refreshCaptureHistory() calls captureConversation()`
+- c0200 ..> c0238: `writeState() calls sanitizeCaptureSnapshot()`
+- c0204 --> c0084: `field replacement`
+- c0204 --> c0091: `field replacement`
+- c0204 --> c0107: `field context`
+- c0204 --> c0208: `field binding`
+- c0204 --> c0216: `field supersession`
+- c0206 --> c0075: `field compactedConversation`
+- c0206 --> c0084: `field inspectionEntries`
+- c0206 --> c0211: `field status`
+- c0206 --> c0216: `field supersession`
+- c0209 --> c0071: `field snapshot`
+- c0209 --> c0208: `field binding`
+- c0209 --> c0211: `field status`
+- c0209 --> c0216: `field supersession`
+- c0210 --> c0071: `field snapshot`
+- c0212 --> c0204: `field conflicts`
+- c0212 --> c0213: `field watermarks`
+- c0212 --> c0215: `field jobs`
+- c0213 --> c0203: `field historyAlternatives`
+- c0215 --|> c0209: `inherits`
+- c0218 ..> c0071: `type in dedupeKey`
+- c0218 ..> c0071: `type in orderedSourceEntryIds`
+- c0218 ..> c0071: `type in summaryCursor`
+- c0218 ..> c0084: `type in validateInspectionEntry`
+- c0218 ..> c0134: `releaseCompletedArtifacts() calls get()`
+- c0218 ..> c0196: `scrubDiagnostic() calls sanitizeText()`
+- c0218 ..> c0200: `nowIso() calls now()`
+- c0218 ..> c0203: `type in historyCaches`
+- c0218 ..> c0203: `type in setHistoryCaches`
+- c0218 ..> c0204: `type in conflictIdentityMatches`
+- c0218 ..> c0208: `type in conflictIdentityMatches`
+- c0218 ..> c0208: `type in identityMatches`
+- c0218 ..> c0209: `type in identityMatches`
+- c0218 ..> c0209: `type in interruptedWrite`
+- c0218 ..> c0212: `type in normaliseState`
+- c0218 ..> c0213: `type in clearHistoryCache`
+- c0218 ..> c0213: `type in historyCaches`
+- c0218 ..> c0213: `type in setHistoryCaches`
+- c0218 ..> c0215: `type in releaseCompletedArtifacts`
+- c0218 ..> c0218: `conflictIdentityMatches() calls identityMatches()`
+- c0218 ..> c0218: `interruptedWrite() calls outcomeRecord()`
+- c0218 ..> c0218: `releaseCompletedArtifacts() calls outcomeRecord()`
+- c0218 ..> c0218: `releaseCompletedArtifacts() calls scrubDiagnostic()`
+- c0218 ..> c0218: `setHistoryCaches() calls clearHistoryCache()`
+- c0218 ..> c0218: `summaryCursor() calls orderedSourceEntryIds()`
+- c0220 --> c0101: `field projects`
+- c0220 --> c0104: `field scope`
+- c0220 --> c0107: `field context`
+- c0222 --> c0084: `field sessionContext`
+- c0222 --> c0097: `field diagnosticContext`
+- c0222 --> c0101: `field projects`
+- c0222 --> c0104: `field scope`
+- c0222 --> c0107: `field context`
+- c0222 --> c0221: `field onPlan`
+- c0223 --> c0104: `field scope`
+- c0224 ..> c0056: `searchMemories() calls mapConcurrent()`
+- c0224 ..> c0068: `constructor() calls isRecallConcurrency()`
+- c0224 ..> c0068: `deeper() calls resolveScope()`
+- c0224 ..> c0068: `recall() calls resolveScope()`
+- c0224 --> c0086: `field client`
+- c0224 ..> c0086: `type in constructor`
+- c0224 ..> c0089: `type in memoryInScope`
+- c0224 ..> c0089: `type in optionalKnowledge`
+- c0224 --> c0092: `field model`
+- c0224 ..> c0092: `type in constructor`
+- c0224 ..> c0096: `type in recallReadTool`
+- c0224 ..> c0101: `type in matchResolution`
+- c0224 ..> c0101: `type in resolveScope`
+- c0224 ..> c0104: `type in empty`
+- c0224 ..> c0104: `type in memoryInScope`
+- c0224 ..> c0104: `type in optionalKnowledge`
+- c0224 ..> c0104: `type in requestsDifferentProject`
+- c0224 ..> c0104: `type in resolveScope`
+- c0224 ..> c0104: `type in searchMemories`
+- c0224 ..> c0104: `type in searchRequest`
+- c0224 ..> c0105: `type in searchRequest`
+- c0224 ..> c0107: `type in contextProjectResolution`
+- c0224 ..> c0107: `type in resolveScope`
+- c0224 ..> c0107: `type in searchRequest`
+- c0224 ..> c0134: `deeper() calls search()`
+- c0224 ..> c0134: `resolveScope() calls listProjects()`
+- c0224 ..> c0134: `searchMemories() calls search()`
+- c0224 ..> c0144: `type in optionalKnowledge`
+- c0224 ..> c0144: `type in resultWithKnowledge`
+- c0224 --> c0145: `field knowledge`
+- c0224 ..> c0145: `constructor() constructs KnowledgeReadService`
+- c0224 ..> c0145: `optionalKnowledge() calls expand()`
+- c0224 ..> c0160: `recallReadTool() calls executeKnowledgeRead()`
+- c0224 ..> c0192: `recall() calls complete()`
+- c0224 ..> c0196: `deeper() calls sanitizeText()`
+- c0224 ..> c0196: `finishReview() calls sanitizeText()`
+- c0224 ..> c0196: `optionalKnowledge() calls errorMessage()`
+- c0224 ..> c0196: `plannerInput() calls sanitizeText()`
+- c0224 ..> c0196: `queryContext() calls sanitizeText()`
+- c0224 ..> c0196: `recall() calls sanitizeText()`
+- c0224 ..> c0196: `recall() calls sanitizeValue()`
+- c0224 ..> c0196: `searchFailure() calls errorMessage()`
+- c0224 ..> c0196: `searchFailure() calls sanitizeValue()`
+- c0224 ..> c0219: `type in authorizeProjectSelection`
+- c0224 ..> c0219: `type in ensureLive`
+- c0224 ..> c0219: `type in finishFailure`
+- c0224 ..> c0219: `type in searchMemories`
+- c0224 ..> c0220: `type in deeper`
+- c0224 ..> c0221: `type in authorizeProjectSelection`
+- c0224 ..> c0221: `type in queryContext`
+- c0224 ..> c0221: `type in requestsDifferentProject`
+- c0224 ..> c0221: `type in searchMemories`
+- c0224 ..> c0221: `type in searchRequest`
+- c0224 ..> c0222: `type in authorizeProjectSelection`
+- c0224 ..> c0222: `type in finishFailure`
+- c0224 ..> c0222: `type in plannerInput`
+- c0224 ..> c0222: `type in recall`
+- c0224 ..> c0222: `type in recallReadTool`
+- c0224 ..> c0222: `type in requestsDifferentProject`
+- c0224 ..> c0222: `type in searchMemories`
+- c0224 ..> c0223: `type in deeper`
+- c0224 ..> c0223: `type in empty`
+- c0224 ..> c0223: `type in finishFailure`
+- c0224 ..> c0223: `type in finishReview`
+- c0224 ..> c0223: `type in recall`
+- c0224 ..> c0223: `type in recallReadTool`
+- c0224 ..> c0223: `type in resultWithKnowledge`
+- c0224 ..> c0224: `authorizeProjectSelection() calls requestsDifferentProject()`
+- c0224 ..> c0224: `circuitOpen() calls now()`
+- c0224 ..> c0224: `deeper() calls circuitOpen()`
+- c0224 ..> c0224: `deeper() calls empty()`
+- c0224 ..> c0224: `deeper() calls memoryInScope()`
+- c0224 ..> c0224: `deeper() calls optionalKnowledge()`
+- c0224 ..> c0224: `deeper() calls recordFailure()`
+- c0224 ..> c0224: `deeper() calls recordSuccess()`
+- c0224 ..> c0224: `deeper() calls resultWithKnowledge()`
+- c0224 ..> c0224: `finishFailure() calls empty()`
+- c0224 ..> c0224: `finishFailure() calls recordFailure()`
+- c0224 ..> c0224: `finishReview() calls recordFailure()`
+- c0224 ..> c0224: `finishReview() calls recordSuccess()`
+- c0224 ..> c0224: `recall() calls authorizeProjectSelection()`
+- c0224 ..> c0224: `recall() calls circuitOpen()`
+- c0224 ..> c0224: `recall() calls empty()`
+- c0224 ..> c0224: `recall() calls ensureLive()`
+- c0224 ..> c0224: `recall() calls finishFailure()`
+- c0224 ..> c0224: `recall() calls finishReview()`
+- c0224 ..> c0224: `recall() calls memoryInScope()`
+- c0224 ..> c0224: `recall() calls optionalKnowledge()`
+- c0224 ..> c0224: `recall() calls plannerInput()`
+- c0224 ..> c0224: `recall() calls recallReadTool()`
+- c0224 ..> c0224: `recall() calls recordSuccess()`
+- c0224 ..> c0224: `recall() calls resultWithKnowledge()`
+- c0224 ..> c0224: `recall() calls searchMemories()`
+- c0224 ..> c0224: `recall() calls searchRequest()`
+- c0224 ..> c0224: `recordFailure() calls now()`
+- c0224 ..> c0224: `resolveScope() calls contextProjectResolution()`
+- c0224 ..> c0224: `resolveScope() calls matchResolution()`
+- c0224 ..> c0224: `searchMemories() calls ensureLive()`
+- c0224 ..> c0224: `searchMemories() calls searchFailure()`
+- c0224 ..> c0224: `searchMemories() calls searchRequest()`
+- c0224 ..> c0224: `searchRequest() calls queryContext()`
+- c0224 ..> c0225: `type in constructor`
+- c0224 ..> c0226: `finishReview() constructs ReviewValidationError`
+- c0224 ..> c0227: `type in contextProjectResolution`
+- c0224 ..> c0227: `type in matchResolution`
+- c0224 ..> c0227: `type in recallReadTool`
+- c0224 ..> c0227: `type in resolveScope`
+- c0224 ..> c0227: `type in searchMemories`
+- c0224 ..> c0227: `type in searchRequest`
+- c0224 ..> c0228: `type in searchMemories`
+- c0224 ..> c0229: `authorizeProjectSelection() calls raceAbort()`
+- c0224 ..> c0229: `deeper() calls createDeadlineSignal()`
+- c0224 ..> c0229: `deeper() calls failureReason()`
+- c0224 ..> c0229: `deeper() calls formatRecall()`
+- c0224 ..> c0229: `deeper() calls isForgetfulResponseError()`
+- c0224 ..> c0229: `deeper() calls raceAbort()`
+- c0224 ..> c0229: `deeper() calls trim()`
+- c0224 ..> c0229: `ensureLive() calls abortError()`
+- c0224 ..> c0229: `finishFailure() calls failureReason()`
+- c0224 ..> c0229: `finishFailure() calls submissionAttemptTrace()`
+- c0224 ..> c0229: `finishReview() calls parseReview()`
+- c0224 ..> c0229: `finishReview() calls reviewMismatchDirection()`
+- c0224 ..> c0229: `finishReview() calls reviewSources()`
+- c0224 ..> c0229: `finishReview() calls reviewValidationDebug()`
+- c0224 ..> c0229: `finishReview() calls sourceLabels()`
+- c0224 ..> c0229: `finishReview() calls submissionAttemptTrace()`
+- c0224 ..> c0229: `optionalKnowledge() calls raceAbort()`
+- c0224 ..> c0229: `plannerInput() calls availableProjects()`
+- c0224 ..> c0229: `recall() calls boundDebugText()`
+- c0224 ..> c0229: `recall() calls createDeadlineSignal()`
+- c0224 ..> c0229: `recall() calls formatRecall()`
+- c0224 ..> c0229: `recall() calls parsePlan()`
+- c0224 ..> c0229: `recall() calls raceAbort()`
+- c0224 ..> c0229: `recall() calls recallReviewSubmission()`
+- c0224 ..> c0229: `recall() calls reviewSources()`
+- c0224 ..> c0229: `recall() calls sanitizePolicy()`
+- c0224 ..> c0229: `recall() calls submissionAttemptTrace()`
+- c0224 ..> c0229: `recall() calls trim()`
+- c0224 ..> c0229: `recallReadTool() calls abortError()`
+- c0224 ..> c0229: `recallReadTool() calls reviewSources()`
+- c0224 ..> c0229: `resolveScope() calls availableProjects()`
+- c0224 ..> c0229: `searchMemories() calls exceptionDiagnostic()`
+- c0224 ..> c0229: `searchMemories() calls isAbort()`
+- c0224 ..> c0229: `searchMemories() calls raceAbort()`
+- c0224 ..> c0229: `searchRequest() calls repoAwareQuery()`
+- c0227 --> c0101: `field project`
+- c0228 --> c0089: `field memories`
+- c0229 ..> c0004: `availableProjects() calls set()`
+- c0229 ..> c0089: `type in formatRecall`
+- c0229 ..> c0089: `type in validateMemory`
+- c0229 ..> c0099: `type in recallReviewSubmission`
+- c0229 ..> c0101: `type in availableProjects`
+- c0229 ..> c0107: `type in availableProjects`
+- c0229 ..> c0107: `type in repoAwareQuery`
+- c0229 ..> c0107: `type in repositoryIdentity`
+- c0229 ..> c0144: `type in formatRecall`
+- c0229 ..> c0196: `exceptionDiagnostic() calls sanitizeText()`
+- c0229 ..> c0196: `formatRecall() calls sanitizeText()`
+- c0229 ..> c0196: `parseReview() calls sanitizeText()`
+- c0229 ..> c0196: `plannerString() calls sanitizeText()`
+- c0229 ..> c0196: `repoAwareQuery() calls sanitizeText()`
+- c0229 ..> c0196: `repositoryIdentity() calls sanitizeText()`
+- c0229 ..> c0196: `reviewMismatchDirection() calls sanitizeText()`
+- c0229 ..> c0196: `reviewerOutputText() calls sanitizeText()`
+- c0229 ..> c0196: `reviewerOutputText() calls sanitizeValue()`
+- c0229 ..> c0196: `sanitizePolicy() calls sanitizeText()`
+- c0229 ..> c0196: `submissionAttemptTrace() calls sanitizeText()`
+- c0229 ..> c0219: `type in createDeadlineSignal`
+- c0229 ..> c0219: `type in failureReason`
+- c0229 ..> c0221: `type in parsePlan`
+- c0229 ..> c0223: `type in parseReview`
+- c0229 ..> c0223: `type in recallReviewSubmission`
+- c0229 ..> c0223: `type in reviewSources`
+- c0229 ..> c0223: `type in reviewValidationDebug`
+- c0229 ..> c0224: `createDeadlineSignal() calls now()`
+- c0229 ..> c0229: `createDeadlineSignal() calls exceptionDiagnostic()`
+- c0229 ..> c0229: `formatRecall() calls trim()`
+- c0229 ..> c0229: `parseEntities() calls plannerString()`
+- c0229 ..> c0229: `parsePlan() calls isObject()`
+- c0229 ..> c0229: `parsePlan() calls parseEntities()`
+- c0229 ..> c0229: `parsePlan() calls parseQueries()`
+- c0229 ..> c0229: `parsePlan() calls plannerString()`
+- c0229 ..> c0229: `parsePlan() calls positiveInteger()`
+- c0229 ..> c0229: `parseQueries() calls plannerString()`
+- c0229 ..> c0229: `parseReview() calls isObject()`
+- c0229 ..> c0229: `parseReview() calls reviewSources()`
+- c0229 ..> c0229: `parseReview() calls sourceLabels()`
+- c0229 ..> c0229: `parseReview() calls trim()`
+- c0229 ..> c0229: `plannerString() calls trim()`
+- c0229 ..> c0229: `raceAbort() calls abortError()`
+- c0229 ..> c0229: `repoAwareQuery() calls repositoryIdentity()`
+- c0229 ..> c0229: `repoAwareQuery() calls trim()`
+- c0229 ..> c0229: `repositoryIdentity() calls trim()`
+- c0229 ..> c0229: `reviewMismatchDirection() calls isObject()`
+- c0229 ..> c0229: `reviewMismatchDirection() calls trim()`
+- c0229 ..> c0229: `reviewValidationDebug() calls boundDebugText()`
+- c0229 ..> c0229: `reviewValidationDebug() calls reviewSources()`
+- c0229 ..> c0229: `reviewValidationDebug() calls reviewerOutputText()`
+- c0229 ..> c0229: `reviewValidationDebug() calls sourceLabels()`
+- c0229 ..> c0229: `submissionAttemptTrace() calls trim()`
+- c0229 ..> c0229: `validateMemory() calls isObject()`
+- c0230 ..> c0229: `repositoryName() calls trim()`
+- c0232 ..> c0231: `type in buildSetupPrompt`
+- c0232 ..> c0231: `type in promptSetupHelp`
+- c0233 --|> c0071: `inherits`
+- c0235 --> c0070: `field mode`
+- c0235 --> c0104: `field scope`
+- c0235 --> c0107: `field context`
+- c0235 --> c0237: `field session`
+- c0236 --> c0233: `field snapshot`
+- c0238 ..> c0069: `type in captureSummaryRecord`
+- c0238 ..> c0069: `type in reuseCaptureHistory`
+- c0238 ..> c0071: `type in captureConversation`
+- c0238 ..> c0071: `type in compactCaptureSnapshot`
+- c0238 ..> c0071: `type in reuseCaptureHistory`
+- c0238 ..> c0071: `type in sanitizeCaptureSnapshot`
+- c0238 ..> c0075: `type in compactCaptureSnapshot`
+- c0238 ..> c0084: `type in collectEvidence`
+- c0238 ..> c0084: `type in evidenceForEntry`
+- c0238 ..> c0084: `type in toolEvidence`
+- c0238 ..> c0196: `captureSummaryRecord() calls sanitizeText()`
+- c0238 ..> c0196: `compactCaptureSnapshot() calls sanitizeText()`
+- c0238 ..> c0196: `conversationForEntry() calls isMemoryOperation()`
+- c0238 ..> c0196: `safeText() calls sanitizeText()`
+- c0238 ..> c0196: `sanitizeCaptureSnapshot() calls sanitizeValue()`
+- c0238 ..> c0196: `sanitizeConversation() calls sanitizeText()`
+- c0238 ..> c0196: `sanitizeConversation() calls sanitizeValue()`
+- c0238 ..> c0196: `toolEvidence() calls isMemoryOperation()`
+- c0238 ..> c0196: `toolEvidence() calls sanitizeValue()`
+- c0238 ..> c0229: `compactCaptureSnapshot() calls trim()`
+- c0238 ..> c0229: `safeText() calls trim()`
+- c0238 ..> c0234: `type in asMessage`
+- c0238 ..> c0234: `type in lastAssistantEntry`
+- c0238 ..> c0234: `type in toolEvidence`
+- c0238 ..> c0235: `type in buildCaptureSnapshot`
+- c0238 ..> c0235: `type in collectEvidence`
+- c0238 ..> c0235: `type in toolEvidence`
+- c0238 ..> c0236: `type in buildCaptureSnapshot`
+- c0238 ..> c0238: `asMessage() calls isRecord()`
+- c0238 ..> c0238: `buildCaptureSnapshot() calls collectEvidence()`
+- c0238 ..> c0238: `buildCaptureSnapshot() calls deltaStartIndex()`
+- c0238 ..> c0238: `buildCaptureSnapshot() calls lastAssistantEntry()`
+- c0238 ..> c0238: `buildCaptureSnapshot() calls rootId()`
+- c0238 ..> c0238: `buildCaptureSnapshot() calls snapshotId()`
+- c0238 ..> c0238: `captureConversation() calls isRecord()`
+- c0238 ..> c0238: `collectEvidence() calls evidenceForEntry()`
+- c0238 ..> c0238: `compactCaptureSnapshot() calls captureConversation()`
+- c0238 ..> c0238: `compactCaptureSnapshot() calls captureSummaryRecord()`
+- c0238 ..> c0238: `compactCaptureSnapshot() calls isRecord()`
+- c0238 ..> c0238: `contentText() calls isRecord()`
+- c0238 ..> c0238: `conversationForEntry() calls asMessage()`
+- c0238 ..> c0238: `conversationForEntry() calls isRecord()`
+- c0238 ..> c0238: `conversationForEntry() calls sanitizeConversation()`
+- c0238 ..> c0238: `evidenceForEntry() calls asMessage()`
+- c0238 ..> c0238: `evidenceForEntry() calls contentText()`
+- c0238 ..> c0238: `evidenceForEntry() calls isRecord()`
+- c0238 ..> c0238: `evidenceForEntry() calls safeText()`
+- c0238 ..> c0238: `evidenceForEntry() calls toolEvidence()`
+- c0238 ..> c0238: `lastAssistantEntry() calls asMessage()`
+- c0238 ..> c0238: `reuseCaptureHistory() calls captureSummaryRecord()`
+- c0238 ..> c0238: `reuseCaptureHistory() calls isRecord()`
+- c0238 ..> c0238: `sanitizeCaptureSnapshot() calls sanitizeCaptureConversation()`
+- c0238 ..> c0238: `sanitizeConversation() calls isRecord()`
+- c0238 ..> c0238: `toolEvidence() calls contentText()`
+- c0238 ..> c0238: `toolEvidence() calls safeText()`
+- c0241 --> c0239: `field error`
+- c0241 --> c0239: `field provenanceError`
+- c0242 ..> c0004: `readFile() calls close()`
+- c0242 ..> c0047: `getUrl() calls resolve()`
+- c0242 ..> c0047: `git() calls resolve()`
+- c0242 ..> c0047: `inspect() calls resolve()`
+- c0242 ..> c0134: `getUrl() calls get()`
+- c0242 ..> c0160: `readFile() calls readFile()`
+- c0242 ..> c0174: `git() calls execute()`
+- c0242 ..> c0196: `inspect() calls sanitizeValue()`
+- c0242 ..> c0196: `inspectUrl() calls sanitizeText()`
+- c0242 ..> c0196: `inspectUrl() calls sanitizeValue()`
+- c0242 ..> c0229: `provenance() calls trim()`
+- c0242 ..> c0240: `type in inspectUrl`
+- c0242 ..> c0241: `type in inspect`
+- c0242 ..> c0241: `type in inspectUrl`
+- c0242 ..> c0242: `getUrl() calls check()`
+- c0242 ..> c0242: `git() calls check()`
+- c0242 ..> c0242: `inspect() calls check()`
+- c0242 ..> c0242: `inspect() calls inspectUrl()`
+- c0242 ..> c0242: `inspect() calls provenance()`
+- c0242 ..> c0242: `inspect() calls readFile()`
+- c0242 ..> c0242: `inspectUrl() calls check()`
+- c0242 ..> c0242: `inspectUrl() calls getUrl()`
+- c0242 ..> c0242: `provenance() calls git()`
+- c0242 ..> c0242: `readFile() calls check()`
+- c0242 --> c0243: `field options`
+- c0242 ..> c0243: `type in constructor`
+- c0242 ..> c0244: `getUrl() calls validateAddress()`
+- c0242 ..> c0244: `getUrl() calls validateUrl()`
+- c0242 ..> c0244: `git() calls requireInside()`
+- c0242 ..> c0244: `inspect() calls errorDetails()`
+- c0242 ..> c0244: `inspect() calls requireInside()`
+- c0242 ..> c0244: `inspect() calls sourceContent()`
+- c0242 ..> c0244: `inspectUrl() calls loopback()`
+- c0242 ..> c0244: `inspectUrl() calls sourceContent()`
+- c0242 ..> c0244: `inspectUrl() calls validateUrl()`
+- c0242 ..> c0244: `provenance() calls errorDetails()`
+- c0242 ..> c0244: `readFile() calls requireInside()`
+- c0244 ..> c0196: `errorDetails() calls sanitizeText()`
+- c0244 ..> c0196: `sourceContent() calls sanitizeText()`
+- c0244 ..> c0196: `validateUrl() calls sanitizeText()`
+- c0244 ..> c0196: `validateUrl() calls sanitizeValue()`
+- c0244 ..> c0239: `type in errorDetails`
+- c0244 ..> c0240: `type in sourceContent`
+- c0244 ..> c0242: `validateAddress() calls check()`
+- c0244 ..> c0244: `validateAddress() calls loopback()`
 
 ## Type key
 
 - Type1: `(text: string) => string`
-- Type2: `"pending" | "planned" | "complete" | "partial" | "unsupported"`
-- Type3: `Array<{ memoryId: number; reason: string }>`
-- Type4: `{ documents: Document[]; codeArtifacts: CodeArtifact[] }`
-- Type5: `Array<{ operation: string; error: string }>`
-- Type6: `"link" | "unlink" | "attachments" | "entity"`
-- Type7: `"started" | "completed" | "failed"`
-- Type8: `"keep" | "reject" | "add" | "ignore" | "unresolved"`
-- Type9: `"complete" | "unresolved"`
-- Type10: `Promise<Memory | undefined>`
-- Type11: `NonNullable<CaptureLinkReview["unreviewed"]>`
-- Type12: `number[] | undefined`
-- Type13: `() => Promise<void>`
-- Type14: `Map<string, boolean>`
-- Type15: `PreservationDecision | undefined`
-- Type16: `Map<string, { decisions: LinkDecision[]; preservation?: PreservationDecision }>`
-- Type17: `Array<{ candidateId: string; review: CaptureLinkReview }>`
-- Type18: `ConnectionResult["operation"]`
-- Type19: `() => Promise<unknown>`
-- Type20: `(review: CaptureLinkReview) => Promise<void>`
-- Type21: `() => void`
-- Type22: `Promise<{ documents: Document[]; codeArtifacts: CodeArtifact[] }>`
-- Type23: `Array<{ id: string; reason: string }>`
-- Type24: `CaptureCandidate["evidenceType"]`
-- Type25: `| { valid: true; value: T } | { valid: false; reason: string }`
-- Type26: `"create" | "skip" | "supersede" | "escalate"`
-- Type27: `"reviewing" | "saving" | "checking"`
-- Type28: `"userDecision" | "verifiedToolChange" | "observation"`
-- Type29: `Array<{ jobId: string; error: string }>`
-- Type30: `"ready" | "busy"`
-- Type31: `{ status: CaptureLinkReview["status"]; unreviewedCount: number; reason?: string }`
-- Type32: `PendingConflict["status"]`
-- Type33: `{ entryId: string; inspectionEntryIds: string[] } | null`
-- Type34: `"resolved" | "deferred" | "rejected"`
-- Type35: `Array<{ key: string; id: number }>`
-- Type36: `(id: number) => Promise<Memory>`
-- Type37: `() => boolean | Promise<boolean>`
-- Type38: `() => CaptureMode | Promise<CaptureMode>`
-- Type39: `() => boolean`
-- Type40: `() => Date`
-- Type41: `CaptureServiceOptions["onActivity"]`
-- Type42: `() => Promise<T>`
-- Type43: `(signal: AbortSignal) => Promise<T>`
-- Type44: `"reviewing" | "checking"`
-- Type45: `"info" | "debug"`
-- Type46: `Record<string, unknown>`
-- Type47: `"capture" | "overlap" | "overlapBatch"`
-- Type48: `Promise<number | undefined>`
-- Type49: `CaptureNeighborhood | undefined`
-- Type50: `"created" | "skipped" | "replacement-created"`
-- Type51: `Promise<"applied" | "already">`
-- Type52: `Promise<{ job: QueueJob; destination?: number }>`
-- Type53: `Promise< | { status: "ready"; job: QueueJob; outcome: Record<string, unknown> |
+- Type2: `"ready" | "needs-review" | "exhausted"`
+- Type3: `"correctable" | "retry"`
+- Type4: `{ tool: ModelReadTool; requireObserved: () => void; }`
+- Type5: `"pending" | "planned" | "complete" | "partial" | "unsupported"`
+- Type6: `Array<{ memoryId: number; reason: string }>`
+- Type7: `{ documents: Document[]; codeArtifacts: CodeArtifact[] }`
+- Type8: `Array<{ operation: string; error: string }>`
+- Type9: `"link" | "unlink" | "attachments" | "entity"`
+- Type10: `"started" | "completed" | "failed"`
+- Type11: `"keep" | "reject" | "add" | "ignore" | "unresolved"`
+- Type12: `"complete" | "unresolved"`
+- Type13: `Promise<Memory | undefined>`
+- Type14: `NonNullable<CaptureLinkReview["unreviewed"]>`
+- Type15: `{ automaticIds?: number[]; beforeRead: () => Promise<void>; includeAttachments?: boolean
+  }`
+- Type16: `Map<string, boolean>`
+- Type17: `Map<string, { decisions: LinkDecision[]; preservation?: PreservationDecision }>`
+- Type18: `Array<{ candidateId: string; review: CaptureLinkReview }>`
+- Type19: `ConnectionResult["operation"]`
+- Type20: `(markDispatched: () => void) => Promise<unknown>`
+- Type21: `(review: CaptureLinkReview) => Promise<void>`
+- Type22: `() => Promise<void>`
+- Type23: `() => void`
+- Type24: `Promise<{ documents: Document[]; codeArtifacts: CodeArtifact[] }>`
+- Type25: `Record<string, { status: "started" | "completed" | "rejected"; error?: string; input?:
+  unknown; }>`
+- Type26: `(number[] | undefined)[]`
+- Type27: `number | null | undefined`
+- Type28: `Pick<MergeConnections, "documentIds" | "codeArtifactIds" | "fileIds">`
+- Type29: `Array<{ id: string; reason: string }>`
+- Type30: `| { valid: true; value: T } | { valid: false; reason: string }`
+- Type31: `"create" | "skip" | "supersede" | "escalate" | "retire" | "merge"`
+- Type32: `"reviewing" | "saving" | "checking"`
+- Type33: `"memory" | "maintenance"`
+- Type34: `"userDecision" | "verifiedToolChange" | "observation"`
+- Type35: `Array<{ jobId: string; error: string }>`
+- Type36: `"ready" | "busy"`
+- Type37: `{ status: CaptureLinkReview["status"]; unreviewedCount: number; reason?: string }`
+- Type38: `PendingConflict["status"]`
+- Type39: `{ error: unknown }`
+- Type40: `{ entryId: string; inspectionEntryIds: string[] } | null`
+- Type41: `"resolved" | "deferred" | "rejected"`
+- Type42: `Array<{ key: string; id: number }>`
+- Type43: `(id: number) => Promise<Memory>`
+- Type44: `() => boolean | Promise<boolean>`
+- Type45: `() => CaptureMode | Promise<CaptureMode>`
+- Type46: `() => boolean`
+- Type47: `() => Date`
+- Type48: `CaptureServiceOptions["onActivity"]`
+- Type49: `() => Promise<T>`
+- Type50: `(signal: AbortSignal) => Promise<T>`
+- Type51: `"reviewing" | "checking"`
+- Type52: `"info" | "debug"`
+- Type53: `Record<string, unknown>`
+- Type54: `"capture" | "overlap" | "overlapBatch"`
+- Type55: `Promise<number | undefined>`
+- Type56: `"created" | "skipped" | "replacement-created"`
+- Type57: `number | undefined`
+- Type58: `Promise<"applied" | "already">`
+- Type59: `Promise<{ job: QueueJob; destination?: number }>`
+- Type60: `Promise< | { status: "ready"; job: QueueJob; outcome: Record<string, unknown> |
   undefined; overlaps: Memory[]; } | { status: "skipped"; job: QueueJob } >`
-- Type54: `Record<string, unknown> | undefined`
-- Type55: `Promise<Entity | undefined>`
-- Type56: `Promise<{ entities: Entity[]; truncated: boolean }>`
-- Type57: `Promise<{ relationships: EntityRelationship[]; truncated: boolean }>`
-- Type58: `Promise< | { status: "ready"; job: QueueJob; decision: CaptureDecision } | { status:
+- Type61: `Record<string, unknown> | undefined`
+- Type62: `Promise<Entity | undefined>`
+- Type63: `Promise<{ entities: Entity[]; truncated: boolean }>`
+- Type64: `Promise<{ relationships: EntityRelationship[]; truncated: boolean }>`
+- Type65: `Promise<{ job: QueueJob; inputs: CaptureBatchInput[] }>`
+- Type66: `Promise< | { status: "ready"; job: QueueJob; decision: CaptureDecision } | { status:
   "skipped"; job: QueueJob } >`
-- Type59: `Promise<{ job: QueueJob; candidates: CaptureCandidate[]; progress?: boolean }>`
-- Type60: `Promise<{ job: QueueJob; stopped: boolean }>`
-- Type61: `CaptureLinkReview | undefined`
-- Type62: `Promise<{ job: QueueJob; inputs: Array<{ candidateId: string; review: CaptureLinkReview
+- Type67: `Promise<{ job: QueueJob; plan: CaptureMergePlan }>`
+- Type68: `Promise<{ job: QueueJob; candidates: CaptureCandidate[]; progress?: boolean }>`
+- Type69: `{ candidate: CaptureCandidate; decision?: CaptureDecision }`
+- Type70: `CaptureMergePlan | undefined`
+- Type71: `Promise<QueueJob | undefined>`
+- Type72: `CaptureUncertainWrite | undefined`
+- Type73: `Promise<{ job: QueueJob; stopped: boolean }>`
+- Type74: `CaptureLinkReview | undefined`
+- Type75: `Promise<{ job: QueueJob; inputs: Array<{ candidateId: string; review: CaptureLinkReview
   }> }>`
-- Type63: `Promise<"progress" | void>`
-- Type64: `Promise<"advance" | "progress" | "deferred">`
-- Type65: `CaptureSnapshot | CaptureCheckpointOptions`
-- Type66: `{ sessionId?: string; branchId?: string; jobId?: string; limit?: number; }`
-- Type67: `{ sessionId?: string; branchId?: string; }`
-- Type68: `{ sessionId?: string; branchId?: string } | string`
-- Type69: `CaptureCandidate & { sourceFiles: string[] }`
-- Type70: `Promise<NonNullable<PendingConflict["replacement"]>>`
-- Type71: `CaptureAdvanceInput | CaptureSnapshot`
-- Type72: `Pick<WorkContext, "sessionId" | "branchId">`
-- Type73: `(phase: CaptureActivityPhase | undefined) => void`
-- Type74: `"supersede" | "skip" | "defer"`
-- Type75: `Pick< CaptureCandidate, "entities" | "documents" | "codeArtifacts" | "relationships" >`
-- Type76: `string | undefined`
-- Type77: `number | undefined`
-- Type78: `CandidateValidation<CandidateDestination>`
-- Type79: `CandidateValidation<Pick<EntityInput, "entity_type" | "custom_type">>`
-- Type80: `CandidateValidation<CaptureEntityResource>`
-- Type81: `CandidateValidation<CaptureDocumentResource>`
-- Type82: `CandidateValidation<CaptureCodeArtifactResource>`
-- Type83: `CandidateValidation<CaptureRelationshipResource>`
-- Type84: `(item: Record<string, unknown>, index: number) => CandidateValidation<unknown>`
-- Type85: `CaptureCandidate | undefined`
-- Type86: `(id: string, raw: unknown, reason?: string) => void`
-- Type87: `(reason: string) => void`
-- Type88: `string[] | undefined`
-- Type89: `"reason" | "oldClaim" | "newClaim"`
-- Type90: `KnowledgeWritePlan | undefined`
-- Type91: `(item: T, index: number) => Promise<R>`
-- Type92: `{ userSettings: string; projectSettings: string; }`
-- Type93: `"classification" | "recall" | "capture"`
-- Type94: `"default" | "project" | "invalid"`
-- Type95: `"debug" | "info" | "warning" | "error"`
-- Type96: `value is Record<string, unknown>`
-- Type97: `ModelSelection | undefined`
-- Type98: `{ scope: Scope; scopeSource: ScopeSource }`
-- Type99: `Partial< Pick< PersistedUserSettings, | "base_url" | "token_env" | "timeout_ms" |
-  "enabled" | "capture_mode" | "debug" | "verbosity" | "logging" | "recall_model_timeout_ms" |
-  "recall_concurrency" | "context_limit_tokens" | "model" > >`
-- Type100: `{ baseUrl: string; tokenEnv?: string }`
-- Type101: `"auto" | "observe" | "off"`
-- Type102: `"complete" | "legacy-partial" | "summarized"`
-- Type103: `string | null`
-- Type104: `number | null`
-- Type105: `Omit<CodeArtifact, "code">`
-- Type106: `Omit<Document, "content">`
-- Type107: `"Organization" | "Individual" | "Team" | "Device" | "System" | "Other"`
-- Type108: `"user" | "assistant" | "toolResult"`
-- Type109: `Promise<{ id: number; title: string }[]>`
-- Type110: `Promise<"ready" | "progress">`
-- Type111: `"classification" | "recall-review" | "capture" | "overlap"`
-- Type112: `(view: CompactedConversation) => Promise<void>`
-- Type113: `() => unknown`
-- Type114: `{ jobId?: string; sessionId?: string; branchId?: string; candidateId?: string; }`
-- Type115: `"global" | "project"`
-- Type116: `{ cwd: string; repoName?: string; project?: { id: number; name: string } }`
-- Type117: `Array<{ key: string; stage: string; reason?: string }>`
-- Type118: `{ detail: string; retryPending: boolean; key: string }`
-- Type119: `| { kind: "completed"; value: T } | { kind: "aborted" } | { kind: "timed-out" } | {
+- Type76: `{ candidate: CaptureCandidate; outcome: Record<string, unknown>; review:
+  CaptureLinkReview; operation: string; error: unknown; }`
+- Type77: `Promise<{ job: QueueJob; needsCorrection: boolean }>`
+- Type78: `Promise<"progress" | void>`
+- Type79: `Promise<"advance" | "progress" | "deferred">`
+- Type80: `CaptureSnapshot | CaptureCheckpointOptions`
+- Type81: `{ sessionId?: string; branchId?: string; jobId?: string; limit?: number; }`
+- Type82: `{ sessionId?: string; branchId?: string; }`
+- Type83: `{ sessionId?: string; branchId?: string } | string`
+- Type84: `Promise<NonNullable<PendingConflict["replacement"]>>`
+- Type85: `CaptureAdvanceInput | CaptureSnapshot`
+- Type86: `Pick<WorkContext, "sessionId" | "branchId">`
+- Type87: `(phase: CaptureActivityPhase | undefined) => void`
+- Type88: `{ id: number; name: string }[]`
+- Type89: `"supersede" | "skip" | "defer"`
+- Type90: `CaptureDecision | undefined`
+- Type91: `string | undefined`
+- Type92: `(id: string, raw: unknown, reason?: string) => void`
+- Type93: `(reason: string) => void`
+- Type94: `number[] | undefined`
+- Type95: `string[] | undefined`
+- Type96: `"reason" | "oldClaim" | "newClaim"`
+- Type97: `KnowledgeWritePlan | undefined`
+- Type98: `(item: T, index: number) => Promise<R>`
+- Type99: `{ userSettings: string; projectSettings: string; }`
+- Type100: `"classification" | "recall" | "capture"`
+- Type101: `"default" | "project" | "invalid"`
+- Type102: `"debug" | "info" | "warning" | "error"`
+- Type103: `value is Record<string, unknown>`
+- Type104: `ModelSelection | undefined`
+- Type105: `{ scope: Scope; scopeSource: ScopeSource }`
+- Type106: `Partial< Pick< PersistedUserSettings, | "base_url" | "token_env" | "timeout_ms" |
+  "enabled" | "capture_mode" | "debug" | "verbosity" | "logging" | "log_directory" |
+  "recall_model_timeout_ms" | "recall_concurrency" | "context_limit_tokens" | "model" > >`
+- Type107: `{ baseUrl: string; tokenEnv?: string }`
+- Type108: `"auto" | "observe" | "off"`
+- Type109: `"complete" | "legacy-partial" | "summarized"`
+- Type110: `string | null`
+- Type111: `number | null`
+- Type112: `Omit<CodeArtifact, "code">`
+- Type113: `Omit<Document, "content">`
+- Type114: `"Organization" | "Individual" | "Team" | "Device" | "System" | "Other"`
+- Type115: `"user" | "assistant" | "toolResult"`
+- Type116: `Promise<{ id: number; title: string }[]>`
+- Type117: `Promise<"ready" | "progress">`
+- Type118: `"classification" | "recall-review" | "capture" | "overlap"`
+- Type119: `(view: CompactedConversation) => Promise<void>`
+- Type120: `() => unknown`
+- Type121: `{ jobId?: string; sessionId?: string; branchId?: string; candidateId?: string; }`
+- Type122: `"global" | "project"`
+- Type123: `Array<{ key: string; stage: string; reason?: string; count?: number }>`
+- Type124: `{ detail: string; retryPending: boolean; key: string }`
+- Type125: `| { kind: "completed"; value: T } | { kind: "aborted" } | { kind: "timed-out" } | {
   kind: "failed"; error: unknown }`
-- Type120: `"completed"`
-- Type121: `"aborted"`
-- Type122: `"timed-out"`
-- Type123: `"failed"`
-- Type124: `{ sessionId: string; branchId: string; entryIds: string[]; finalEntryId?: string;
+- Type126: `"completed"`
+- Type127: `"aborted"`
+- Type128: `"timed-out"`
+- Type129: `"failed"`
+- Type130: `{ sessionId: string; branchId: string; entryIds: string[]; finalEntryId?: string;
   snapshotId?: string; }`
-- Type125: `void | Promise<void>`
-- Type126: `{ action: "supersede" | "skip" | "defer"; reason?: string; evidenceEntryIds?: string[];
+- Type131: `void | Promise<void>`
+- Type132: `{ action: "supersede" | "skip" | "defer"; reason?: string; evidenceEntryIds?: string[];
   additionalEvidence?: string; additionalEntries?: EvidenceEntry[]; conversation?: readonly
   unknown[]; }`
-- Type127: `Map<string, number>`
-- Type128: `(options: { baseUrl: string; token?: string; timeoutMs: number; }) => ForgetfulClient`
-- Type129: `( client: ForgetfulClient, model: PiMemoryModel, config: ForgetfulConfig, ) =>
+- Type133: `Map<string, number>`
+- Type134: `(options: { baseUrl: string; token?: string; timeoutMs: number; }) => ForgetfulClient`
+- Type135: `( client: ForgetfulClient, model: PiMemoryModel, config: ForgetfulConfig, ) =>
   RecallServicePort`
-- Type130: `( config: ForgetfulConfig, client: ForgetfulClient | undefined, model: PiMemoryModel |
+- Type136: `( config: ForgetfulConfig, client: ForgetfulClient | undefined, model: PiMemoryModel |
   undefined, ) => CaptureServicePort | undefined`
-- Type131: `( ctx: ExtensionContext, branchId: string, ) => Promise<ExtensionWorkContext> |
+- Type137: `( ctx: ExtensionContext, branchId: string, ) => Promise<ExtensionWorkContext> |
   ExtensionWorkContext`
-- Type132: `Partial< Pick< LoadConfigOptions, | "userSettingsPath" | "projectSettingsPath" |
+- Type138: `Partial< Pick< LoadConfigOptions, | "userSettingsPath" | "projectSettingsPath" |
   "userPromptDir" | "projectPromptDir" > >`
-- Type133: `Partial<Record<PolicyName, string>>`
-- Type134: `keyof typeof DEFAULT_MEMORY_POLICIES | "capture" | "overlap"`
-- Type135: `"automatic" | "queued"`
-- Type136: `"pending" | "retrieval" | "terminal"`
-- Type137: `RecallRequest & { sessionContext?: EvidenceEntry[] }`
-- Type138: `Map<string, CaptureFeedbackState>`
-- Type139: `{ throughTriggerId: number; branches: CaptureBranch[] }`
-- Type140: `Map<string, PendingQueuedRecall[]>`
-- Type141: `Map<string, AutomaticRecall>`
-- Type142: `Map<string, RecallJob>`
-- Type143: `readonly (AbortSignal | undefined)[]`
-- Type144: `Promise<string | undefined>`
-- Type145: `Promise<SetupAuthentication | undefined>`
-- Type146: `"context" | "failure" | "no-context"`
-- Type147: `{ id: string; prompt: string } | undefined`
-- Type148: `Array<{ role: string; content?: unknown }>`
-- Type149: `Promise<Model<any> | undefined>`
-- Type150: `Model<any> | undefined`
-- Type151: `"info" | "warning" | "error"`
-- Type152: `"warning" | "error"`
-- Type153: `Promise<Record<string, unknown> | undefined>`
-- Type154: `CaptureCheckpointResult | undefined`
-- Type155: `AutomaticCaptureJobOutcome | undefined`
-- Type156: `Promise<AutomaticCaptureJobOutcome | undefined>`
-- Type157: `{ failure?: NonNullable<AutomaticCaptureJobOutcome["failure"]>; recovered: boolean; }`
-- Type158: `ReturnType<typeof collectCaptureFeedback>`
-- Type159: `{ message?: string; terminalJobIds: string[] }`
-- Type160: `(value: unknown) => Memory`
-- Type161: `( path: string, method: string, body: Record<string, unknown> | undefined, signal:
-  AbortSignal | undefined, statuses: number[], ) => Promise<unknown>`
-- Type162: `Partial<DocumentInput | CodeArtifactInput>`
-- Type163: `DocumentSummary | CodeArtifactSummary`
-- Type164: `string | URL`
-- Type165: `AbortSignal | undefined`
-- Type166: `{ k: number; maxLinks: number; }`
-- Type167: `KnowledgeReadServiceOptions | MemoryReader`
-- Type168: `Promise<Map<number, Entity>>`
-- Type169: `Map<number, Entity>`
-- Type170: `({ id: number; title: string }[] | undefined)[]`
-- Type171: `( id: number, signal?: AbortSignal, ) => Promise<Memory>`
-- Type172: `number | null | undefined`
-- Type173: `Promise<T | undefined>`
-- Type174: `Record<string, unknown> & { operation: string }`
-- Type175: `{ id: number; name: string }`
-- Type176: `Array<ToolText | ToolImage>`
-- Type177: `"image"`
-- Type178: `"text"`
-- Type179: `Array<[string, number]>`
-- Type180: `Document | CodeArtifact`
-- Type181: `"content" | "code"`
-- Type182: `{ items: T[]; offset: number; limit: number; total: number; truncated: boolean }`
-- Type183: `{ items: unknown[]; offset: number; limit: number; total: number; truncated: boolean;
+- Type139: `Partial<Record<PolicyName, string>>`
+- Type140: `keyof typeof DEFAULT_MEMORY_POLICIES | "capture" | "overlap"`
+- Type141: `"automatic" | "queued"`
+- Type142: `"pending" | "retrieval" | "terminal"`
+- Type143: `RecallRequest & { sessionContext?: EvidenceEntry[] }`
+- Type144: `Map<string, CaptureFeedbackState>`
+- Type145: `{ throughTriggerId: number; branches: CaptureBranch[] }`
+- Type146: `Map<string, PendingQueuedRecall[]>`
+- Type147: `Map<string, AutomaticRecall>`
+- Type148: `Map<string, RecallJob>`
+- Type149: `readonly (AbortSignal | undefined)[]`
+- Type150: `Promise<string | undefined>`
+- Type151: `Promise<SetupAuthentication | undefined>`
+- Type152: `"context" | "failure" | "no-context"`
+- Type153: `{ id: string; prompt: string } | undefined`
+- Type154: `Array<{ role: string; content?: unknown }>`
+- Type155: `Promise<Model<any> | undefined>`
+- Type156: `Model<any> | undefined`
+- Type157: `"info" | "warning" | "error"`
+- Type158: `"warning" | "error"`
+- Type159: `CaptureCheckpointResult | undefined`
+- Type160: `AutomaticCaptureJobOutcome | undefined`
+- Type161: `Promise<AutomaticCaptureJobOutcome | undefined>`
+- Type162: `{ failure?: NonNullable<AutomaticCaptureJobOutcome["failure"]>; recovered: boolean; }`
+- Type163: `ReturnType<typeof collectCaptureFeedback>`
+- Type164: `{ message?: string; terminalJobIds: string[] }`
+- Type165: `(value: unknown) => Memory`
+- Type166: `( path: string, method: string, body: unknown, signal: AbortSignal | undefined,
+  statuses: number[], ) => Promise<unknown>`
+- Type167: `Partial<DocumentInput | CodeArtifactInput>`
+- Type168: `DocumentSummary | CodeArtifactSummary`
+- Type169: `string | URL`
+- Type170: `AbortSignal | undefined`
+- Type171: `T | undefined`
+- Type172: `NonNullable<KnowledgeExpansionResult["failures"]>`
+- Type173: `{ operation: string; message: string }[]`
+- Type174: `KnowledgeReadServiceOptions | MemoryReader`
+- Type175: `Promise<Map<number, Entity>>`
+- Type176: `Map<number, Entity>`
+- Type177: `({ id: number; title: string }[] | undefined)[]`
+- Type178: `( id: number, signal?: AbortSignal, ) => Promise<Memory>`
+- Type179: `Promise<T | undefined>`
+- Type180: `Record<string, unknown> & { operation: string }`
+- Type181: `{ id: number; name: string }`
+- Type182: `Array<ToolText | ToolImage>`
+- Type183: `"image"`
+- Type184: `"text"`
+- Type185: `Array<[string, number]>`
+- Type186: `Document | CodeArtifact`
+- Type187: `"content" | "code"`
+- Type188: `{ items: T[]; offset: number; limit: number; total: number; truncated: boolean }`
+- Type189: `{ items: unknown[]; offset: number; limit: number; total: number; truncated: boolean;
   next_offset: number }`
-- Type184: `{ content: Array<ToolText | ToolImage>; kind: string }`
-- Type185: `{ source_repo?: string; source_files?: string[]; encoding_version?: string; }`
-- Type186: `(() => Promise<void>) | undefined`
-- Type187: `( state: KnowledgeWriteState, ) => Promise<void>`
-- Type188: `{ title: string; content: string }`
-- Type189: `{ key: string }[]`
-- Type190: `{ kind: string; key: string; create: () => Promise<T>; authorize?: () => Promise<void>;
-  }`
-- Type191: `KnowledgeWriteGuard | undefined`
-- Type192: `{ document_ids?: number[]; code_artifact_ids?: number[]; }`
-- Type193: `Pick< KnowledgeClient, | "getEntity" | "createEntity" | "getDocument" | "createDocument"
-  | "getCodeArtifact" | "createCodeArtifact" | "getRelationships" | "createRelationship" |
-  "linkEntityMemory" | "linkMemories" | "updateMemory" >`
-- Type194: `"off" | "info" | "debug"`
-- Type195: `{ directory: string; sessionId: string; level: FileLogLevel; onError?: (error: unknown)
+- Type190: `{ content: Array<ToolText | ToolImage>; kind: string }`
+- Type191: `{ source_repo?: string; source_files?: string[]; encoding_version?: string; }`
+- Type192: `(() => Promise<void>) | undefined`
+- Type193: `( state: KnowledgeWriteState, ) => Promise<void>`
+- Type194: `{ title: string; content: string }`
+- Type195: `{ kind: string; key: string; occurrence: number; input: unknown; error: string }`
+- Type196: `{ kind: string; key: string; occurrence: number; input: unknown; create: () =>
+  Promise<T>; }`
+- Type197: `KnowledgeWriteGuard | undefined`
+- Type198: `{ document_ids?: number[]; code_artifact_ids?: number[]; }`
+- Type199: `{ kind: string; key: string; input: unknown; execute: () => Promise<unknown> }`
+- Type200: `T & { occurrence: number }`
+- Type201: `Pick< KnowledgeClient, | "getEntity" | "createEntity" | "getDocument" | "createDocument"
+  | "getCodeArtifact" | "createCodeArtifact" | "createRelationship" | "linkEntityMemory" |
+  "linkMemories" | "updateMemory" >`
+- Type202: `{ key: string }[]`
+- Type203: `"off" | "info" | "debug"`
+- Type204: `{ directory: string; sessionId: string; level: FileLogLevel; onError?: (error: unknown)
   => void; maxFileBytes?: number; maxFiles?: number; maxEventBytes?: number; }`
-- Type196: `CompactedMemoryHistory & { summaryMessage: Message }`
-- Type197: `CompactedMemoryHistory | undefined`
-- Type198: `(history: CompactedMemoryHistory) => Promise<void>`
-- Type199: `Promise<number | "progress">`
-- Type200: `( context: Context, options: SimpleStreamOptions, ) => Promise<AssistantMessage>`
-- Type201: `Promise<{ summary: string; count: number }>`
-- Type202: `( headers: ProviderHeaders, ) => ProviderHeaders | Promise<ProviderHeaders>`
-- Type203: `ModelRegistryPort & { getAvailable?: () => Model<any>[]; }`
-- Type204: `readonly { model: Model<any> }[]`
-- Type205: `"task" | "compaction"`
-- Type206: `() => Promise<number>`
-- Type207: `ProviderHeaders | undefined`
-- Type208: `MemoryModelHeaderTransform | undefined`
-- Type209: `ModelSubmissionTool | ModelReadTool`
-- Type210: `PiMemoryModel | undefined`
-- Type211: `Project | undefined`
-- Type212: `Promise<ProjectInput | undefined>`
-- Type213: `Promise<Project | undefined>`
-- Type214: `DurableQueueStoreOptions | string`
-- Type215: `( state: QueueState, ) => | Promise<{ value: T; changed?: boolean }> | { value: T;
+- Type205: `CompactedMemoryHistory & { summaryMessage: Message }`
+- Type206: `CompactedMemoryHistory | undefined`
+- Type207: `(history: CompactedMemoryHistory) => Promise<void>`
+- Type208: `Promise<number | "progress">`
+- Type209: `( context: Context, options: SimpleStreamOptions, ) => Promise<AssistantMessage>`
+- Type210: `ToolResultMessage["content"]`
+- Type211: `Promise<{ summary: string; count: number }>`
+- Type212: `( headers: ProviderHeaders, ) => ProviderHeaders | Promise<ProviderHeaders>`
+- Type213: `ModelRegistryPort & { getAvailable?: () => Model<any>[]; }`
+- Type214: `readonly { model: Model<any> }[]`
+- Type215: `"task" | "compaction"`
+- Type216: `() => Promise<number>`
+- Type217: `ProviderHeaders | undefined`
+- Type218: `MemoryModelHeaderTransform | undefined`
+- Type219: `ModelSubmissionTool | ModelReadTool`
+- Type220: `PiMemoryModel | undefined`
+- Type221: `Project | undefined`
+- Type222: `Promise<ProjectInput | undefined>`
+- Type223: `Promise<Project | undefined>`
+- Type224: `DurableQueueStoreOptions | string`
+- Type225: `( state: QueueState, ) => | Promise<{ value: T; changed?: boolean }> | { value: T;
   changed?: boolean }`
-- Type216: `WatermarkAdvance | CaptureSnapshot`
-- Type217: `WorkContext & { projects?: Project[] }`
-- Type218: `Promise<QueueJob | undefined>`
-- Type219: `Array<{ sessionId: string; branchId: string }>`
-- Type220: `{ sessionId: string; branchId: string }`
-- Type221: `(outcomes: Array<{ jobId: string; error: string }>) => void`
-- Type222: `{ sessionId: string; branchId: string } | undefined`
-- Type223: `QueueCheckpoint | string`
-- Type224: `Promise<PendingConflict | undefined>`
-- Type225: `"pending" | "resolved" | "rejected"`
-- Type226: `{ // Missing version identifies legacy implicit preservation plans; never execute as
+- Type226: `WatermarkAdvance | CaptureSnapshot`
+- Type227: `WorkContext & { projects?: Project[] }`
+- Type228: `Promise<{ job: QueueJob; historyError?: string }>`
+- Type229: `Promise<{ history?: NonNullable<SnapshotPayload["historySummary"]>; historyError?:
+  string; }>`
+- Type230: `Array<{ sessionId: string; branchId: string }>`
+- Type231: `{ sessionId: string; branchId: string }`
+- Type232: `(outcomes: Array<{ jobId: string; error: string }>) => void`
+- Type233: `{ sessionId: string; branchId: string } | undefined`
+- Type234: `QueueCheckpoint | string`
+- Type235: `Promise<PendingConflict | undefined>`
+- Type236: `"pending" | "handed_off" | "resolved" | "rejected"`
+- Type237: `{ // Missing version identifies legacy implicit preservation plans; never execute as
   explicit. planVersion?: 1; requestKey?: string; requestPayload?: string; request?: {
   evidenceEntryIds: string[]; selectedAdditionalEntries: EvidenceEntry[]; reason?: string;
   additionalEvidence?: string; }; // The model's update selection and this plan's actual target are
@@ -6789,47 +7091,51 @@ classDiagram
   number[]; completedMemoryIds?: number[]; creationError?: string; input: MemoryInput; candidate:
   unknown; entityIds: number[]; memoryIds: number[]; linksComplete?: boolean; creationAttempted?:
   boolean; knowledgeState?: unknown; }`
-- Type227: `Omit<CaptureSnapshot, "entries" | "conversation" | "sourceConversation">`
-- Type228: `| "pending" | "running" | "paused" | "complete" | "failed"`
-- Type229: `1 | 2`
-- Type230: `Record<string, QueueWatermark>`
-- Type231: `Pick<CaptureSnapshot, "entries" | "conversation" | "sourceConversation" |
-  "historySummary">`
-- Type232: `{ throughEntryId: string; entryIds: string[]; } | undefined`
-- Type233: `{ throughEntryId: string; entryIds: string[] }`
-- Type234: `{ throughEntryId?: string; entryIds?: string[] }`
-- Type235: `(stage: string, error: unknown) => string`
-- Type236: `NonNullable<ModelRequest["diagnosticContext"]>`
-- Type237: `(projectId: number, reason: string) => Promise<boolean>`
-- Type238: `(plan: RecallPlan) => void`
-- Type239: `() => number`
-- Type240: `{ stage: string; debugTrace: string; plannerRejections: string[]; reviewRejections:
+- Type238: `Omit<CaptureSnapshot, "entries" | "conversation" | "sourceConversation">`
+- Type239: `| "pending" | "running" | "paused" | "complete" | "failed"`
+- Type240: `1 | 2`
+- Type241: `Record<string, QueueWatermark>`
+- Type242: `Pick<CaptureSnapshot, "entries" | "conversation" | "sourceConversation" |
+  "historySummary"> & { /** Full source ordering for completed caches; kept outside the bounded
+  queue index. */ historyEntryIds?: string[]; }`
+- Type243: `"retire"`
+- Type244: `{ throughEntryId: string; entryIds: string[]; } | undefined`
+- Type245: `{ throughEntryId: string; entryIds: string[] }`
+- Type246: `{ throughEntryId?: string; entryIds?: string[] }`
+- Type247: `(stage: string, error: unknown) => string`
+- Type248: `NonNullable<ModelRequest["diagnosticContext"]>`
+- Type249: `(projectId: number, reason: string) => Promise<boolean>`
+- Type250: `(plan: RecallPlan) => void`
+- Type251: `() => number`
+- Type252: `{ stage: string; debugTrace: string; plannerRejections: string[]; reviewRejections:
   string[]; failedReviewDebug: string | undefined; }`
-- Type241: `Promise<KnowledgeExpansionResult | undefined>`
-- Type242: `KnowledgeExpansionResult | undefined`
-- Type243: `Project[] | undefined`
-- Type244: `error is Error & { responseBody: string }`
-- Type245: `Memory | undefined`
-- Type246: `{ text: string; ids: number[]; knowledgeText: string }`
-- Type247: `Record<keyof typeof SOURCE_FIELDS, number[]>`
-- Type248: `"Review" | "Planner"`
-- Type249: `{ summary: string; reason: string; sources: ReturnType<typeof reviewSources>; }`
-- Type250: `(debug: string) => void`
-- Type251: `(toolName: string, text: string) => boolean`
-- Type252: `| { status: "ready"; snapshot: CaptureSnapshotWithStatus } | { status: "skipped";
+- Type253: `Promise<KnowledgeExpansionResult | undefined>`
+- Type254: `KnowledgeExpansionResult | undefined`
+- Type255: `Project[] | undefined`
+- Type256: `error is Error & { responseBody: string }`
+- Type257: `Memory | undefined`
+- Type258: `{ text: string; ids: number[]; knowledgeText: string }`
+- Type259: `Record<keyof typeof SOURCE_FIELDS, number[]>`
+- Type260: `"Review" | "Planner"`
+- Type261: `{ summary: string; reason: string; sources: ReturnType<typeof reviewSources>; }`
+- Type262: `(debug: string) => void`
+- Type263: `"CLI" | "MCP"`
+- Type264: `Promise<SetupHelp | "manual" | undefined>`
+- Type265: `(toolName: string, text: string) => boolean`
+- Type266: `| { status: "ready"; snapshot: CaptureSnapshotWithStatus } | { status: "skipped";
   reason: string; finalEntryId?: string }`
-- Type253: `"ready"`
-- Type254: `"skipped"`
-- Type255: `MessageRecord | undefined`
-- Type256: `string | null | undefined`
-- Type257: `EvidenceEntry | undefined`
-- Type258: `SnapshotOptions["includeToolEvidence"]`
-- Type259: `| ((toolName: string, text: string) => boolean) | undefined`
-- Type260: `{ entry: SessionEntry; message: MessageRecord } | undefined`
-- Type261: `CaptureHistorySummary | undefined`
-- Type262: `Pick< Static<typeof SOURCE_INSPECTION_PARAMETERS>, "offset" | "limit" > & ({ path:
+- Type267: `"ready"`
+- Type268: `"skipped"`
+- Type269: `MessageRecord | undefined`
+- Type270: `string | null | undefined`
+- Type271: `EvidenceEntry | undefined`
+- Type272: `SnapshotOptions["includeToolEvidence"]`
+- Type273: `| ((toolName: string, text: string) => boolean) | undefined`
+- Type274: `{ entry: SessionEntry; message: MessageRecord } | undefined`
+- Type275: `CaptureHistorySummary | undefined`
+- Type276: `Pick< Static<typeof SOURCE_INSPECTION_PARAMETERS>, "offset" | "limit" > & ({ path:
   string; url?: never } | { url: string; path?: never })`
-- Type263: `{ status: "ok"; identifier: string; content: string; observedAt: string; /** SHA-256 of
+- Type277: `{ status: "ok"; identifier: string; content: string; observedAt: string; /** SHA-256 of
   the complete observed source bytes, before sanitizing or paging. */ contentHash: string;
   sanitized: boolean; page: { offset: number; totalCharacters: number; nextOffset?: number };
   source_repo?: string; source_files?: string[]; source_url?: string; encoding_version?: string; /**
@@ -6837,424 +7143,445 @@ classDiagram
   | "modified" | "uncommitted" | "unknown"; provenanceError?: SourceInspectionError; httpStatus?:
   number; } | { status: "error"; observedAt: string; error: SourceInspectionError; source_url?:
   string; httpStatus?: number; httpStatusText?: string; body?: string; }`
-- Type264: `"ok"`
-- Type265: `{ offset: number; totalCharacters: number; nextOffset?: number }`
-- Type266: `"committed" | "modified" | "uncommitted" | "unknown"`
-- Type267: `"error"`
-- Type268: `{ path: string; dev: number; ino: number }`
-- Type269: `SourceInspectionRequest & { url: string }`
-- Type270: `Promise<{ bytes: Buffer; status: number; statusText: string; location?: string; }>`
+- Type278: `"ok"`
+- Type279: `{ offset: number; totalCharacters: number; nextOffset?: number }`
+- Type280: `"committed" | "modified" | "uncommitted" | "unknown"`
+- Type281: `"error"`
+- Type282: `{ path: string; dev: number; ino: number }`
+- Type283: `SourceInspectionRequest & { url: string }`
+- Type284: `Promise<{ bytes: Buffer; status: number; statusText: string; location?: string; }>`
 
 ## Signature key
 
 - Signature1: `prepareLinkReview(client: ForgetfulClient, memoryId: number, destination: number,
-  overlaps: Memory[], automaticIds: number[] | undefined, beforeRead: () => Promise<void>,
-  includeAttachments: unknown) Promise<CaptureLinkReview>`
+  scope: Scope, overlaps: Memory[], options: { automaticIds?: number[]; beforeRead: () =>
+  Promise<void>; includeAttachments?: boolean }) Promise<CaptureLinkReview>`
 - Signature2: `validateLinkDecisions(decisions: LinkDecision[], review: CaptureLinkReview, edges:
-  Map<string, boolean>) void`
-- Signature3: `authorizedMemory(client: ForgetfulClient, id: number, destination: number)
-  Promise<Memory>`
+  Map<string, boolean>, candidateId: string) void`
+- Signature3: `authorizedMemory(client: ForgetfulClient, id: number, destination: number, scope:
+  Scope) Promise<Memory>`
 - Signature4: `executeConnection(review: CaptureLinkReview, operation:
-  ConnectionResult["operation"], targetId: number, execute: () => Promise<unknown>, save: (review:
-  CaptureLinkReview) => Promise<void>) Promise<void>`
-- Signature5: `applyLinkReview(client: ForgetfulClient, destination: number, initial:
+  ConnectionResult["operation"], targetId: number, execute: (markDispatched: () => void) =>
+  Promise<unknown>, save: (review: CaptureLinkReview) => Promise<void>) Promise<void>`
+- Signature5: `applyLinkReview(client: ForgetfulClient, destination: number, scope: Scope, initial:
   CaptureLinkReview, save: (review: CaptureLinkReview) => Promise<void>, beforeWrite: () =>
   Promise<void>, assertCanWrite: () => void) Promise<CaptureLinkReview>`
-- Signature6: `readAttachmentRecords(client: ForgetfulClient, memory: Memory, destination: number,
-  beforeRead: () => Promise<void>) Promise<{ documents: Document[]; codeArtifacts: CodeArtifact[]
-  }>`
-- Signature7: `preparePreviousConnections(client: ForgetfulClient, expected: Memory, replacementId:
-  number, destination: number, beforeRead: () => Promise<void>) Promise<PreviousConnections>`
+- Signature6: `readAttachmentRecords(client: ForgetfulClient, memory: Memory, beforeRead: () =>
+  Promise<void>) Promise<{ documents: Document[]; codeArtifacts: CodeArtifact[] }>`
+- Signature7: `preparePreviousConnections(client: ForgetfulClient, expected: Memory, _replacementId:
+  number, _destination: number, beforeRead: () => Promise<void>) Promise<PreviousConnections>`
 - Signature8: `preserveConnections(client: ForgetfulClient, initial: CaptureLinkReview, beforeWrite:
   () => Promise<void>, save: (review: CaptureLinkReview) => Promise<void>, assertCanWrite: () =>
   void) Promise<CaptureLinkReview>`
-- Signature9: `-addConflict(job: QueueJob, candidate: CaptureCandidate, destinationProjectId:
+- Signature9: `collectMergeConnections(client: ForgetfulClient, memories: Memory[], previous:
+  MergeConnections) Promise<MergeConnections>`
+- Signature10: `requireResourceScope(id: number, projectId: number | null | undefined, kind: string,
+  access: MergeAccess) void`
+- Signature11: `checkMergeAttachments(client: ForgetfulClient, plan: Pick<MergeConnections,
+  "documentIds" | "codeArtifactIds" | "fileIds">, access: MergeAccess) Promise<void>`
+- Signature12: `preflightMergeConnections(client: ForgetfulClient, plan: MergeConnections, access:
+  MergeAccess) Promise<void>`
+- Signature13: `preserveMergeConnections(client: ForgetfulClient, replacementId: number, plan:
+  MergeConnections, options: MergeExecution) Promise<void>`
+- Signature14: `-addConflict(job: QueueJob, candidate: CaptureCandidate, destinationProjectId:
   number, decision: CaptureDecision, reason: string, oldMemory: Memory, replacementId: number)
   Promise<PendingConflict>`
-- Signature10: `-checkpointOutcome(job: QueueJob, candidateId: string, outcome: unknown)
+- Signature15: `-checkpointOutcome(job: QueueJob, candidateId: string, outcome: unknown)
   Promise<QueueJob>`
-- Signature11: `-destinationProjects(candidate: CaptureCandidate, context: WorkContext)
+- Signature16: `-destinationProjects(candidate: CaptureCandidate, context: WorkContext)
   Promise<number[]>`
-- Signature12: `-validateDecisionResources(decision: CaptureDecision, candidate: CaptureCandidate,
-  batch: boolean, neighborhood: CaptureNeighborhood | undefined) void`
-- Signature13: `-validateDecision(decision: CaptureDecision, candidate: CaptureCandidate, overlaps:
-  Memory[], batch: unknown, neighborhood: CaptureNeighborhood) void`
-- Signature14: `-createMemory(job: QueueJob, candidate: CaptureCandidate, destination: number,
-  projectIds: unknown) Promise<MemoryCreateResult>`
-- Signature15: `-writeKnowledge(job: QueueJob, candidate: CaptureCandidate, destination: number,
+- Signature17: `-validateDecision(decision: CaptureDecision, _candidate: CaptureCandidate,
+  _overlaps: Memory[], _batch: unknown, _neighborhood: CaptureNeighborhood) void`
+- Signature18: `-createMemory(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  projectIds: unknown, replacement: unknown) Promise<MemoryCreateResult>`
+- Signature19: `-writeKnowledge(job: QueueJob, candidate: CaptureCandidate, destination: number,
   memoryId: number, baseOutcome: Record<string, unknown>, finalStage: "created" | "skipped" |
   "replacement-created", existingMemory: Memory) Promise<QueueJob>`
-- Signature16: `-applySupersession(job: QueueJob, oldMemory: Memory, replacementId: number, reason:
-  string) Promise<"applied" | "already">`
-- Signature17: `-finishSupersession(job: QueueJob, candidate: CaptureCandidate, destination: number,
+- Signature20: `-supersessionAlreadyApplied(job: QueueJob, oldMemoryId: number, replacementId:
+  number | undefined, destination: number) Promise<boolean>`
+- Signature21: `-applySupersession(job: QueueJob, oldMemory: Memory, replacementId: number |
+  undefined, reason: string, destination: number) Promise<"applied" | "already">`
+- Signature22: `-finishSupersession(job: QueueJob, candidate: CaptureCandidate, destination: number,
   oldMemory: Memory, replacementId: number, reason: string, decision: CaptureDecision)
   Promise<QueueJob>`
-- Signature18: `-processReplacementCheckpoint(job: QueueJob, candidate: CaptureCandidate, outcome:
+- Signature23: `-processReplacementCheckpoint(job: QueueJob, candidate: CaptureCandidate, outcome:
   Record<string, unknown>) Promise<QueueJob>`
-- Signature19: `-processKnowledgeCheckpoint(job: QueueJob, candidate: CaptureCandidate, outcome:
+- Signature24: `-processKnowledgeCheckpoint(job: QueueJob, candidate: CaptureCandidate, outcome:
   Record<string, unknown>) Promise<QueueJob>`
-- Signature20: `-loadOverlaps(job: QueueJob, candidate: CaptureCandidate, outcome: Record<string,
+- Signature25: `-loadOverlaps(job: QueueJob, candidate: CaptureCandidate, outcome: Record<string,
   unknown> | undefined, destination: number) Promise< | { status: "ready"; job: QueueJob; outcome:
   Record<string, unknown> | undefined; overlaps: Memory[]; } | { status: "skipped"; job: QueueJob }
   >`
-- Signature21: `-neighborhoodEntities(job: QueueJob, candidate: CaptureCandidate, destination:
+- Signature26: `-neighborhoodEntities(job: QueueJob, candidate: CaptureCandidate, destination:
   number) Promise<{ entities: Entity[]; truncated: boolean }>`
-- Signature22: `-existingNeighborhood(job: QueueJob, candidate: CaptureCandidate, destination:
+- Signature27: `-existingNeighborhood(job: QueueJob, candidate: CaptureCandidate, destination:
   number) Promise<CaptureNeighborhood>`
-- Signature23: `-validateEquivalentCandidate(decision: CaptureDecision, input: CaptureBatchInput,
-  candidates: CaptureCandidate[], current: QueueJob, inputs: CaptureBatchInput[]) void`
-- Signature24: `-decideOverlap(job: QueueJob, candidate: CaptureCandidate, outcome: Record<string,
+- Signature28: `-decideOverlap(job: QueueJob, candidate: CaptureCandidate, outcome: Record<string,
   unknown> | undefined, overlaps: Memory[], destination: number) Promise< | { status: "ready"; job:
   QueueJob; decision: CaptureDecision } | { status: "skipped"; job: QueueJob } >`
-- Signature25: `-recordEscalation(job: QueueJob, candidate: CaptureCandidate, destination: number,
+- Signature29: `-recordEscalation(job: QueueJob, candidate: CaptureCandidate, destination: number,
   decision: CaptureDecision, reason: string, oldMemory: Memory, outcomeReason: string)
   Promise<QueueJob>`
-- Signature26: `-supersedeCandidate(job: QueueJob, candidate: CaptureCandidate, destination: number,
+- Signature30: `-supersedeCandidate(job: QueueJob, candidate: CaptureCandidate, destination: number,
   overlaps: Memory[], decision: CaptureDecision) Promise<QueueJob>`
-- Signature27: `-equivalentMemory(job: QueueJob, candidateId: string, destination: number)
+- Signature31: `-readMaintenanceTargets(job: QueueJob, ids: number[], destination: number)
+  Promise<Memory[]>`
+- Signature32: `-preflightRetirement(job: QueueJob, candidateId: string, destination: number, ids:
+  number[]) Promise<void>`
+- Signature33: `-composeMerge(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  decision: CaptureDecision) Promise<{ job: QueueJob; plan: CaptureMergePlan }>`
+- Signature34: `-verifyRequestedMerge(job: QueueJob, outcome: Record<string, unknown> | undefined,
+  replacementId: number, destination: number) Promise<void>`
+- Signature35: `-finishMerge(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  decision: CaptureDecision, plan: CaptureMergePlan, replacementId: number) Promise<QueueJob>`
+- Signature36: `-mergeCandidate(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  decision: CaptureDecision) Promise<QueueJob>`
+- Signature37: `-retireCandidate(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  decision: CaptureDecision) Promise<QueueJob>`
+- Signature38: `-equivalentMemory(job: QueueJob, candidateId: string, destination: number)
   Promise<Memory>`
-- Signature28: `-applyDecision(job: QueueJob, candidate: CaptureCandidate, destination: number,
+- Signature39: `-skipCandidate(job: QueueJob, candidate: CaptureCandidate, destination: number,
   overlaps: Memory[], decision: CaptureDecision) Promise<QueueJob>`
-- Signature29: `-processCandidate(job: QueueJob, candidate: CaptureCandidate, outcome: unknown)
+- Signature40: `-applyDecision(job: QueueJob, candidate: CaptureCandidate, destination: number,
+  overlaps: Memory[], decision: CaptureDecision) Promise<QueueJob>`
+- Signature41: `-processCandidate(job: QueueJob, candidate: CaptureCandidate, outcome: unknown)
   Promise<QueueJob>`
-- Signature30: `-recordCandidateFailure(currentJob: QueueJob, candidate: CaptureCandidate, error:
+- Signature42: `-correctedCaptureOutcome(outcome: Record<string, unknown>, corrected: { candidate:
+  CaptureCandidate; decision?: CaptureDecision }, rejectedMerge: CaptureMergePlan | undefined)
+  Record<string, unknown>`
+- Signature43: `-saveCorrectableFailure(job: QueueJob, candidate: CaptureCandidate, error: unknown)
+  Promise<QueueJob | undefined>`
+- Signature44: `-recordCandidateFailure(currentJob: QueueJob, candidate: CaptureCandidate, error:
   unknown, result: CaptureCheckpointResult) Promise<void>`
-- Signature31: `-processCandidates(job: QueueJob, candidates: CaptureCandidate[], result:
+- Signature45: `-pauseCandidate(job: QueueJob, error: CapturePause, result: CaptureCheckpointResult)
+  Promise<void>`
+- Signature46: `-correctCandidateFailures(job: QueueJob, candidates: CaptureCandidate[], result:
   CaptureCheckpointResult) Promise<{ job: QueueJob; stopped: boolean }>`
-- Signature32: `-refreshLinkReview(current: QueueJob, candidates: CaptureCandidate[], outcome:
+- Signature47: `-processCandidates(job: QueueJob, candidates: CaptureCandidate[], result:
+  CaptureCheckpointResult) Promise<{ job: QueueJob; stopped: boolean }>`
+- Signature48: `-processOrderedCandidates(job: QueueJob, candidates: CaptureCandidate[], ordered:
+  CaptureCandidate[], result: CaptureCheckpointResult) Promise<{ job: QueueJob; stopped: boolean }>`
+- Signature49: `-refreshLinkReview(current: QueueJob, candidates: CaptureCandidate[], outcome:
   Record<string, unknown>, mode: CaptureMode, prior: CaptureLinkReview | undefined)
   Promise<CaptureLinkReview>`
-- Signature33: `-planLinkReviews(job: QueueJob, candidates: CaptureCandidate[], inputs: Array<{
+- Signature50: `-migrateLegacyLinkReview(job: QueueJob, candidateId: string, outcome: Record<string,
+  unknown>) Promise<QueueJob>`
+- Signature51: `-planLinkReviews(job: QueueJob, candidates: CaptureCandidate[], inputs: Array<{
   candidateId: string; review: CaptureLinkReview }>) Promise<QueueJob>`
-- Signature34: `-runBranchWorker(branch: CaptureBranch, budget: number, result:
+- Signature52: `-previousSupersessionCompleted(job: QueueJob, outcome: Record<string, unknown>,
+  review: CaptureLinkReview) Promise<boolean>`
+- Signature53: `-finishReviewedSupersession(job: QueueJob, candidate: CaptureCandidate, outcome:
+  Record<string, unknown>) Promise<QueueJob>`
+- Signature54: `-runBranchWorker(branch: CaptureBranch, budget: number, result:
   CaptureCheckpointResult) Promise<void>`
-- Signature35: `-recordBranchFailure(job: QueueJob, result: CaptureCheckpointResult, error: unknown,
+- Signature55: `-recordBranchFailure(job: QueueJob, result: CaptureCheckpointResult, error: unknown,
   started: number) Promise<void>`
-- Signature36: `-checkpointBranch(branch: CaptureBranch, budget: number)
+- Signature56: `-checkpointBranch(branch: CaptureBranch, budget: number)
   Promise<CaptureCheckpointResult>`
-- Signature37: `-appendCheckpointResult(total: CaptureCheckpointResult, result:
+- Signature57: `-appendCheckpointResult(total: CaptureCheckpointResult, result:
   CaptureCheckpointResult) void`
-- Signature38: `pendingConflicts(optionsOrSession: { sessionId?: string; branchId?: string } |
+- Signature58: `pendingConflicts(optionsOrSession: { sessionId?: string; branchId?: string } |
   string, branchId: string) Promise<CapturePendingConflict[]>`
-- Signature39: `-rejectConflict(conflict: PendingConflict, input: ResolveConflictInput)
+- Signature59: `-rejectConflict(conflict: PendingConflict, input: ResolveConflictInput)
   Promise<CaptureResolveResult>`
-- Signature40: `-selectResolutionEvidence(conflict: PendingConflict, input: ResolveConflictInput,
+- Signature60: `-selectResolutionEvidence(conflict: PendingConflict, input: ResolveConflictInput,
   additionalIds: string[]) string[]`
-- Signature41: `-validateResolutionEvidence(conflict: PendingConflict, input: ResolveConflictInput)
+- Signature61: `-validateResolutionEvidence(conflict: PendingConflict, input: ResolveConflictInput)
   ConflictResolutionEvidence`
-- Signature42: `-markConflictResolved(conflictId: string, resolution: unknown)
+- Signature62: `-markConflictResolved(conflictId: string, resolution: unknown)
   Promise<CaptureResolveResult>`
-- Signature43: `-planConflictReplacement(conflict: PendingConflict, candidate: CaptureCandidate,
+- Signature63: `-planConflictReplacement(conflict: PendingConflict, candidate: CaptureCandidate,
   evidence: ConflictResolutionEvidence, context: WorkContext, current: Memory, requestPayload:
   string, conversation: readonly unknown[]) Promise<NonNullable<PendingConflict["replacement"]>>`
-- Signature44: `-validateConflictMemory(conflict: PendingConflict, current: Memory, _oldMemory:
-  Memory) void`
-- Signature45: `-updateResolutionReplacement(conflict: PendingConflict, replacementId: number)
+- Signature64: `-updateResolutionReplacement(conflict: PendingConflict, replacementId: number)
   Promise<void>`
-- Signature46: `-linkResolutionEntity(conflict: PendingConflict, replacementId: number, id: number)
+- Signature65: `-linkResolutionEntity(conflict: PendingConflict, replacementId: number, id: number)
   Promise<void>`
-- Signature47: `-applyConflictResolution(conflict: PendingConflict, evidence:
+- Signature66: `-applyConflictResolution(conflict: PendingConflict, evidence:
   ConflictResolutionEvidence, target: ConflictResolutionTarget, requestPayload: string,
   conversation: readonly unknown[]) Promise<CaptureResolveResult>`
-- Signature48: `-resolveConflictOwned(conflictId: string, input: ResolveConflictInput)
+- Signature67: `-resolveConflictOwned(conflictId: string, input: ResolveConflictInput)
   Promise<CaptureResolveResult>`
-- Signature49: `resolveConflict(conflictId: string, input: ResolveConflictInput)
+- Signature68: `resolveConflict(conflictId: string, input: ResolveConflictInput)
   Promise<CaptureResolveResult>`
-- Signature50: `candidateFields(item: Record<string, unknown>, snapshot: CaptureSnapshot)
-  CandidateValidation<CandidateFields>`
-- Signature51: `resourceStrings(value: unknown, label: string, maxItems: number, sanitize: unknown)
-  CandidateValidation<string[]>`
-- Signature52: `resourceEvidence(item: Record<string, unknown>, sourceIds: string[], snapshot:
-  CaptureSnapshot, kind: CaptureCandidate["evidenceType"]) CandidateValidation<string[]>`
-- Signature53: `entityResource(item: Record<string, unknown>, index: number, sourceIds: string[],
-  snapshot: CaptureSnapshot, kind: CaptureCandidate["evidenceType"])
-  CandidateValidation<CaptureEntityResource>`
-- Signature54: `documentResource(item: Record<string, unknown>, index: number, sourceIds: string[],
-  snapshot: CaptureSnapshot, kind: CaptureCandidate["evidenceType"])
-  CandidateValidation<CaptureDocumentResource>`
-- Signature55: `codeArtifactResource(item: Record<string, unknown>, index: number, sourceIds:
-  string[], snapshot: CaptureSnapshot, kind: CaptureCandidate["evidenceType"])
-  CandidateValidation<CaptureCodeArtifactResource>`
-- Signature56: `relationshipResource(item: Record<string, unknown>, index: number, sourceIds:
-  string[], snapshot: CaptureSnapshot, kind: CaptureCandidate["evidenceType"])
-  CandidateValidation<CaptureRelationshipResource>`
-- Signature57: `parseResourceList(raw: unknown, label: string, maxItems: number, parse: (item:
-  Record<string, unknown>, index: number) => CandidateValidation<unknown>)
-  CandidateValidation<unknown[]>`
-- Signature58: `richResources(item: Record<string, unknown>, sourceIds: string[], snapshot:
-  CaptureSnapshot, kind: CaptureCandidate["evidenceType"]) CandidateValidation<RichResources>`
-- Signature59: `buildCandidate(item: Record<string, unknown>, index: number, fields:
-  CandidateFields, lists: CandidateLists, destination: CandidateDestination, resources:
-  RichResources) CaptureCandidate | undefined`
-- Signature60: `eligibleCandidate(value: unknown, snapshot: CaptureSnapshot, index: number)
+- Signature69: `sharedSourceEvidence(candidates: CaptureCandidate[], snapshot: CaptureSnapshot)
+  EvidenceEntry[]`
+- Signature70: `eligibleCandidate(value: unknown, snapshot: CaptureSnapshot, index: number)
   CandidateValidation<CaptureCandidate>`
-- Signature61: `parseCandidates(value: unknown, snapshot: CaptureSnapshot, maxCandidates: number,
-  onCandidate: (id: string, raw: unknown, reason?: string) => void) CandidateExtraction`
-- Signature62: `captureCandidateSubmission(snapshot: CaptureSnapshot, maxCandidates: number,
-  recordRejection: (reason: string) => void) ModelSubmissionTool`
-- Signature63: `memoryInput(candidate: CaptureCandidate, projectIds: number[], context: WorkContext)
+- Signature71: `parseCandidates(value: unknown, snapshot: CaptureSnapshot, onCandidate: (id: string,
+  raw: unknown, reason?: string) => void) CandidateExtraction`
+- Signature72: `captureCandidateSubmission(snapshot: CaptureSnapshot, recordRejection: (reason:
+  string) => void) ModelSubmissionTool`
+- Signature73: `memoryInput(candidate: CaptureCandidate, projectIds: number[], context: WorkContext)
   MemoryInput`
-- Signature64: `captureKnowledgePlan(candidate: CaptureCandidate, destination: number, memoryId:
+- Signature74: `captureKnowledgePlan(candidate: CaptureCandidate, destination: number, memoryId:
   number, context: WorkContext, existingMemory: Memory, operationId: unknown, entityMemoryKeys:
   string[]) KnowledgeWritePlan | undefined`
-- Signature65: `readPromptDirectory(path: string, trusted: boolean, warnings: string[])
+- Signature75: `readPromptDirectory(path: string, trusted: boolean, warnings: string[])
   Promise<PromptOverlays>`
-- Signature66: `mergePrompts(globalPrompts: PromptOverlays, projectPrompts: PromptOverlays)
+- Signature76: `mergePrompts(globalPrompts: PromptOverlays, projectPrompts: PromptOverlays)
   PromptOverlays`
-- Signature67: `resolveScope(projectData: JsonReadResult, projectPath: string, trusted: boolean,
+- Signature77: `resolveScope(projectData: JsonReadResult, projectPath: string, trusted: boolean,
   warnings: string[]) { scope: Scope; scopeSource: ScopeSource }`
-- Signature68: `+supersede(id: number, replacementId: number, reason: string, signal: AbortSignal)
+- Signature78: `+obsolete(id: number, reason: string, replacementId: number, signal: AbortSignal)
   Promise<void>`
-- Signature69: `+updateEntity(id: number, input: Partial<EntityInput>, signal: AbortSignal)
+- Signature79: `+supersede(id: number, replacementId: number, reason: string, signal: AbortSignal)
+  Promise<void>`
+- Signature80: `+updateEntity(id: number, input: Partial<EntityInput>, signal: AbortSignal)
   Promise<Entity>`
-- Signature70: `+createRelationship(input: EntityRelationshipInput, signal: AbortSignal)
+- Signature81: `+createRelationship(input: EntityRelationshipInput, signal: AbortSignal)
   Promise<EntityRelationship>`
-- Signature71: `+updateDocument(id: number, input: Partial<DocumentInput>, signal: AbortSignal)
+- Signature82: `+updateDocument(id: number, input: Partial<DocumentInput>, signal: AbortSignal)
   Promise<Document>`
-- Signature72: `+listCodeArtifacts(projectId: number, signal: AbortSignal)
+- Signature83: `+listCodeArtifacts(projectId: number, signal: AbortSignal)
   Promise<CodeArtifactSummary[]>`
-- Signature73: `+updateCodeArtifact(id: number, input: Partial<CodeArtifactInput>, signal:
+- Signature84: `+updateCodeArtifact(id: number, input: Partial<CodeArtifactInput>, signal:
   AbortSignal) Promise<CodeArtifact>`
-- Signature74: `+updateMemory(id: number, input: Partial<MemoryInput>, signal: AbortSignal)
+- Signature85: `+updateMemory(id: number, input: Partial<MemoryInput>, signal: AbortSignal)
   Promise<Memory>`
-- Signature75: `boundedWait(promise: Promise<T>, signals: readonly (AbortSignal | undefined)[],
+- Signature86: `boundedWait(promise: Promise<T>, signals: readonly (AbortSignal | undefined)[],
   timeoutMs: number) Promise<BoundedWaitOutcome<T>>`
-- Signature76: `automaticRecallTerminalText(result: RecallResult, kind: "automatic" | "queued",
+- Signature87: `automaticRecallTerminalText(result: RecallResult, kind: "automatic" | "queued",
   resultInHistory: unknown) string`
-- Signature77: `recordRecallActivity(runtime: Runtime, result: RecallResult, ctx: ExtensionContext,
+- Signature88: `recordRecallActivity(runtime: Runtime, result: RecallResult, ctx: ExtensionContext,
   elapsedMs: number) void`
-- Signature78: `resolutionEvidence(ctx: ExtensionContext, preferredIds: readonly string[])
-  EvidenceEntry[]`
-- Signature79: `conflictBelongsToActiveBranch(conflict: Record<string, unknown>, runtime: Runtime,
+- Signature89: `conflictBelongsToActiveBranch(conflict: Record<string, unknown>, runtime: Runtime,
   ctx: ExtensionContext) boolean`
-- Signature80: `discoverWorkContext(pi: ExtensionAPI, ctx: ExtensionContext, branchId: string)
+- Signature90: `discoverWorkContext(pi: ExtensionAPI, ctx: ExtensionContext, branchId: string)
   Promise<ExtensionWorkContext>`
-- Signature81: `log(ctx: ExtensionContext, config: ForgetfulConfig, message: string, level:
+- Signature91: `log(ctx: ExtensionContext, config: ForgetfulConfig, message: string, level:
   Verbosity, fileMessage: unknown) void`
-- Signature82: `logFailure(ctx: ExtensionContext, config: ForgetfulConfig, message: string, error:
+- Signature92: `logFailure(ctx: ExtensionContext, config: ForgetfulConfig, message: string, error:
   unknown, level: "warning" | "error") void`
-- Signature83: `findResolutionConflict(runtime: Runtime, ctx: ExtensionContext, conflictId: string)
-  Promise<Record<string, unknown> | undefined>`
-- Signature84: `readCaptureOutcome(capture: CaptureServicePort, runtime: Runtime, jobId: string,
+- Signature93: `readCaptureOutcome(capture: CaptureServicePort, runtime: Runtime, jobId: string,
   checkpointResult: CaptureCheckpointResult) Promise<AutomaticCaptureJobOutcome | undefined>`
-- Signature85: `updateDocument(documentId: number, input: Partial<DocumentInput>, signal:
+- Signature94: `updateDocument(documentId: number, input: Partial<DocumentInput>, signal:
   AbortSignal) unknown`
-- Signature86: `updateCodeArtifact(artifactId: number, input: Partial<CodeArtifactInput>, signal:
+- Signature95: `updateCodeArtifact(artifactId: number, input: Partial<CodeArtifactInput>, signal:
   AbortSignal) unknown`
-- Signature87: `supersede(id: number, replacementId: number, reason: string, signal: AbortSignal)
+- Signature96: `supersede(id: number, replacementId: number, reason: string, signal: AbortSignal)
   Promise<void>`
-- Signature88: `-request(pathOrUrl: string | URL, method: string, body: Record<string, unknown> |
-  undefined, callerSignal: AbortSignal | undefined, expectedStatuses: number[]) Promise<unknown>`
-- Signature89: `-throwResponseError(response: Response, method: string, url: URL, signal:
+- Signature97: `obsolete(id: number, reason: string, replacementId: number, signal: AbortSignal)
+  Promise<void>`
+- Signature98: `-request(pathOrUrl: string | URL, method: string, body: unknown, callerSignal:
+  AbortSignal | undefined, expectedStatuses: number[]) Promise<unknown>`
+- Signature99: `-throwResponseError(response: Response, method: string, url: URL, signal:
   AbortSignal, maxBytes: number) Promise<never>`
-- Signature90: `parseSearchPayload(payload: unknown, fallbackQuery: string, requireMetadata:
+- Signature100: `parseSearchPayload(payload: unknown, fallbackQuery: string, requireMetadata:
   unknown) MemorySearchResult`
-- Signature91: `-findRelationships(entities: Entity[], request: KnowledgeExpansionRequest)
+- Signature101: `-findRelationships(entities: Entity[], request: ExpansionContext)
   Promise<RelationshipExpansion[]>`
-- Signature92: `-collectRelationships(entities: Entity[], signal: AbortSignal)
+- Signature102: `-collectRelationships(entities: Entity[], request: ExpansionContext)
   Promise<EntityRelationship[]>`
-- Signature93: `-resolveRelationshipEndpoints(entities: Entity[], relationships:
-  EntityRelationship[], signal: AbortSignal) Promise<Map<number, Entity>>`
-- Signature94: `-formatRelationships(entities: Entity[], relationships: EntityRelationship[],
+- Signature103: `-resolveRelationshipEndpoints(entities: Entity[], relationships:
+  EntityRelationship[], request: ExpansionContext) Promise<Map<number, Entity>>`
+- Signature104: `-formatRelationships(entities: Entity[], relationships: EntityRelationship[],
   endpoints: Map<number, Entity>, request: KnowledgeExpansionRequest) RelationshipExpansion[]`
-- Signature95: `-findEntityMemories(entities: Entity[], request: KnowledgeExpansionRequest)
+- Signature105: `-findEntityMemories(entities: Entity[], request: ExpansionContext)
   Promise<LinkedMemoryExpansion[]>`
-- Signature96: `-collectEntityMemories(entities: Entity[], linked: ({ id: number; title: string }[]
-  | undefined)[], request: KnowledgeExpansionRequest) Promise<LinkedMemoryExpansion[]>`
-- Signature97: `-formatExpansion(entities: Entity[], relationships: RelationshipExpansion[],
+- Signature106: `-collectEntityMemories(entities: Entity[], linked: ({ id: number; title: string }[]
+  | undefined)[], request: ExpansionContext) Promise<LinkedMemoryExpansion[]>`
+- Signature107: `-formatExpansion(entities: Entity[], relationships: RelationshipExpansion[],
   linkedMemories: LinkedMemoryExpansion[], attachments: Attachments) KnowledgeExpansionResult`
-- Signature98: `resolveWriteProject(client: ForgetfulClient, context: KnowledgeToolContext,
+- Signature108: `resolveWriteProject(client: ForgetfulClient, context: KnowledgeToolContext,
   requested: number | undefined, signal: AbortSignal) Promise<ResolvedWriteProject>`
-- Signature99: `assertReadMemory(client: ForgetfulClient, id: number, context: KnowledgeToolContext,
-  signal: AbortSignal) Promise<Memory>`
-- Signature100: `assertReadEntity(knowledge: KnowledgeClient, id: number, context:
+- Signature109: `assertReadMemory(client: ForgetfulClient, id: number, context:
+  KnowledgeToolContext, signal: AbortSignal) Promise<Memory>`
+- Signature110: `assertReadEntity(knowledge: KnowledgeClient, id: number, context:
   KnowledgeToolContext, signal: AbortSignal) Promise<Entity>`
-- Signature101: `executeKnowledgeRead(client: ForgetfulClient, rawRequest: KnowledgeReadRequest,
+- Signature111: `executeKnowledgeRead(client: ForgetfulClient, rawRequest: KnowledgeReadRequest,
   context: KnowledgeToolContext, signal: AbortSignal) Promise<KnowledgeToolResult>`
-- Signature102: `updateProvenance(existing: Provenance, request: Record<string, unknown>, context:
+- Signature112: `updateProvenance(existing: Provenance, request: Record<string, unknown>, context:
   KnowledgeToolContext, destinationProjectId: number) Provenance`
-- Signature103: `memoryInProject(client: ForgetfulClient, memoryId: number, projectId: number,
+- Signature113: `memoryInProject(client: ForgetfulClient, memoryId: number, projectId: number,
   signal: AbortSignal, editable: unknown) Promise<Memory>`
-- Signature104: `entityInProject(knowledge: KnowledgeClient, entityId: number, projectId: number,
+- Signature114: `entityInProject(knowledge: KnowledgeClient, entityId: number, projectId: number,
   signal: AbortSignal, editable: unknown) Promise<Entity>`
-- Signature105: `hydrateEntities(knowledge: KnowledgeClient, candidates: Entity[], signal:
+- Signature115: `hydrateEntities(knowledge: KnowledgeClient, candidates: Entity[], signal:
   AbortSignal) Promise<Entity[]>`
-- Signature106: `validateAttachments(knowledge: KnowledgeClient, projectId: number, request:
+- Signature116: `validateAttachments(knowledge: KnowledgeClient, projectId: number, request:
   Record<string, unknown>, signal: AbortSignal) Promise<void>`
-- Signature107: `createMemory(client: ForgetfulClient, request: Record<string, unknown>, context:
+- Signature117: `createMemory(client: ForgetfulClient, request: Record<string, unknown>, context:
   KnowledgeToolContext, projectId: number, signal: AbortSignal | undefined, beforeWrite: (() =>
   Promise<void>) | undefined, checkWriteState: () => void) Promise<KnowledgeToolResult>`
-- Signature108: `createEntity(knowledge: KnowledgeClient, request: Record<string, unknown>, context:
+- Signature118: `createEntity(knowledge: KnowledgeClient, request: Record<string, unknown>, context:
   KnowledgeToolContext, projectId: number, signal: AbortSignal | undefined, beforeWrite: (() =>
   Promise<void>) | undefined, checkWriteState: () => void) Promise<KnowledgeToolResult>`
-- Signature109: `createDocument(knowledge: KnowledgeClient, request: Record<string, unknown>,
+- Signature119: `createDocument(knowledge: KnowledgeClient, request: Record<string, unknown>,
   context: KnowledgeToolContext, projectId: number, signal: AbortSignal | undefined, beforeWrite:
   (() => Promise<void>) | undefined, checkWriteState: () => void) Promise<KnowledgeToolResult>`
-- Signature110: `createCodeArtifact(knowledge: KnowledgeClient, request: Record<string, unknown>,
+- Signature120: `createCodeArtifact(knowledge: KnowledgeClient, request: Record<string, unknown>,
   context: KnowledgeToolContext, projectId: number, signal: AbortSignal | undefined, beforeWrite:
   (() => Promise<void>) | undefined, checkWriteState: () => void) Promise<KnowledgeToolResult>`
-- Signature111: `executeKnowledgeWrite(client: ForgetfulClient, rawRequest: KnowledgeWriteRequest,
+- Signature121: `executeKnowledgeWrite(client: ForgetfulClient, rawRequest: KnowledgeWriteRequest,
   context: KnowledgeToolContext, signal: AbortSignal, beforeWrite: () => Promise<void>,
   checkWriteState: () => void) Promise<KnowledgeToolResult>`
-- Signature112: `constructor(client: WriteClient, readMemory: KnowledgeMemoryReader, assertCanWrite:
+- Signature122: `constructor(client: WriteClient, readMemory: KnowledgeMemoryReader, assertCanWrite:
   () => void) unknown`
-- Signature113: `-codeArtifactInProject(id: number, projectId: number, signal: AbortSignal)
-  Promise<CodeArtifact>`
-- Signature114: `-validateAttachments(documentIds: number[], codeArtifactIds: number[], projectId:
-  number, signal: AbortSignal) Promise<void>`
-- Signature115: `-createOnce(operation: { kind: string; key: string; create: () => Promise<T>;
-  authorize?: () => Promise<void>; }, plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
-  KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
-  Promise<T>`
-- Signature116: `-writeEntity(resource: KnowledgeEntityPlan, plan: KnowledgeWritePlan, state:
-  KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite:
-  KnowledgeWriteGuard | undefined) Promise<Entity>`
-- Signature117: `-writeEntities(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
-  KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
-  Promise<void>`
-- Signature118: `-writeDocument(resource: KnowledgeDocumentPlan, plan: KnowledgeWritePlan, state:
-  KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite:
-  KnowledgeWriteGuard | undefined) Promise<Document>`
-- Signature119: `-writeDocuments(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
-  KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
-  Promise<void>`
-- Signature120: `-writeCodeArtifact(resource: KnowledgeCodeArtifactPlan, plan: KnowledgeWritePlan,
+- Signature123: `-recordCreateFailure(attempt: string, state: KnowledgeWriteState, save:
+  KnowledgeWriteSave, error: unknown) Promise<void>`
+- Signature124: `-createOnce(operation: { kind: string; key: string; occurrence: number; input:
+  unknown; create: () => Promise<T>; }, plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+  KnowledgeWriteSave, beforeWrite: KnowledgeWriteGuard | undefined) Promise<T>`
+- Signature125: `-writeEntity(resource: ResourceSlot<KnowledgeEntityPlan>, plan: KnowledgeWritePlan,
   state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal | undefined,
-  beforeWrite: KnowledgeWriteGuard | undefined) Promise<CodeArtifact>`
-- Signature121: `-writeCodeArtifacts(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+  beforeWrite: KnowledgeWriteGuard | undefined) Promise<Entity>`
+- Signature126: `-writeEntities(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
   KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
   Promise<void>`
-- Signature122: `-requestedAttachmentIds(plan: KnowledgeWritePlan, state: KnowledgeWriteState)
+- Signature127: `-writeDocument(resource: ResourceSlot<KnowledgeDocumentPlan>, plan:
+  KnowledgeWritePlan, state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal |
+  undefined, beforeWrite: KnowledgeWriteGuard | undefined) Promise<Document>`
+- Signature128: `-writeDocuments(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+  KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
+  Promise<void>`
+- Signature129: `-writeCodeArtifact(resource: ResourceSlot<KnowledgeCodeArtifactPlan>, plan:
+  KnowledgeWritePlan, state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal |
+  undefined, beforeWrite: KnowledgeWriteGuard | undefined) Promise<CodeArtifact>`
+- Signature130: `-writeCodeArtifacts(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+  KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
+  Promise<void>`
+- Signature131: `-requestedAttachmentIds(plan: KnowledgeWritePlan, state: KnowledgeWriteState)
   KnowledgeAttachmentIds`
-- Signature123: `-writeAttachments(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+- Signature132: `-writeConnection(operation: { kind: string; key: string; input: unknown; execute:
+  () => Promise<unknown> }, plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+  KnowledgeWriteSave, beforeWrite: KnowledgeWriteGuard | undefined) Promise<void>`
+- Signature133: `-writeAttachments(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
   KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
   Promise<void>`
-- Signature124: `-writeRelationship(resource: KnowledgeRelationshipPlan, plan: KnowledgeWritePlan,
-  state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal | undefined,
-  beforeWrite: KnowledgeWriteGuard | undefined) Promise<EntityRelationship>`
-- Signature125: `-writeRelationships(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+- Signature134: `-writeRelationship(resource: ResourceSlot<KnowledgeRelationshipPlan>, plan:
+  KnowledgeWritePlan, state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal |
+  undefined, beforeWrite: KnowledgeWriteGuard | undefined) Promise<EntityRelationship>`
+- Signature135: `-writeRelationships(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
   KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
   Promise<void>`
-- Signature126: `-writeEntityMemoryLink(resource: KnowledgeEntityMemoryLinkPlan, plan:
+- Signature136: `-writeEntityMemoryLink(resource: KnowledgeEntityMemoryLinkPlan, plan:
   KnowledgeWritePlan, state: KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal |
   undefined, beforeWrite: KnowledgeWriteGuard | undefined) Promise<void>`
-- Signature127: `-writeEntityMemoryLinks(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+- Signature137: `-writeEntityMemoryLinks(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
   KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
   Promise<void>`
-- Signature128: `-writeLinkedMemory(linkedMemoryId: number, plan: KnowledgeWritePlan, state:
+- Signature138: `-writeLinkedMemory(linkedMemoryId: number, plan: KnowledgeWritePlan, state:
   KnowledgeWriteState, save: KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite:
   KnowledgeWriteGuard | undefined) Promise<void>`
-- Signature129: `-writeLinkedMemories(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
+- Signature139: `-writeLinkedMemories(plan: KnowledgeWritePlan, state: KnowledgeWriteState, save:
   KnowledgeWriteSave, signal: AbortSignal | undefined, beforeWrite: KnowledgeWriteGuard | undefined)
   Promise<void>`
-- Signature130: `execute(plan: KnowledgeWritePlan, previous: Partial<KnowledgeWriteState>,
+- Signature140: `execute(plan: KnowledgeWritePlan, previous: Partial<KnowledgeWriteState>,
   checkpoint: KnowledgeWriteCheckpoint, signal: AbortSignal, beforeWrite: KnowledgeWriteGuard)
   Promise<KnowledgeWriteState>`
-- Signature131: `constructor(model: Model<any>, task: Message, settings: CompactionSettings,
+- Signature141: `stateWithNumber(values: KnowledgeWriteReceipt[], key: string, id: number,
+  occurrence: number) void`
+- Signature142: `constructor(model: Model<any>, task: Message, settings: CompactionSettings,
   contextLimitTokens: unknown, initialHistory: CompactedMemoryHistory & { summaryMessage: Message })
   unknown`
-- Signature132: `prepare(context: Context, signal: AbortSignal, sessionId: string | undefined,
+- Signature143: `prepare(context: Context, signal: AbortSignal, sessionId: string | undefined,
   complete: SummaryCompletion, onCompacted: (history: CompactedMemoryHistory) => Promise<void>)
   Promise<number>`
-- Signature133: `prepareCapture(context: Context, signal: AbortSignal, sessionId: string |
+- Signature144: `prepareCapture(context: Context, signal: AbortSignal, sessionId: string |
   undefined, complete: SummaryCompletion, onCompacted: (history: CompactedMemoryHistory) =>
   Promise<void>) Promise<"ready" | "progress">`
-- Signature134: `-prepareContext(context: Context, signal: AbortSignal, sessionId: string |
+- Signature145: `-prepareContext(context: Context, signal: AbortSignal, sessionId: string |
   undefined, complete: SummaryCompletion, onCompacted: (history: CompactedMemoryHistory) =>
   Promise<void>, maxChunks: unknown) Promise<number | "progress">`
-- Signature135: `-applySummary(context: Context, summary: string, lastRecord: Message, previousSize:
+- Signature146: `-applySummary(context: Context, summary: string, lastRecord: Message, previousSize:
   number) number`
-- Signature136: `assertFits(context: Context, model: Model<any>, output: number, contextWindow:
+- Signature147: `assertFits(context: Context, model: Model<any>, output: number, contextWindow:
   number) void`
-- Signature137: `outputCeiling(model: Model<any>, settings: typeof DEFAULT_COMPACTION_SETTINGS,
+- Signature148: `outputCeiling(model: Model<any>, settings: typeof DEFAULT_COMPACTION_SETTINGS,
   requestedMaxTokens: unknown) number`
-- Signature138: `resolvedOutputAllowance(context: Context, model: Model<any>, contextWindow: number,
+- Signature149: `resolvedOutputAllowance(context: Context, model: Model<any>, contextWindow: number,
   settings: typeof DEFAULT_COMPACTION_SETTINGS, requestedMaxTokens: unknown) number`
-- Signature139: `summarizeMemoryHistory(messages: Message[], options: MemoryHistorySummaryOptions,
+- Signature150: `summarizeMemoryHistory(messages: Message[], options: MemoryHistorySummaryOptions,
   previousSummary: string) Promise<{ summary: string; count: number }>`
-- Signature140: `+complete(model: Model<any>, context: Context, options: ModelsSimpleStreamOptions)
+- Signature151: `+complete(model: Model<any>, context: Context, options: ModelsSimpleStreamOptions)
   Promise<AssistantMessage>`
-- Signature141: `constructor(registry: ModelRegistryPort, selection: ModelSelection, options:
+- Signature152: `constructor(registry: ModelRegistryPort, selection: ModelSelection, options:
   PiMemoryModelOptions) unknown`
-- Signature142: `-completeAttempt(model: Model<any>, context: Context, options:
+- Signature153: `-completeAttempt(model: Model<any>, context: Context, options:
   ModelsSimpleStreamOptions, request: ModelRequest, deadline: RequestDeadline, attempt: number,
   kind: "task" | "compaction") Promise<AssistantMessage>`
-- Signature143: `-executeRead(read: ModelReadTool, call: ToolCall, request: ModelRequest, deadline:
+- Signature154: `-executeRead(read: ModelReadTool, call: ToolCall, request: ModelRequest, deadline:
   RequestDeadline) Promise<ToolResultMessage>`
-- Signature144: `-completeWithSubmission(model: Model<any>, context: Context, options:
+- Signature155: `-completeWithSubmission(model: Model<any>, context: Context, options:
   ModelsSimpleStreamOptions, request: ModelRequest, deadline: RequestDeadline, prepare: () =>
   Promise<number>) Promise<unknown>`
-- Signature145: `ensureCompletionFinished(response: AssistantMessage, request: ModelRequest,
+- Signature156: `ensureCompletionFinished(response: AssistantMessage, request: ModelRequest,
   timedOut: boolean, allowToolUse: boolean) void`
-- Signature146: `requestOptions(model: Model<any>, sessionId: string | undefined, transformHeaders:
+- Signature157: `requestOptions(model: Model<any>, sessionId: string | undefined, transformHeaders:
   MemoryModelHeaderTransform | undefined, signal: AbortSignal) ModelsSimpleStreamOptions`
-- Signature147: `appendCallCountCorrection(context: Context, response: AssistantMessage, calls:
-  ToolCall[], submissionName: string, base: string) void`
-- Signature148: `resolveMemoryModel(registry: ModelRegistryPort, selection: ModelSelection |
+- Signature158: `appendCallCountCorrection(context: Context, response: AssistantMessage, calls:
+  ToolCall[], submissionName: string, base: string, readNames: string[]) void`
+- Signature159: `throwRequestFailure(error: unknown, request: ModelRequest, timedOut: boolean,
+  timeoutMs: number) never`
+- Signature160: `resolveMemoryModel(registry: ModelRegistryPort, selection: ModelSelection |
   undefined, options: PiMemoryModelOptions) PiMemoryModel | undefined`
-- Signature149: `promptExistingProject(client: ForgetfulClient, ctx: ExtensionContext, repoName:
+- Signature161: `promptExistingProject(client: ForgetfulClient, ctx: ExtensionContext, repoName:
   string) Promise<Project | undefined>`
-- Signature150: `initialiseProject(client: ForgetfulClient, ctx: ExtensionContext, repoName: string,
+- Signature162: `initialiseProject(client: ForgetfulClient, ctx: ExtensionContext, repoName: string,
   ensureCurrent: () => Promise<void>) Promise<Project | undefined>`
-- Signature151: `initialiseProjectForAgent(client: ForgetfulClient, ctx: ExtensionContext, repoName:
+- Signature163: `initialiseProjectForAgent(client: ForgetfulClient, ctx: ExtensionContext, repoName:
   string, input: AgentProjectInitInput, ensureCurrent: () => Promise<void>) Promise<Project>`
-- Signature152: `resolveBranchId(sessionId: string, activeEntryIds: readonly string[],
+- Signature164: `resolveBranchId(sessionId: string, activeEntryIds: readonly string[],
   fallbackBranchId: string) Promise<string>`
-- Signature153: `cancel(jobId: string, interruptedModelCall: unknown, uncertainWrite: string)
+- Signature165: `cancel(jobId: string, interruptedModelCall: unknown, uncertainWrite: string)
   Promise<void>`
-- Signature154: `-compactJobSnapshot(job: StoredQueueJob, conversation: CompactedConversation)
+- Signature166: `-compactJobSnapshot(job: StoredQueueJob, conversation: CompactedConversation)
   Promise<void>`
-- Signature155: `pendingConflicts(identity: QueueIdentity, sessionId: string, branchId: string)
+- Signature167: `pendingConflicts(identity: QueueIdentity, sessionId: string, branchId: string)
   Promise<PendingConflict[]>`
-- Signature156: `listPendingConflicts(identity: QueueIdentity, sessionId: string, branchId: string)
+- Signature168: `listPendingConflicts(identity: QueueIdentity, sessionId: string, branchId: string)
   Promise<PendingConflict[]>`
-- Signature157: `updateConflict(conflictId: string, patch: Partial<PendingConflict>)
+- Signature169: `updateConflict(conflictId: string, patch: Partial<PendingConflict>)
   Promise<PendingConflict>`
-- Signature158: `constructor(client: ForgetfulClient, model: MemoryModelClient, options:
+- Signature170: `constructor(client: ForgetfulClient, model: MemoryModelClient, options:
   RecallServiceOptions) unknown`
-- Signature159: `-recallReadTool(request: RecallRequest, resolution: ScopeResolution, candidates:
+- Signature171: `-recallReadTool(request: RecallRequest, resolution: ScopeResolution, candidates:
   RecallResult) ModelReadTool`
-- Signature160: `-finishFailure(request: RecallRequest, deadline: DeadlineSignal, error: unknown,
+- Signature172: `-finishFailure(request: RecallRequest, deadline: DeadlineSignal, error: unknown,
   trace: { stage: string; debugTrace: string; plannerRejections: string[]; reviewRejections:
   string[]; failedReviewDebug: string | undefined; }) RecallResult`
-- Signature161: `-finishReview(output: unknown, candidates: RecallResult, recallPolicy: string,
+- Signature173: `-finishReview(output: unknown, candidates: RecallResult, recallPolicy: string,
   debugTrace: string, searchFailed: boolean, reviewRejections: string[]) RecallResult`
-- Signature162: `-optionalKnowledge(memories: Memory[], entityNames: string[], scope: Scope,
+- Signature174: `-optionalKnowledge(memories: Memory[], entityNames: string[], scope: Scope,
   projectId: number | undefined, signal: AbortSignal) Promise<KnowledgeExpansionResult | undefined>`
-- Signature163: `-resultWithKnowledge(result: RecallResult, expansion: KnowledgeExpansionResult |
+- Signature175: `-resultWithKnowledge(result: RecallResult, expansion: KnowledgeExpansionResult |
   undefined, knowledgeText: string) RecallResult`
-- Signature164: `-authorizeProjectSelection(request: RecallRequest, deadline: DeadlineSignal, plan:
+- Signature176: `-authorizeProjectSelection(request: RecallRequest, deadline: DeadlineSignal, plan:
   RecallPlan) Promise<string | undefined>`
-- Signature165: `-requestsDifferentProject(request: RecallRequest, plan: RecallPlan, scope: Scope)
+- Signature177: `-requestsDifferentProject(request: RecallRequest, plan: RecallPlan, scope: Scope)
   boolean`
-- Signature166: `-searchMemories(request: RecallRequest, plan: RecallPlan, scope: Scope, resolution:
+- Signature178: `-searchMemories(request: RecallRequest, plan: RecallPlan, scope: Scope, resolution:
   ScopeResolution, deadline: DeadlineSignal) Promise<SearchOutcome>`
-- Signature167: `-searchRequest(query: string, plan: RecallPlan, context: WorkContext, scope: Scope,
+- Signature179: `-searchRequest(query: string, plan: RecallPlan, context: WorkContext, scope: Scope,
   resolution: ScopeResolution) SearchRequest`
-- Signature168: `-resolveScope(context: WorkContext, scope: Scope, selectedId: number | undefined,
+- Signature180: `-resolveScope(context: WorkContext, scope: Scope, selectedId: number | undefined,
   supplied: Project[] | undefined, signal: AbortSignal) Promise<ScopeResolution>`
-- Signature169: `formatRecall(memories: Memory[], entities: string[], recallPolicy: string,
+- Signature181: `formatRecall(memories: Memory[], entities: string[], recallPolicy: string,
   expansion: KnowledgeExpansionResult) { text: string; ids: number[]; knowledgeText: string }`
-- Signature170: `reviewValidationDebug(value: unknown, candidates: RecallResult, mismatchDirection:
+- Signature182: `reviewValidationDebug(value: unknown, candidates: RecallResult, mismatchDirection:
   string | undefined) string`
-- Signature171: `recallReviewSubmission(candidates: RecallResult, rejections: string[], setDebug:
+- Signature183: `recallReviewSubmission(candidates: RecallResult, rejections: string[], setDebug:
   (debug: string) => void) ModelSubmissionTool`
-- Signature172: `deltaStartIndex(branch: SessionEntry[], afterEntryId: string | null | undefined,
+- Signature184: `deltaStartIndex(branch: SessionEntry[], afterEntryId: string | null | undefined,
   baselineEntryId: string | null | undefined) number | undefined`
-- Signature173: `compactCaptureSnapshot(snapshot: CaptureSnapshot, view: CompactedConversation)
+- Signature185: `compactCaptureSnapshot(snapshot: CaptureSnapshot, view: CompactedConversation)
   CaptureSnapshot`
 
 ## Extraction warnings
 
 - `Unresolved or out-of-scope base: ActivityLoader -> Loader`
-- `Unresolved or out-of-scope base: CapturePause -> Error`
+- `Unresolved or out-of-scope base: CaptureProgress -> Error`
+- `Unresolved or out-of-scope base: CaptureSelectionError -> Error`
 - `Unresolved or out-of-scope base: ContextWindowError -> Error`
 - `Unresolved or out-of-scope base: ForgetfulAbortError -> Error`
 - `Unresolved or out-of-scope base: ForgetfulHttpError -> Error`
 - `Unresolved or out-of-scope base: ForgetfulSchemaError -> Error`
 - `Unresolved or out-of-scope base: ForgetfulTimeoutError -> Error`
 - `Unresolved or out-of-scope base: InvalidCaptureOutput -> Error`
+- `Unresolved or out-of-scope base: MergeWriteUncertain -> Error`
 - `Unresolved or out-of-scope base: ModelSubmissionError -> Error`
+- `Unresolved or out-of-scope base: ModelTaskPause -> Error`
 - `Unresolved or out-of-scope base: ProjectInitError -> Error`
 - `Unresolved or out-of-scope base: QueueBusyError -> Error`
 - `Unresolved or out-of-scope base: QueueJobMetadata -> Omit<QueueJob, "snapshot">`

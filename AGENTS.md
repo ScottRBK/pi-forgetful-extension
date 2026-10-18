@@ -73,6 +73,13 @@ See [the approved design](docs/design.md).
 Before changing code or reasoning about this repository's architecture, read the
 [Mycelium class diagram](docs/assets/mycelium_class_diagram.md).
 
+After source-code changes, use the `mycelium-mermaid` skill to regenerate that map before declaring
+work complete or committing. Preserve full detail; explicitly exclude `test` and
+`scripts/forgetful-test-server.py` with `--test-path`. Verify expected source areas and repeat-export
+determinism. Include the refreshed map in the same commit when it changes. Do not hand-edit generated
+content. Documentation-only changes do not require regeneration. If generation fails, report the
+blocker rather than treating the existing map as current.
+
 Pi lifecycle code remains separate from memory policy and transport details. The MVP uses a warm
 HTTP REST service behind transport-neutral memory and knowledge ports. Background recall/capture
 does not use MCP. The main agent's independent CLI/MCP integration is outside this extension.
