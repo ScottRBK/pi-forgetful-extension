@@ -3393,7 +3393,7 @@ test("debug includes saved candidates when a capture retry is pending", async ()
 
 test("debug does not count a partial write again when its retry completes", async () => {
   const fixture = await harness({ userSettings: { verbosity: "debug" } });
-  let diagnosticsCount = 0;
+  let retryComplete = false;
   try {
     await fixture.emit("session_start", {
       type: "session_start",
@@ -3406,7 +3406,7 @@ test("debug does not count a partial write again when its retry completes", asyn
       errors: [],
     });
     fixture.capture.diagnostics = async (options) => {
-      const retry = diagnosticsCount++ > 0;
+      const retry = retryComplete;
       return {
         jobs: [
           {
@@ -3422,6 +3422,8 @@ test("debug does not count a partial write again when its retry completes", asyn
         conflicts: [],
       };
     };
+    // A read-only status inspection must not advance the simulated capture retry.
+    await fixture.command("status");
     fixture.entries.push(entry("partial-user", "root", "user", "partial work"));
     fixture.entries.push(
       entry("partial-assistant", "partial-user", "assistant", "done", "stop"),
@@ -3444,6 +3446,7 @@ test("debug does not count a partial write again when its retry completes", asyn
       entry("retry-assistant", "retry-user", "assistant", "done", "stop"),
     );
     const beforeRetryNotifications = fixture.notifications.length;
+    retryComplete = true;
     await fixture.emit("agent_settled", { type: "agent_settled" });
     const secondDeadline = Date.now() + 500;
     while (
