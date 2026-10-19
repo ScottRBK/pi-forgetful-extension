@@ -156,7 +156,7 @@ normal Pi tool-result persistence.
 
 ## Pi feasibility
 
-The implementation is tested against Pi 1.0.1 and uses these extension seams:
+The implementation is tested against Pi 1.3.0 and uses these extension seams:
 
 - `before_agent_start` can modify the system prompt for the current turn;
 - `input` starts queued recall without blocking Pi's queue, and `context` activates only the
@@ -980,3 +980,379 @@ behaviour. Real-model evaluations can explore these; they are not deterministic 
 - Supersession preserves history but is a multi-step operation on the existing REST API.
   Partial outcomes and the remaining concurrent-write risk must stay visible in recorded state.
 - Post-exit capture completion is deferred beyond MVP; the durable queue remains in scope.
+
+## Planning visibility
+
+The planning viewer is a human-facing, read-only feature with strict hexagonal boundaries.
+The agreed defaults, controls and public test boundaries below govern its implementation.
+The earlier mock used fictional data; production views read the configured REST instance.
+Existing recall/capture decisions above remain unchanged.
+
+[Forgetful #99](https://github.com/ScottRBK/forgetful/issues/99) shipped in the inspected server
+checkout as `GET /.well-known`, with `schema_version: 1` and `capabilities.planning: boolean`.
+This differs from the original proposed `/.well-known/forgetful` path. No server implementation
+changes are bundled here; the isolated integration launcher enables its existing planning routes.
+
+### User experience and defaults
+
+Retain the chosen compact, top-right floating panel and a command/shortcut-opened detail browser.
+The panel covers part of chat; it does not reserve a sidebar or use the area above the editor.
+Keep AgentShell's widget and Forgetful's recall/capture activity indicator untouched.
+
+Defaults:
+
+- Start with the panel off. Persist `planning_panel: false|true` in user settings, independently
+  of the current session, recall scope, verbosity and capture mode. Enabling it is an explicit
+  choice; temporary service failures do not rewrite that choice.
+- Show active plans for the current repository's mapped project. The detail browser can switch
+  to another accessible project without changing repository mapping, capture destination or
+  recall scope. Do not silently show global plans when a mapping is missing or ambiguous.
+- Refresh immediately on opening, then every 10 seconds while a planning view is visible.
+  Closing the browser with the panel off stops planning traffic. A panel hidden by terminal size
+  does not keep polling; resizing it back into view triggers a refresh.
+- `/forgetful off` also pauses planning reads and hides its views, while retaining the panel
+  preference for `/forgetful on`. `/forgetful capture off` does not hide the panel. This extends
+  documented enablement behaviour; independent CLI/MCP clients remain unaffected.
+- Pi 1.3.0 is the tested minimum, following the recorded supply-chain audit in CONTRIBUTING.md.
+  Its custom-dialog completion closes the owned overlay even if another extension has opened
+  a popup above it. No private SDK workaround is carried.
+
+Controls:
+
+- `/forgetful plans`: open the detail browser, even when the persistent panel is off.
+- `/forgetful plans on|off|toggle`: change the persistent panel preference only.
+- `Ctrl+Alt+P`: open/close details; `Ctrl+Alt+W`: toggle the panel, as in the mock.
+- In details: left/right selects a plan, up/down selects a task, Enter inspects it, Tab selects
+  another project, `g` shows plan goal/context, `r` refreshes, and Escape goes back/closes. Keep h/j/k/l equivalents.
+- `/forgetful status`: include planning preference, effective availability, selected project,
+  last successful refresh and any current error. Commands remain usable if shortcuts conflict.
+
+Implement controls inside the existing `/forgetful` command, not a second registration. Do not
+reset recall/capture when toggling only the panel. Open a loading view promptly instead of waiting
+for remote project discovery before showing anything. Keep the editor draft intact.
+
+### What the views display
+
+The compact panel uses the mock's 48-column width and 14-row maximum. Hide it below 100 columns
+or 26 rows, or without 15 safe rows above the widget/editor region. The command-opened browser
+remains usable in a smaller terminal.
+Show project name and active-plan count, at most two plan summaries and two task rows per plan,
+with explicit overflow counts and a details hint. Use a stable title/ID ordering for plans.
+This deliberately bounds the display; it does not claim every plan's tasks are on screen.
+
+For each displayed active plan:
+
+- Fetch all task summaries for that plan. Display tasks whose state is `doing`, or whose state
+  is unfinished and whose server `blocked` flag is true. Exclude `done` and `cancelled` tasks
+  from these rows. Keep blocked and doing as separate facts when both apply.
+- Prioritise doing tasks, then other blocked tasks, with priority and ID as stable tie-breakers.
+- Show done/total task counts; show cancelled counts separately rather than calling them done.
+  An active plan with no doing/blocked tasks still has a plan row and a clear empty-work message.
+- Treat `doing` as recorded status, never a live-agent heartbeat. `waiting` alone does not mean
+  blocked. Use Forgetful's blocked flag instead of inventing local readiness rules.
+
+The browser initially shows active plans in its selected project, with all task states for the
+selected plan. It adds plan goal/context, task priority, assignment, description, acceptance
+criteria and dependencies. Read full plan/task records only for the selected detail view.
+Resolve dependency titles from already loaded summaries; preserve an unavailable dependency as
+an ID with an unknown state. Do not guess that it is satisfied. Preserve selection by ID across
+refreshes; gracefully move or close details when a record is removed or leaves the active list.
+
+Display loading, no active plans, no project mapping, disabled planning, unavailable access and
+stale data distinctly. An error must not look like an empty result. Successful empty responses
+are valid. Show a last-success timestamp when retaining data during a temporary outage, and mark
+partial per-plan failures rather than reporting unknown counts as zero.
+
+The first version is read-only: no create, claim, assignment, completion, editing, automatic task
+tracking, session-to-plan association, notifications to the agent or plan history browser. Reads
+may still trigger the server's existing identity/access bookkeeping. Plan/task text is untrusted:
+strip terminal control sequences and apply existing known-secret redaction before rendering or
+logging it. Keep dashboard content out of model context, saved Pi messages and capture evidence.
+
+### Capability detection and reads
+
+Use the same configured REST instance and authentication as background memory work. Do not depend
+on the main agent's independent MCP/CLI connection or a configured/authenticated memory model.
+Missing configured credentials must still stop planning reads; a public capability document does
+not authorize falling back to anonymous access.
+
+On first use, inspect the capability document once for the current connection:
+
+- A supported document with `planning: true` permits plan reads; normal authentication and service
+  errors remain possible. Explicit `false` shows planning-disabled guidance and stops task polling.
+- A missing document (404/405), unsupported schema version or absent planning field means unknown.
+  Fall back to a validated `GET /plans?project_id=<id>&status=active` response when a project is
+  selected. A valid 200, including an empty list, proves that this read is available.
+- A missing plans route means unavailable, not definitely disabled. Keep authentication failures,
+  timeouts, malformed responses and service failures distinct. Do not mask capability-request
+  401/403/429/5xx or transport failures by immediately trying more routes.
+- Manual refresh, re-enabling the panel or changing connection settings rechecks capabilities.
+  Transient failures use bounded backoff while visible. Disabled planning, unavailable planning
+  routes or denied access wait for an explicit retry or configuration change.
+
+Use the delivered server contract, rather than the original issue's example.
+The configured API base normally ends in `/api/v1`; do not append `/.well-known/forgetful` to it.
+Test root and supported reverse-proxy prefixes explicitly. Never send credentials to an origin
+advertised by a remote document or silently guess a different deployment's endpoint.
+
+Use the ordinary REST plan/task routes, not the bulk graph or activity-history endpoints:
+
+- `/plans?project_id=<id>&status=active` lists plans in the displayed project.
+- `/tasks?plan_id=<id>` supplies the summary counts and blocked flags.
+- `/plans/<id>` and `/tasks/<id>` supply the selected details.
+- Existing project-list reads supply the explicit project picker; do not limit its choices to
+  the capture prompt's first 100 projects without making any truncation visible.
+
+Poll actual summary/detail values. Current Forgetful criteria and dependency edits do not emit
+activity events (`app/services/task_service.py:349-415` in the Forgetful repository), and task
+versions/timestamps alone cannot detect every visible change. SSE is deferred; it would not remove
+this polling requirement.
+
+Use one refresh cycle at a time, with bounded request concurrency. While the panel is visible,
+load tasks only for its displayed plans. While details are open, hide/pause the compact view and
+refresh only the selected project's list and selected plan/task. Re-read open task details so
+criteria/dependency changes become visible even when the task version is unchanged. Opening or
+changing a selection starts its own cancellable read, without overlapping identical refreshes.
+
+Keep cache data in memory and limited to the current views. The server's plan/task lists have no
+pagination; retain HTTP byte limits and avoid fetching every plan's tasks in the background.
+Oversized responses must produce an explicit limit error, not silently truncated completion counts.
+Separate reads are not an atomic dashboard snapshot. Clear data on connection/account changes and
+access denial; do not reuse another account's cached records.
+
+### Hexagonal boundaries
+
+The implementation should make the planning workflow usable without Pi. Pi's commands and views
+call that workflow; REST and local settings supply the outside services it needs. The application
+owns the interfaces, or ports, describing those services. Concrete adapters implement them.
+
+There are useful boundaries already: `ForgetfulClient` and `MemoryModelClient` belong to the core,
+and services receive their implementations. However, the current separation is incomplete:
+
+- `src/extension.ts:29-70` imports application services alongside Pi, HTTP, file settings and
+  queue implementations. It currently combines host integration and object construction.
+- `src/recall.ts:2-4` imports defaults from `src/config.ts`, whose imports at lines 1-4 include
+  filesystem operations. A seemingly harmless constants import therefore reaches an adapter.
+- `src/capture.ts:67-74,1142` depends on the concrete `DurableQueueStore`; source inspection and
+  snapshot processing also cross infrastructure boundaries. Preserve their durability and receipt
+  semantics when separating them; do not simplify away the guarantees.
+
+Use planning as the first strict feature boundary. Apply the same direction to existing memory
+work incrementally, rather than moving every file before delivering a usable feature.
+
+Planning source layout:
+
+```text
+src/
+  domain/planning.ts                  plan/task records and pure selection/counting rules
+  application/planning.ts             workflow, selections, refresh and stale-data state
+  application/ports/planning.ts       read/preferences contracts and public workflow state
+  adapters/pi/planning.ts             commands, keyboard handling and terminal views
+  adapters/forgetful/planning.ts      REST parsing, capability discovery and read errors
+  adapters/local/planning-settings.ts saved preference using the existing settings writer
+  bootstrap/planning.ts               constructs and connects the implementations
+```
+
+This layout separates responsibilities, not deployment units. Use ordinary TypeScript interfaces,
+functions and constructor arguments. No dependency-injection framework, event bus, generic
+repository base class or interface for every helper is needed.
+
+The planning workflow owns availability, selected IDs, task filtering, counts, stale snapshots,
+refresh overlap prevention and cancellation. Its public operations include opening/closing a
+view, changing selection, toggling the preference and refreshing. It publishes plain state through
+a small subscription/callback; the Pi adapter renders it. Colours, terminal widths, focus, key
+names and scroll positions stay in the Pi adapter. Narrow-terminal visibility is an input to the
+workflow, not a terminal API imported by it.
+
+The outbound ports should cover only actual needs:
+
+- A read-only planning reader supplies capabilities, accessible projects, plan/task summaries and
+  selected details. The workflow never receives the full memory-writing client or a raw fetch API.
+- A preference store reads/writes the panel choice. Paths, JSON files and environment variables
+  stay outside the workflow. Pass connection readiness and repository identity as plain inputs.
+- A small time/scheduling dependency supports visible-only refresh, stale timestamps and backoff.
+  Its concrete timer and cancellation cleanup stay outside core code. This is for the existing
+  polling requirement, not a general background-job system.
+
+Keep port definitions application-owned and independent of SDK types, HTTP response objects,
+filesystem classes and concrete error classes. Read outcomes distinguish unavailable capability,
+denied access, transient failure, missing records and invalid data. Preserve original bounded,
+redacted diagnostics alongside those categories; classification must not replace what Forgetful
+said. The HTTP adapter owns HTTP-status interpretation; the application chooses user-visible and
+retry behaviour from the port outcome. Existing capture correction/receipt rules remain unchanged.
+
+Only the bootstrap constructs concrete planning adapters. The Pi adapter calls the public
+application operations and observes state; it cannot call the REST/settings adapters directly.
+The REST/settings adapters cannot import Pi. All adapters may import application-owned ports and
+domain records. The core cannot import adapters, bootstrap or the legacy extension, even through
+a helper or a type-only re-export. Shared modules require explicit allowed roles; a `utils` folder
+must not become a way around these rules.
+
+Reuse the existing HTTP transport inside its adapter boundary
+(`src/http.ts:393-539`), preserving TLS, authentication, timeouts, aborts, byte limits and
+service diagnostics. Reuse the settings writer behind the local preference adapter. Extract only
+the small shared pieces needed to avoid circular imports; do not duplicate either implementation.
+`index.ts` and the existing `src/extension.ts` remain recognised composition entry points during
+the migration. They delegate planning construction to `src/bootstrap/planning.ts`, then connect
+its start/stop operations to the existing runtime. No planning business rules go into that wiring.
+
+### Enforce and extend the boundaries
+
+Dependency Cruiser 18.6.0 is a development-only dependency. The pre-install supply-chain audit is
+recorded in CONTRIBUTING.md. Context7 documents forbidden reachability rules and TypeScript
+pre-compilation dependencies. Retained fixtures verify direct/indirect paths, type-only imports,
+re-exports, TS resolution and literal dynamic imports. Computed imports remain outside coverage.
+
+Start by classifying all production modules, including the two existing composition entry points:
+
+- Core contracts/policies/helpers: `contracts.ts`, `policies.ts`, `repository.ts`, `concurrency.ts`,
+  `privacy.ts` and `memory-context.ts`. Permit pure utilities such as `node:util` explicitly;
+  do not ban all standard-library use indiscriminately.
+- Application modules: `recall.ts`, `capture.ts`, `capture-feedback.ts`, `capture-links.ts`,
+  `capture-merge.ts`, `knowledge-read.ts`, `knowledge-write.ts` and `knowledge-tools.ts`.
+- Pi/model adapters: `activity.ts`, `foreground-tools.ts`, `setup.ts`, `model.ts` and
+  `model-context.ts`. `snapshot.ts` and `project-init.ts` currently mix Pi-facing and core work.
+- REST adapters: `http.ts` and `http-knowledge.ts`. Local/source adapters: `queue.ts` and
+  `source-inspection.ts`. `config.ts` and `logging.ts` currently mix contracts with file handling.
+- Composition/host integration: `index.ts` and `src/extension.ts`. New bootstrap modules are
+  composition too; placing construction in a facade must not make it invisible to the checker.
+
+Names above are under `src/` unless qualified. This is a role inventory, not a claim that existing
+imports already obey the target. Record exact existing violating paths as reviewed migration
+exceptions; do not exclude all old source or allow unrestricted imports from new core into it.
+Check the graph inventory so new/unclassified modules cannot silently escape coverage. Keep
+production dependency rules separate from test fixtures, while analysing their forbidden paths
+in the architecture regression suite.
+
+Enforce new planning boundaries immediately. Then make existing boundaries stricter in small,
+behaviour-preserving slices:
+
+1. Separate pure configuration/defaults and diagnostic contracts from file adapters; extract the
+   reusable project-matching rule from Pi lifecycle code without changing capture discovery.
+2. Move construction out of host handlers as those handlers are touched. Keep lifecycle ownership,
+   generation checks and shutdown order explicit at the Pi boundary.
+3. Separately migrate capture queue, source-reader and snapshot dependencies to core-owned ports,
+   backed by the existing implementations. This is follow-on work with its own agreed regression
+   scope, not a requirement to rewrite capture before the dashboard can ship.
+
+For every enforced dependency contract, retain small passing and deliberately violating fixtures.
+Prove that a valid forbidden import passes with its target rule disabled, fails with that rule
+enabled, reports the expected rule and dependency path, then passes when removed. Cover direct
+and indirect violations, including a helper outside both endpoint areas. Also prove that legitimate
+adapter-to-port imports and bootstrap construction remain allowed. Use fresh graphs; syntax errors
+or an unrelated rule failure do not prove the intended boundary.
+
+The checker test seam is its exit status, named rule and reported dependency path.
+`npm run check:architecture` is included in `npm run check` and in the push/PR CI workflow.
+CI uses read-only permissions and cancels superseded runs. Dependencies and actions were audited
+before addition; CONTRIBUTING.md records both the evidence and the upstream action advisories.
+These checks inspect imports, not runtime behaviour: computed dynamic imports, global `fetch` and
+other runtime side effects need review and behavioural tests. Dependency checks are not a sandbox.
+
+### Fit with the existing lifecycle
+
+Project discovery currently depends on `memoryReady`
+(`src/extension.ts:1651-1669`). Reuse the local repository identity and exact-match lookup helpers,
+with separate viewer discovery state. Do not simply widen `memoryReady`: it also affects capture's
+pending-discovery state and queue identity. Planning must work without a memory model and must not
+await capture recovery. Do not use a successful panel read to authorize capture or change recall
+scope. Project selection in the browser is separate from `runtime.context.project`.
+
+The planning command branch loads the runtime without waiting for remote discovery
+(`src/extension.ts:3390-3430`), rendering loading state while discovery finishes in the background. Preserve startup's local-only foreground work and existing project-trust rules.
+A panel-specific failure cannot delay a prompt, consume a model budget or alter capture retries.
+
+Tie controllers and requests to the runtime's cancellation/generation boundary
+(`src/extension.ts:1997-2090,2102-2142`). Shutdown, reload, session replacement and connection
+changes must cancel reads, stop timers and dispose only this feature's overlays. Ignore late
+results from an obsolete runtime or previous browser selection. On session/branch navigation,
+restore the user preference without carrying stale selections into another project.
+Normal agent completion or abort must not permanently stop a viewer that is still visible.
+
+Mount only in TUI mode; `hasUI` alone does not establish custom-overlay support. The summary must
+not capture keyboard focus. Temporarily hide it during its detail browser and interactive prompts,
+without changing the persisted preference. Test coexistence with permission prompts, model pickers
+and other extensions' overlays. Close through the owned lifecycle on the supported SDK; never pop
+an arbitrary topmost overlay or leave an abandoned completion promise.
+
+Pi 1.3.0 wraps `ui.custom()` calls as blocking UI prompts, even with `nonCapturing`. The
+passive panel instead mounts through a zero-row widget host and owns its `tui.showOverlay()`
+handle. The host is acquired only while the panel is wanted and released when turned off. The
+interactive browser uses the normal temporary `ui.custom()` lifecycle and completion callback.
+Public `Container.children` and `Component.render(width)` measurements establish space above the
+entire widget root and editor. A short regular-mode transcript or unknown layout hides the panel
+and pauses polling; fullscreen still needs 15 safe rows. No private Pi state is inspected/patched.
+
+Pi shortcut contexts bypass its normal extension-prompt wrapping. Our browser retains the wrapped
+lifecycle context obtained at mount, so its prompt start/end events balance. Unrelated extensions
+using their raw shortcut context may not emit those events; their overlays still retain ownership
+and keyboard focus. Tests cover disposing this browser underneath another extension's popup.
+
+The Pi baseline upgrade also adds custom-message `before_agent_start` events without a user prompt.
+Both conflict handoff and automatic recall explicitly ignore those starts, preventing a recalled
+result or another extension's continuation from masquerading as a new user request. A real SDK
+regression exercises this event path.
+
+### Delivery slices
+
+Use the agreed public test boundaries below. Each slice starts with a failing behaviour test,
+then the smallest working path and relevant regressions. Do not write all layers or tests in advance.
+
+1. **Usable read-only overview.** Agree and enforce the first planning dependency contracts while
+   building the first path through the core and adapters. Audit/update the Pi baseline and settle
+   the passive-overlay lifecycle check. Make `/forgetful plans` show real active plans and tasks
+   for the mapped project in a basic browser. Include capability detection/fallback, loading,
+   empty/error states, no-model operation and cancellable close. Validate against controlled HTTP
+   responses and an isolated real Forgetful service.
+2. **Persistent floating panel.** Add the saved preference, toggle/shortcuts, compact projection,
+   visible-only refresh and stale/offline handling. Opening details hides the panel; closing
+   restores it only when wanted. Prove focus, resize and reload behaviour in isolated tmux.
+3. **Detailed navigation.** Add other-project selection, plan goal/context, task criteria and
+   dependencies, manual refresh and stable selections across live changes. Keep the current-project
+   compact view unchanged when browsing elsewhere. Cover deletion and partial-read failures.
+4. **Integration and release checks.** Exercise concurrent recall/capture and other Pi UI, slow
+   responses, permission loss and session changes. Document controls, scope, minimum Pi version
+   and failure states in README. Confirm the delivered capability contract from Forgetful #99.
+
+No new runtime dependency is expected; the selected dependency checker is development tooling.
+Any dependency addition or upgrade requires a supply-chain audit before installation.
+Refresh the Mycelium map after source changes, excluding `test` and
+`scripts/forgetful-test-server.py`, and verify full source coverage and repeat-export determinism.
+Documentation-only planning does not require map regeneration.
+
+### Validation boundaries
+
+Tests exercise these public boundaries:
+
+- **Architecture boundary:** declarative import contracts and their retained proof fixtures, as
+  described above. The production graph must cover all source roles and composition entry points.
+- **Planning application boundary:** call the public workflow without loading Pi; assert emitted
+  state and externally visible reads/settings effects. Exercise real adapters against a controlled
+  HTTP server and temporary settings files. Do not test private methods or mock internal classes.
+
+1. **REST read boundary:** real HTTP requests through the adapter against controlled responses;
+   verify filters, payload validation, capability states, original diagnostics, byte limits,
+   authentication, path prefixes, timeout and cancellation. Run planning-enabled and disabled
+   cases against a throwaway real Forgetful SQLite service. The launcher explicitly registers
+   capability discovery and takes `--planning` to select planning-enabled or disabled fixtures,
+   without relying on production environment flags.
+2. **Extension behaviour boundary:** public commands/lifecycle with a real Pi session and controlled
+   HTTP server. Verify saved preference, no-model operation, project isolation, no requests while
+   hidden/off, bounded refresh, stale responses, cancellation and zero planning writes/model calls.
+   Assert planning content never enters Pi history or recall/capture inputs. Existing patterns are
+   in `test/background-startup-pi.test.ts` and `test/extension-surface-pi.test.ts`.
+3. **Terminal boundary:** isolated `pi-smoke-*` tmux sessions loading this checkout explicitly.
+   Check draft typing, both shortcuts and command fallback, narrow/wide resize, Unicode/long titles,
+   keyboard navigation, another overlay above the panel, permission dialogs, reload and shutdown.
+   Verify passive display does not leave Pi's blocking-prompt lifecycle active. Exercise both
+   regular and fullscreen TUI modes; the original visual mock used fullscreen only.
+   Inspect captured panes and verify cleanup; keep the user's running Pi session untouched.
+   `test/background-ui-pi.test.ts` provides an existing opt-in terminal harness pattern.
+4. **Existing memory behaviour:** run `npm run check`, the targeted real REST suites with
+   `FORGETFUL_TEST_SOURCE` set, and opt-in terminal checks. Verify discovery changes preserve early
+   capture queueing, repository identity, trust, startup responsiveness and the sole main-agent
+   tool `forgetful_recall_wait`. Use deterministic fixtures, not paid model calls.
+
+The full UI remains human-facing and read-only. The existing capture queue/source/snapshot
+migration remains follow-on work; shipping the viewer does not imply those legacy boundaries are
+already fully separated. Local validation and hosted CI are reported separately.

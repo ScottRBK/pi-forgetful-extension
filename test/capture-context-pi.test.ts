@@ -104,7 +104,7 @@ for (const scenario of ["skip", "queued skip", "branched skip", "pinned settleme
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const settledId = manager.appendMessage(reply);
-      const settling = session.extensionRunner.emit({ type: "agent_settled" });
+      const settling = session.extensionRunner.emit({ type: "agent_settled", aborted: false });
       manager.appendMessage({ role: "user", content: "LATER_WORK: unrelated future entry.",
         timestamp: 3 });
       manager.appendMessage({ ...reply, timestamp: 4 });
@@ -129,11 +129,11 @@ for (const scenario of ["skip", "queued skip", "branched skip", "pinned settleme
       manager.appendMessage({ role: "user", content: "SKIPPED_WORK: provisional seating idea.",
         timestamp: 1 });
       manager.appendMessage(reply);
-      const first = session.extensionRunner.emit({ type: "agent_settled" });
+      const first = session.extensionRunner.emit({ type: "agent_settled", aborted: false });
       manager.appendMessage({ role: "user", content: "NEW_WORK: confirm the workshop date.",
         timestamp: 3 });
       manager.appendMessage({ ...reply, timestamp: 4 });
-      const second = session.extensionRunner.emit({ type: "agent_settled" });
+      const second = session.extensionRunner.emit({ type: "agent_settled", aborted: false });
       await Promise.all([first, second]);
     } else {
       await session.prompt("SKIPPED_WORK: provisional workshop seating idea.");

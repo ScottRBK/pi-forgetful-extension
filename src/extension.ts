@@ -17,6 +17,7 @@ import {
 import type { Model, UserMessage } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { ForgetfulActivity } from "./activity.ts";
+import { createPlanningRuntime, type PlanningRuntime } from "./bootstrap/planning.ts";
 import type {
   CaptureSnapshot,
   EvidenceEntry,
@@ -396,6 +397,7 @@ interface RecallActivity {
 interface Runtime {
   logger: FileLogger;
   activity: ForgetfulActivity;
+  planning?: PlanningRuntime;
   sessionId: string;
   generation: number;
   cwd: string;
@@ -2055,6 +2057,16 @@ export function createForgetfulExtension(
         }
         state.skipNextCapture = false;
         state.runtime = runtime;
+        if (ctx.mode === "tui" && runtime.client) {
+          try {
+            runtime.planning = createPlanningRuntime(ctx, runtime.config, async () => {
+              const context = await discoverWorkContext(pi, ctx, runtime.branchId);
+              return context.repoName;
+            });
+          } catch (error) {
+            logFailure(ctx, runtime.config, "Forgetful planning view unavailable", error);
+          }
+        }
         runtime.logger.emit("info", "session.started", { branchId: runtime.branchId });
         runtime.initialization = initializeRuntimeContext(runtime, ctx);
         // Recovery and live checkpoints share one tail; neither blocks Pi startup.
@@ -2089,6 +2101,12 @@ export function createForgetfulExtension(
 
     const drainRuntime = async (runtime: Runtime): Promise<void> => {
       runtime.lifecycleController.abort();
+      try { runtime.planning?.dispose(); }
+      catch (error) {
+        runtime.logger.emit("debug", "planning.close_failed", {
+          error: boundedErrorDiagnostic(error),
+        });
+      }
       runtime.activity.close();
       cancelAllRecallJobs(runtime);
       await runtime.capture?.stop?.(runtime.sessionId, runtime.branchId);
@@ -2641,6 +2659,9 @@ export function createForgetfulExtension(
       }
     };
 
+    pi.on("ui_prompt_start", () => state.runtime?.planning?.setPromptActive(true));
+    pi.on("ui_prompt_end", () => state.runtime?.planning?.setPromptActive(false));
+
     pi.on("session_start", async (event, ctx) => {
       cancelAllRecallJobs();
       state.generation += 1;
@@ -2655,7 +2676,8 @@ export function createForgetfulExtension(
 
     // Select at the next user turn, rather than queue a message that could cross navigation.
     // Pi saves the returned message before its request; the context hook acknowledges that entry.
-    pi.on("before_agent_start", async (_event, ctx) => {
+    pi.on("before_agent_start", async (event, ctx) => {
+      if (event.messageType === "custom") return;
       try {
         const runtime = await loadRuntime(ctx, undefined, false);
         if (!isCurrentRuntime(runtime, ctx)) return;
@@ -2668,6 +2690,7 @@ export function createForgetfulExtension(
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
+      if (event.messageType === "custom") return;
       try {
         const runtime = await loadRuntime(ctx, undefined, false);
         if (!isCurrentRuntime(runtime, ctx) || !runtime.ready) return;
@@ -2995,7 +3018,8 @@ export function createForgetfulExtension(
               : "unresolved (run /forgetful project init)"
           }; ` +
           `model ${modelToString(runtime.config.model) ?? "not configured"}` +
-          `${recallText}${conflictText}${diagnosticText}${uncertainText}.`,
+          `${recallText}${conflictText}${diagnosticText}${uncertainText}` +
+          `${runtime.planning ? `; ${runtime.planning.status()}` : ""}.`,
       );
       for (const warning of runtime.config.warnings.slice(0, 4))
         notify(ctx, warning, "warning");
@@ -3363,13 +3387,44 @@ export function createForgetfulExtension(
       }
     };
 
+    const planningCommand = async (ctx: ExtensionContext, action: string): Promise<void> => {
+      if (ctx.mode !== "tui") {
+        notify(ctx, "Forgetful plans require Pi's interactive terminal.", "warning");
+        return;
+      }
+      const runtime = await loadRuntime(ctx, undefined, false);
+      if (!runtime.planning) {
+        notify(ctx, "Planning is unavailable. Check /forgetful setup.", "warning");
+        return;
+      }
+      try {
+        if (action === "toggle-details") await runtime.planning.toggleDetails();
+        else await runtime.planning.command(action);
+      } catch (error) {
+        notify(ctx, `Forgetful planning: ${boundedErrorDiagnostic(error)}`, "error");
+      }
+    };
+
+    pi.registerShortcut("ctrl+alt+p", {
+      description: "Open or close Forgetful plan details",
+      handler: (ctx) => planningCommand(ctx, "toggle-details"),
+    });
+    pi.registerShortcut("ctrl+alt+w", {
+      description: "Toggle the Forgetful planning panel",
+      handler: (ctx) => planningCommand(ctx, "toggle"),
+    });
+
     pi.registerCommand("forgetful", {
-      description: "Configure automatic Forgetful recall and capture",
+      description: "Configure Forgetful memory and browse plans",
       handler: async (args, ctx) => {
         const parts = args.trim().split(/\s+/).filter(Boolean);
         const action = parts[0] ?? "status";
         if (action === "setup") {
           await handleSetupCommand(ctx);
+          return;
+        }
+        if (action === "plans") {
+          await planningCommand(ctx, parts.slice(1).join(" "));
           return;
         }
         const runtime = await loadRuntime(ctx);
@@ -3408,7 +3463,8 @@ export function createForgetfulExtension(
           default:
             notify(
               ctx,
-              "Usage: /forgetful setup|project init|status|scope|capture|retry-queue|on|off|" +
+              "Usage: /forgetful setup|plans [on|off|toggle]|project init|status|scope|" +
+                "capture|retry-queue|on|off|" +
                 "logging off|info|debug|verbosity|model (legacy: debug on|off)",
               "error",
             );

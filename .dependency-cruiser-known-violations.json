@@ -1,0 +1,243 @@
+[
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "async_hooks",
+    "type": "dependency",
+    "comment": "Capture execution context isolation; preserve receipt semantics during migration.",
+    "dependencyTypes": [
+      "core",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "crypto",
+    "type": "dependency",
+    "comment": "Existing capture operation IDs and hashes.",
+    "dependencyTypes": [
+      "core",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "node_modules/@earendil-works/pi-ai/dist/index.js",
+    "type": "dependency",
+    "comment": "Existing StringEnum schema helper; remove SDK coupling during capture migration.",
+    "dependencyTypes": [
+      "npm-peer",
+      "npm-dev",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "src/logging.ts",
+    "type": "dependency",
+    "comment": "DiagnosticLogger contract currently shares its file with FileLogger.",
+    "dependencyTypes": [
+      "local",
+      "type-only",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "src/queue.ts",
+    "type": "dependency",
+    "comment": "Durable capture queue and receipts; future application-owned port.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "src/snapshot.ts",
+    "type": "dependency",
+    "comment": "Existing capture snapshot sanitisation; file also imports Pi session types.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/capture.ts",
+    "to": "src/source-inspection.ts",
+    "type": "dependency",
+    "comment": "Existing read-only source inspection; future application-owned port.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/knowledge-write.ts",
+    "to": "crypto",
+    "type": "dependency",
+    "comment": "Existing stable write-operation hashes.",
+    "dependencyTypes": [
+      "core",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-application-direction",
+      "severity": "error"
+    },
+    "from": "src/recall.ts",
+    "to": "src/config.ts",
+    "type": "dependency",
+    "comment": "Recall defaults and validation currently share the filesystem settings module.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-local-direction",
+      "severity": "error"
+    },
+    "from": "src/queue.ts",
+    "to": "src/snapshot.ts",
+    "type": "dependency",
+    "comment": "Existing persisted snapshot handling shares a Pi-facing source module.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-pi-direction",
+      "severity": "error"
+    },
+    "from": "src/model-context.ts",
+    "to": "src/config.ts",
+    "type": "dependency",
+    "comment": "Existing private-context default in the filesystem settings module.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-pi-direction",
+      "severity": "error"
+    },
+    "from": "src/model.ts",
+    "to": "src/config.ts",
+    "type": "dependency",
+    "comment": "Existing memory model configuration types/defaults share the settings adapter.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "legacy-pi-direction",
+      "severity": "error"
+    },
+    "from": "src/model.ts",
+    "to": "src/logging.ts",
+    "type": "dependency",
+    "comment": "Existing DiagnosticLogger contract shares the file logger module.",
+    "dependencyTypes": [
+      "local",
+      "type-only",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "planning-adapter-legacy-edges",
+      "severity": "error"
+    },
+    "from": "src/adapters/forgetful/planning.ts",
+    "to": "src/http.ts",
+    "type": "dependency",
+    "comment": "Reuse authenticated bounded REST transport inside the Forgetful adapter.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "planning-adapter-legacy-edges",
+      "severity": "error"
+    },
+    "from": "src/adapters/forgetful/planning.ts",
+    "to": "src/privacy.ts",
+    "type": "dependency",
+    "comment": "Reuse bounded secret redaction for service diagnostics.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "planning-adapter-legacy-edges",
+      "severity": "error"
+    },
+    "from": "src/adapters/local/planning-settings.ts",
+    "to": "src/config.ts",
+    "type": "dependency",
+    "comment": "Reuse the existing atomic user-settings writer behind the preference port.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  },
+  {
+    "rule": {
+      "name": "planning-adapter-legacy-edges",
+      "severity": "error"
+    },
+    "from": "src/adapters/pi/planning.ts",
+    "to": "src/privacy.ts",
+    "type": "dependency",
+    "comment": "Reuse terminal-bound text sanitisation inside the Pi view.",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ]
+  }
+]

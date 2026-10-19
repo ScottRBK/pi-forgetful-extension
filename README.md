@@ -28,15 +28,21 @@ HTTP is the MVP transport. The application services depend on a transport-neutra
 port, leaving room for a future CLI adapter without changing recall, capture, or scope policy.
 Forgetful MCP transport is deliberately not used by this extension.
 
-The visual source is available as [SVG](docs/assets/architecture.svg), and the detailed editable
-architecture is available in [Excalidraw](docs/code-architecture.excalidraw).
+The plans viewer is a separate read-only workflow: Pi views call an application controller through
+its public operations; REST and saved preferences sit behind narrow ports. Dependency Cruiser
+checks these boundaries, including indirect and type-only imports. The existing memory modules
+are being separated incrementally, with explicit migration exceptions rather than a full rewrite.
+
+The visual source is available as [SVG](docs/assets/architecture.svg). An earlier editable memory
+overview is available in [Excalidraw](docs/code-architecture.excalidraw); the
+[current class map](docs/assets/mycelium_class_diagram.md) includes the planning feature.
 
 ## Requirements
 
 - Node.js 22.19 or newer
-- Pi **1.0.1** (current tested release)
+- Pi **1.3.0** or newer (tested with 1.3.0)
 - An already-running Forgetful REST service
-- An authenticated Pi model for memory planning and capture
+- An authenticated Pi model for automatic recall and capture; the plans viewer needs no model
 - HTTPS for remote Forgetful services; local HTTP endpoints are supported
 
 ## Installation
@@ -111,6 +117,7 @@ directory. The effective settings can also be represented as:
   "model": "provider/model-id",
   "enabled": true,
   "capture_mode": "auto",
+  "planning_panel": false,
   "verbosity": "warning",
   "logging": "off"
 }
@@ -178,8 +185,10 @@ new memory is saved; duplicate/contradiction searches remain destination-scoped.
 | --- | --- |
 | `/forgetful setup` | Get agent-led CLI/MCP help, or configure the REST connection manually. |
 | `/forgetful project init` | Create or link this repository's Forgetful project. |
-| `/forgetful status` | Show effective settings and memory status. |
-| `/forgetful on` / `/forgetful off` | Enable or disable this extension’s memory processing. |
+| `/forgetful status` | Show effective settings, memory and planning status. |
+| `/forgetful plans` | Open the read-only plans and tasks browser. |
+| `/forgetful plans on\|off\|toggle` | Save the floating panel preference. |
+| `/forgetful on` / `/forgetful off` | Enable or pause memory processing and planning views. |
 | `/forgetful capture auto` | Automatically capture evidenced knowledge. |
 | `/forgetful capture observe` | Inspect candidates without writing memories. |
 | `/forgetful capture off` | Disable this extension’s extraction and capture writes. |
@@ -201,6 +210,52 @@ Verbosity is saved in user settings and applies immediately, including to queued
 includes higher-severity messages. Explicit command replies
 (including `/forgetful status`) and normal Pi tool results remain visible at every level.
 Existing `debug: true` settings select debug verbosity unless `verbosity` is explicitly set.
+
+### Plans and tasks
+
+Use `/forgetful plans on` to show a small top-right panel. It floats over chat and leaves the
+editor and other extensions' widgets alone. The default is off; the choice is saved in your user
+settings as `planning_panel`. `Ctrl+Alt+W` toggles it, and `Ctrl+Alt+P` opens/closes details.
+If a shortcut conflicts with another extension, use the commands instead.
+
+The compact panel shows active plans for the project whose repository link exactly matches your
+Git origin. It shows up to two plans and two doing/blocked tasks per plan, with overflow counts.
+Done and cancelled counts are separate. “Doing” is a saved task state, not proof an agent is running.
+Missing or ambiguous project links are shown explicitly; the panel never substitutes global tasks.
+
+`/forgetful plans` opens details even when the panel is off. Use left/right (h/l) for plans,
+up/down (k/j) for tasks, Enter to inspect, Tab to choose a project, `g` for plan goal/context,
+`r` to refresh, and Escape to return/close. Task inspection shows description, criteria and
+dependencies; long details scroll with arrows or Page Up/Down.
+Browsing another project does not change the compact panel's project, recall scope or capture
+settings. The viewer cannot create, edit, claim or complete work.
+
+Visible views refresh every ten seconds, with backoff during outages. Closing details with the
+panel off stops reads. The panel hides and pauses below 100 columns or 26 rows, and while a normal
+Pi extension prompt is open. It also needs 15 safe chat rows above widgets and the editor: in regular
+mode, a short conversation therefore keeps it hidden. Fullscreen normally provides that space.
+Unknown layouts hide it conservatively rather than covering your typing. Details remain available.
+`/forgetful off` hides planning and stops traffic without forgetting your panel preference;
+`/forgetful capture off` does not.
+
+Pi 1.3 does not announce prompts opened directly from another extension's shortcut context. Such
+prompts can still appear over this passive panel; our cleanup removes only our own overlay.
+
+Planning must be enabled on the configured Forgetful REST service. The viewer checks the server's
+`GET /.well-known` capability document, independently of memory-model readiness. Older servers
+without this document fall back to a validated plans-list read. An empty list is valid; a missing
+route is unavailable, not proof planning is disabled. Access failures and stale data remain visible,
+with the last successful refresh; manual refresh retries disabled/unavailable services.
+
+The viewer reuses the REST connection, authentication, timeouts and response-size limits. A missing
+configured token stops reads rather than falling back to anonymous access. For a proxy base such as
+`https://host/forgetful/api/v1`, capability discovery uses `https://host/forgetful/.well-known`.
+It never follows a capability document to another origin.
+
+No model calls are made for the viewer, and its records never become conversation, recall or capture
+input. Terminal controls and known secrets are stripped from displayed data; this is not a guarantee
+that arbitrary private information can be detected. Reads can still trigger Forgetful's ordinary
+server-side identity/access bookkeeping.
 
 ### File logging
 

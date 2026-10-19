@@ -1,0 +1,57 @@
+{
+  "index.ts": ["export * from './src/extension.ts';"],
+  "src/extension.ts": ["export * from './bootstrap/planning.ts';"],
+  "src/bootstrap/planning.ts": [
+    "export * from '../application/planning.ts';",
+    "export * from '../adapters/pi/planning.ts';",
+    "export * from '../adapters/forgetful/planning.ts';",
+    "export * from '../adapters/local/planning-settings.ts';"
+  ],
+  "src/domain/planning.ts": [
+    "import { inspect } from 'node:util';",
+    "export type Record = { id: number };",
+    "export const describe = inspect;"
+  ],
+  "src/application/ports/planning.ts": [
+    "import type { Record } from '../../domain/planning.ts';",
+    "export interface Reader { read(): Record; }"
+  ],
+  "src/application/planning.ts": [
+    "import type { Reader } from './ports/planning.ts';",
+    "export class Planning { constructor(readonly reader: Reader) {} }"
+  ],
+  "src/adapters/pi/planning.ts": [
+    "import type { ExtensionContext } from '@earendil-works/pi-coding-agent';",
+    "import type { Planning } from '../../application/planning.ts';",
+    "import type { Reader } from '../../application/ports/planning.ts';",
+    "import { sanitize } from '../../privacy.ts';",
+    "export type View = [ExtensionContext, Planning, Reader];",
+    "export const render = sanitize;"
+  ],
+  "src/adapters/forgetful/planning.ts": [
+    "import type { Reader } from '../../application/ports/planning.ts';",
+    "import { request } from '../../http.ts';",
+    "import { sanitize } from '../../privacy.ts';",
+    "export const reader: Reader = { read: () => ({ id: request() }) };",
+    "export const diagnostic = sanitize;"
+  ],
+  "src/adapters/local/planning-settings.ts": [
+    "import type { Record } from '../../domain/planning.ts';",
+    "import type { Reader } from '../../application/ports/planning.ts';",
+    "import { settings } from '../../config.ts';",
+    "export type Preference = Record & Reader;",
+    "export const save = settings;"
+  ],
+  "src/privacy.ts": ["export const sanitize = (text: string) => text;"],
+  "src/contracts.ts": ["export type Id = number;"],
+  "src/repository.ts": ["export const repository = 'example';"],
+  "src/http.ts": [
+    "import type { Id } from './contracts.ts';",
+    "import { repository } from './repository.ts';",
+    "export const request = (): Id => repository.length;"
+  ],
+  "src/config.ts": [
+    "import { writeFile } from 'node:fs/promises';",
+    "export const settings = writeFile;"
+  ]
+}

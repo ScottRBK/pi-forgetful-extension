@@ -390,12 +390,8 @@ function flattenSearchResult(result: MemorySearchResult): Memory[] {
   return uniqueMemories(memories);
 }
 
-/** The sole HTTP-aware adapter for the transport-neutral ForgetfulClient port. */
-export class ApiForgetfulClient implements ForgetfulClient {
-  readonly knowledge = new ApiKnowledgeClient(
-    (...args) => this.request(...args),
-    (value) => parseMemory(value, "updateMemory"),
-  );
+/** HTTP mechanics shared by the memory and read-only planning adapters. */
+export class ForgetfulHttpTransport {
   private readonly baseUrl: URL;
   private readonly token?: string;
   private readonly timeoutMs: number;
@@ -450,6 +446,160 @@ export class ApiForgetfulClient implements ForgetfulClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
+  /** Shared bounded transport for adapters; no domain parsing is performed here. */
+  getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+    return this.request(path, "GET", undefined, signal, [200]);
+  }
+
+  /** Discovery lives beside /api/v1, retaining a configured reverse-proxy prefix. */
+  getDeployment(path: string, signal?: AbortSignal): Promise<unknown> {
+    const url = new URL(this.baseUrl);
+    url.pathname = url.pathname.replace(/\/api\/v1$/, "") + "/" + path.replace(/^\//, "");
+    return this.request(url, "GET", undefined, signal, [200]);
+  }
+
+  protected endpoint(path: string): string {
+    return `${this.baseUrl.toString().replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+  }
+
+  private responseByteLimit(method: string, url: URL): number {
+    return method === "GET" && /\/files\/[1-9]\d*$/.test(url.pathname)
+      ? this.maxFileResponseBytes : this.maxResponseBytes;
+  }
+
+  protected async request(
+    pathOrUrl: string | URL,
+    method: string,
+    body: unknown,
+    callerSignal: AbortSignal | undefined,
+    expectedStatuses: number[],
+  ): Promise<unknown> {
+    const url =
+      typeof pathOrUrl === "string"
+        ? new URL(this.endpoint(pathOrUrl))
+        : pathOrUrl;
+    const controller = new AbortController();
+    let timedOut = false;
+    let callerAborted = false;
+    const onAbort = () => {
+      callerAborted = true;
+      controller.abort();
+    };
+    if (callerSignal?.aborted) throw makeAbortError();
+    callerSignal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.timeoutMs);
+
+    try {
+      const headers: Record<string, string> = { accept: "application/json" };
+      if (body !== undefined) headers["content-type"] = "application/json";
+      if (this.token) headers.authorization = `Bearer ${this.token}`;
+      const response = await this.fetchImpl(url, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+        redirect: "error",
+      });
+      const maxBytes = this.responseByteLimit(method, url);
+      if (!expectedStatuses.includes(response.status)) {
+        await this.throwResponseError(response, method, url, controller.signal, maxBytes);
+      }
+      const text = await this.readResponse(response, controller.signal, maxBytes);
+      if (callerAborted || callerSignal?.aborted) throw makeAbortError();
+      if (timedOut) throw new ForgetfulTimeoutError();
+      return parseJson(text, `${method} ${url.pathname}`);
+    } catch (error) {
+      if (timedOut) throw new ForgetfulTimeoutError();
+      if (callerAborted || callerSignal?.aborted) throw makeAbortError();
+      // Preserve transport exceptions as well as returned service errors for the caller.
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private async throwResponseError(
+    response: Response, method: string, url: URL, signal: AbortSignal, maxBytes: number,
+  ): Promise<never> {
+    let body: string;
+    try {
+      body = await this.readResponse(response, signal, maxBytes);
+    } catch (error) {
+      if (!(error instanceof ForgetfulSchemaError)) throw error;
+      body = "Forgetful response exceeded the configured size limit.";
+    }
+    throw new ForgetfulHttpError(
+      `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}` +
+        (body ? `: ${body}` : ""),
+      response.status,
+      body,
+    );
+  }
+
+  private async readResponse(
+    response: Response,
+    signal: AbortSignal,
+    maxBytes: number,
+  ): Promise<string> {
+    const contentLength = response.headers.get("content-length");
+    if (
+      contentLength !== null &&
+      Number(contentLength) > maxBytes
+    ) {
+      await response.body?.cancel();
+      throw new ForgetfulSchemaError(
+        "Forgetful response exceeded the configured size limit",
+      );
+    }
+    if (!response.body) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > maxBytes) {
+        throw new ForgetfulSchemaError(
+          "Forgetful response exceeded the configured size limit",
+        );
+      }
+      return new TextDecoder().decode(bytes);
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        size += next.value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new ForgetfulSchemaError(
+            "Forgetful response exceeded the configured size limit",
+          );
+        }
+        chunks.push(next.value);
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      throw error;
+    }
+    const merged = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(merged);
+  }
+}
+
+/** The sole HTTP-aware adapter for the transport-neutral ForgetfulClient port. */
+export class ApiForgetfulClient extends ForgetfulHttpTransport implements ForgetfulClient {
+  readonly knowledge = new ApiKnowledgeClient(
+    (...args) => this.request(...args),
+    (value) => parseMemory(value, "updateMemory"),
+  );
   async search(
     request: SearchRequest,
     signal?: AbortSignal,
@@ -626,138 +776,4 @@ export class ApiForgetfulClient implements ForgetfulClient {
     return id;
   }
 
-  private endpoint(path: string): string {
-    return `${this.baseUrl.toString().replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
-  }
-
-  private responseByteLimit(method: string, url: URL): number {
-    return method === "GET" && /\/files\/[1-9]\d*$/.test(url.pathname)
-      ? this.maxFileResponseBytes : this.maxResponseBytes;
-  }
-
-  private async request(
-    pathOrUrl: string | URL,
-    method: string,
-    body: unknown,
-    callerSignal: AbortSignal | undefined,
-    expectedStatuses: number[],
-  ): Promise<unknown> {
-    const url =
-      typeof pathOrUrl === "string"
-        ? new URL(this.endpoint(pathOrUrl))
-        : pathOrUrl;
-    const controller = new AbortController();
-    let timedOut = false;
-    let callerAborted = false;
-    const onAbort = () => {
-      callerAborted = true;
-      controller.abort();
-    };
-    if (callerSignal?.aborted) throw makeAbortError();
-    callerSignal?.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, this.timeoutMs);
-
-    try {
-      const headers: Record<string, string> = { accept: "application/json" };
-      if (body !== undefined) headers["content-type"] = "application/json";
-      if (this.token) headers.authorization = `Bearer ${this.token}`;
-      const response = await this.fetchImpl(url, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-        redirect: "error",
-      });
-      const maxBytes = this.responseByteLimit(method, url);
-      if (!expectedStatuses.includes(response.status)) {
-        await this.throwResponseError(response, method, url, controller.signal, maxBytes);
-      }
-      const text = await this.readResponse(response, controller.signal, maxBytes);
-      if (callerAborted || callerSignal?.aborted) throw makeAbortError();
-      if (timedOut) throw new ForgetfulTimeoutError();
-      return parseJson(text, `${method} ${url.pathname}`);
-    } catch (error) {
-      if (timedOut) throw new ForgetfulTimeoutError();
-      if (callerAborted || callerSignal?.aborted) throw makeAbortError();
-      // Preserve transport exceptions as well as returned service errors for the caller.
-      throw error;
-    } finally {
-      clearTimeout(timer);
-      callerSignal?.removeEventListener("abort", onAbort);
-    }
-  }
-
-  private async throwResponseError(
-    response: Response, method: string, url: URL, signal: AbortSignal, maxBytes: number,
-  ): Promise<never> {
-    let body: string;
-    try {
-      body = await this.readResponse(response, signal, maxBytes);
-    } catch (error) {
-      if (!(error instanceof ForgetfulSchemaError)) throw error;
-      body = "Forgetful response exceeded the configured size limit.";
-    }
-    throw new ForgetfulHttpError(
-      `Forgetful ${method} ${url.pathname} returned HTTP ${response.status}` +
-        (body ? `: ${body}` : ""),
-      response.status,
-      body,
-    );
-  }
-
-  private async readResponse(
-    response: Response,
-    signal: AbortSignal,
-    maxBytes: number,
-  ): Promise<string> {
-    const contentLength = response.headers.get("content-length");
-    if (
-      contentLength !== null &&
-      Number(contentLength) > maxBytes
-    ) {
-      await response.body?.cancel();
-      throw new ForgetfulSchemaError(
-        "Forgetful response exceeded the configured size limit",
-      );
-    }
-    if (!response.body) {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > maxBytes) {
-        throw new ForgetfulSchemaError(
-          "Forgetful response exceeded the configured size limit",
-        );
-      }
-      return new TextDecoder().decode(bytes);
-    }
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        size += next.value.byteLength;
-        if (size > maxBytes) {
-          await reader.cancel();
-          throw new ForgetfulSchemaError(
-            "Forgetful response exceeded the configured size limit",
-          );
-        }
-        chunks.push(next.value);
-      }
-    } catch (error) {
-      if (signal.aborted) throw error;
-      throw error;
-    }
-    const merged = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return new TextDecoder().decode(merged);
-  }
 }

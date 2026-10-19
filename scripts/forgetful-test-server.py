@@ -38,8 +38,15 @@ class FixedEmbeddings:
 async def main():
     import uvicorn
 
-    apps = fixture.build_sqlite_app(FixedEmbeddings(), None, enabled_features={"files"})
+    from app.config.settings import settings
+    from app.routes.api import capabilities
+
+    planning = "--planning" in sys.argv[2:]
+    settings.PLANNING_ENABLED = planning
+    features = {"files", "planning"} if planning else {"files"}
+    apps = fixture.build_sqlite_app(FixedEmbeddings(), None, enabled_features=features)
     app = await anext(apps)
+    capabilities.register(app)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]

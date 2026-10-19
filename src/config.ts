@@ -90,6 +90,7 @@ export interface PromptOverlays {
 }
 
 export interface ForgetfulConfig {
+  planningPanel?: boolean;
   enabled: boolean;
   captureMode: CaptureMode;
   verbosity: Verbosity;
@@ -128,6 +129,7 @@ export interface PersistedUserSettings {
   token_env?: unknown;
   timeout_ms?: unknown;
   enabled?: unknown;
+  planning_panel?: unknown;
   capture?: unknown;
   capture_mode?: unknown;
   debug?: unknown;
@@ -381,6 +383,7 @@ export async function loadForgetfulConfig(
 
   return {
     enabled: asBoolean(user.enabled, true) && !tokenEnvMissing,
+    planningPanel: asBoolean(user.planning_panel, false),
     captureMode,
     verbosity: resolveVerbosity(user, warnings),
     logging: isFileLogLevel(user.logging) ? user.logging : "off",
@@ -443,6 +446,7 @@ export async function updateUserSettings(
       | "token_env"
       | "timeout_ms"
       | "enabled"
+      | "planning_panel"
       | "capture_mode"
       | "debug"
       | "verbosity"
@@ -483,4 +487,10 @@ export function modelToString(
   model: ModelSelection | undefined,
 ): string | undefined {
   return model ? `${model.provider}/${model.id}` : undefined;
+}
+
+/** Read just the local viewer preference; independent of model and connection readiness. */
+export async function readPlanningPanel(path: string): Promise<boolean> {
+  const current = await readJson(path);
+  return isRecord(current.value) && current.value.planning_panel === true;
 }

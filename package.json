@@ -8,19 +8,22 @@
   "scripts": {
     "test": "node --import tsx --test --test-concurrency=2 test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check:architecture": "node scripts/check-architecture.mjs && npm run test:architecture",
+    "test:architecture": "node --test test/architecture/*.test.mjs",
+    "check": "npm run check:architecture && npm run typecheck && npm test"
   },
   "engines": { "node": ">=22.19.0" },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
+    "@earendil-works/pi-ai": ">=1.3.0",
+    "@earendil-works/pi-coding-agent": ">=1.3.0",
+    "@earendil-works/pi-tui": ">=1.3.0",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.0.1",
-    "@earendil-works/pi-coding-agent": "1.0.1",
-    "@earendil-works/pi-tui": "1.0.1",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
+    "dependency-cruiser": "18.6.0",
     "@types/node": "22.19.19",
     "tsx": "4.20.6",
     "typebox": "*",

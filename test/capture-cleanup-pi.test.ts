@@ -224,7 +224,7 @@ for (const failure of ["provider", "submission"] as const) {
         "the same settlement must stay deduplicated after permanent deletion");
       const callsBeforeRestart = captureCalls;
       const restarted = await startSession();
-      await restarted.extensionRunner.emit({ type: "agent_settled" });
+      await restarted.extensionRunner.emit({ type: "agent_settled", aborted: false });
       await closeSession!();
       closeSession = undefined;
       assert.equal(captureCalls, callsBeforeRestart, "restart must not replay exhausted work");

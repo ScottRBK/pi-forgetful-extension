@@ -165,7 +165,8 @@ for (const [label, settings, expected] of [
         project: { id: 7, name: "Deadline" }, projects: [] }),
     } })({ on(name: string, handler: (event: any, ctx: any) => unknown) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
-    }, registerCommand() {}, registerTool(tool: any) { waitTool = tool; }, sendMessage() {},
+    }, registerCommand() {}, registerShortcut() {},
+    registerTool(tool: any) { waitTool = tool; }, sendMessage() {},
     appendEntry() {}, events: { on() {}, off() {} },
     } as any);
     const emit = async (name: string, event: any) => {

@@ -97,6 +97,7 @@ async function harness(
     workContextGate?: Promise<void>;
     onWorkContext?: () => void;
     recallService?: RecallServicePort;
+    planningMountError?: boolean;
   } = {},
 ): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "pi-forgetful-extension-"));
@@ -215,10 +216,12 @@ async function harness(
         if (text === undefined) statuses.delete(key);
         else statuses.set(key, text);
       },
-      setWidget: (key: string, content: unknown, options?: { placement?: string }) => {
+      setWidget: (key: string, content: unknown, widgetOptions?: { placement?: string }) => {
+        if (options.planningMountError && key === "forgetful-planning-host" && content)
+          throw new Error("Controlled Pi overlay mount failure");
         const previous = widgets.get(key);
         previous?.component?.dispose?.();
-        widgetCalls.push({ key, content, placement: options?.placement });
+        widgetCalls.push({ key, content, placement: widgetOptions?.placement });
         if (content === undefined) {
           widgets.delete(key);
           events.emit("widget");
@@ -233,7 +236,7 @@ async function harness(
             { fg: (_color: string, text: string) => text },
           )
           : undefined;
-        widgets.set(key, { content, placement: options?.placement, component });
+        widgets.set(key, { content, placement: widgetOptions?.placement, component });
         events.emit("widget");
       },
       notify: (message: string) => {
@@ -279,6 +282,8 @@ async function harness(
     registerTool(definition: any) {
       tools.set(definition.name, definition);
     },
+    // Real shortcut dispatch and overlay focus are covered by planning-terminal.test.ts.
+    registerShortcut() {},
     sendMessage(message: unknown, sendOptions: unknown) {
       sentMessages.push({ message, options: sendOptions });
       events.emit("message");
@@ -4836,4 +4841,19 @@ test("recall wait explains a session change without delivering stale memory", as
     release({ text: "", memoryIds: [], scope: "global" });
     await fixture.cleanup();
   }
+});
+
+test("an optional planning UI mount failure cannot stop memory startup", async () => {
+  // Arrange: Pi's external widget boundary fails, with a saved panel preference.
+  const fixture = await harness({ planningMountError: true,
+    userSettings: { planning_panel: true, verbosity: "debug" } });
+  try {
+    // Act: normal startup and an existing memory control must remain usable.
+    await fixture.emit("session_start", { type: "session_start", reason: "new" });
+    await fixture.command("status");
+
+    // Assert: the original failure is visible without changing memory enablement.
+    assert.ok(fixture.notifications.some((text) => text.includes("Controlled Pi overlay")));
+    assert.ok(fixture.notifications.some((text) => text.startsWith("Forgetful on;")));
+  } finally { await fixture.cleanup(); }
 });

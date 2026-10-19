@@ -47,7 +47,11 @@ The intended experience requires no memory commands during normal work:
   allows cross-project capture links, while project scope keeps links within the destination;
   queued capture uses its pinned scope, and both link endpoints must remain active;
 - human setup, project, logging, verbosity, scope, capture, model, and enablement controls remain
-  available on demand; these settings do not control independent CLI/MCP clients.
+  available on demand; these settings do not control independent CLI/MCP clients;
+- a separately toggleable, read-only planning panel and browser use REST without a memory model;
+  views never enter agent context or capture evidence, and only visible views poll;
+- planning core and ports are independent of Pi, HTTP and filesystem adapters. Dependency Cruiser
+  enforces direct/indirect boundaries; exact legacy exceptions are reviewed migration debt.
 
 Recall defaults to global search. Capture defaults to the current project, but may select another
 existing project when the evidence supports it. Clear complete changes supersede old memories
@@ -146,8 +150,29 @@ flowchart TB
   API --> REST["Forgetful REST service\nwarm process"]
 ```
 
-An editable Excalidraw version is available at
+The planning feature has a separate composition path:
+
+```mermaid
+flowchart LR
+  B[Planning bootstrap] --> UI[Pi view adapter]
+  B --> APP[PlanningController]
+  B --> REST[REST reader adapter]
+  B --> LOCAL[Preference adapter]
+  UI --> APP
+  APP --> PORTS[Application-owned read and preference ports]
+  REST -. implements .-> PORTS
+  LOCAL -. implements .-> PORTS
+```
+
+`src/bootstrap/planning.ts` constructs the adapters; `src/extension.ts` owns runtime lifecycle.
+Project browsing does not modify capture discovery or memory scope. The passive panel uses an
+owned TUI overlay via a zero-row widget host, not a permanently open `ui.custom()` prompt.
+It hides when public layout measurements cannot establish space above widgets and the editor.
+Run `npm run check:architecture`; see CONTRIBUTING.md for contracts, proof fixtures and exceptions.
+
+An editable overview of the earlier memory architecture is available at
 [docs/code-architecture.excalidraw](docs/code-architecture.excalidraw).
+The generated class map above includes the current planning architecture.
 
 ## Forgetful integration and tool-error handling
 
