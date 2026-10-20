@@ -26,7 +26,7 @@ Calls removed by test filtering: 796. Type relationships removed: 194.
 - `test/capture-cleanup-pi.test.ts`: 6 source occurrences (test-path).
 - `test/capture-context-pi.test.ts`: 2 source occurrences (test-path).
 - `test/capture-context.test.ts`: 2 source occurrences (test-path).
-- `test/capture-drain-pi.test.ts`: 6 source occurrences (test-path).
+- `test/capture-drain-pi.test.ts`: 7 source occurrences (test-path).
 - `test/capture-error-diagnostic.test.ts`: 2 source occurrences (test-path).
 - `test/capture-execution.test.ts`: 4 source occurrences (test-path).
 - `test/capture-gate-pi.test.ts`: 3 source occurrences (test-path).

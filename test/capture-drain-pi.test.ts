@@ -511,16 +511,18 @@ for (const uncertain of ["flag", "receipt"] as const) {
       await queue.checkpoint(job!.id, { status: "running" });
       await queue.cancel(job!.id, false, "Earlier accepted save needs checking");
     }
+    const completedPasses = async () => (await pi.diagnostics())
+      .split('"event":"capture.batch_completed"').length - 1;
     pi.ready();
-    await until(() => pi.diagnostics(), (log) => log.includes("capture.batch_completed"),
-      "Initial recovery must settle without repeating the uncertain save");
+    // Neither startup recovery nor the queued settled callback can claim this uncertain job.
+    const beforeRetry = await until(completedPasses, (count) => count >= 2,
+      "Recovery and the queued settled callback must finish before the explicit retry");
     const original = await queue.getJob(job!.id);
 
-    // Act: ask Pi to retry the queue, then await its background worker via lifecycle shutdown.
+    // Act: wait for a new retry checkpoint, then use shutdown to drain its remaining work.
     await pi.session.prompt("/forgetful retry-queue");
-    await until(() => pi.diagnostics(), (log) =>
-      log.split("capture.batch_completed").length === 3,
-    "The explicit retry must finish its safe checkpoint");
+    await until(completedPasses, (count) => count > beforeRetry,
+      "The explicit retry must finish its safe checkpoint");
     await bounded(pi.shutdown(), "Uncertain writes must not leave a retry running");
 
     // Assert: exact saved progress and evidence survive; no provider or write is dispatched.
