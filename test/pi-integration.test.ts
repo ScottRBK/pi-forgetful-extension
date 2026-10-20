@@ -74,7 +74,8 @@ async function shutdownSession(session: AgentSession): Promise<void> {
 test(
   "real Pi receives saved reviewed recall and exposes only recall wait and the independent fixture",
   {
-    timeout: 20_000,
+    // Shared by setup and every sequential subtest.
+    timeout: 60_000,
   },
   async (t) => {
     // Arrange: real Pi and extension services, fake external model and memory HTTP endpoint.
@@ -732,11 +733,10 @@ test(
         while (created.length === 0 && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
+        const savedFeedbackPattern = /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/;
         const feedbackDeadline = Date.now() + 3000;
         while (
-          !notifications.some(({ message }) =>
-            /Forgetful capture saved 1 memory\./.test(message),
-          ) &&
+          !notifications.some(({ message }) => savedFeedbackPattern.test(message)) &&
           Date.now() < feedbackDeadline
         ) {
           await new Promise((resolve) => setTimeout(resolve, 20));
@@ -764,7 +764,7 @@ test(
         assert.ok(decision);
         assert.equal(saved.context, "Explicit user decision.");
         const savedFeedback = notifications.find(({ message }) =>
-          /Forgetful capture(?:: | )saved \d+ memor(?:y|ies)(?:\.|;)/.test(message),
+          savedFeedbackPattern.test(message),
         );
         assert.ok(
           savedFeedback,
