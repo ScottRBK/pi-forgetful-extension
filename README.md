@@ -111,7 +111,7 @@ directory. The effective settings can also be represented as:
 {
   "base_url": "http://localhost:8020/api/v1",
   "token_env": "FORGETFUL_TOKEN",
-  "recall_model_timeout_ms": 5000,
+  "recall_model_timeout_ms": 15000,
   "recall_concurrency": 2,
   "context_limit_tokens": 100000,
   "model": "provider/model-id",
@@ -651,7 +651,8 @@ scope setting means global recall and cross-project capture links. A malformed s
 uses global scope with a warning. Scope preference is independent of capture destination. Queued
 capture uses the scope saved in its snapshot, not later settings changes.
 
-`recall_model_timeout_ms` limits each classification and review request (default 5,000 ms).
+`recall_model_timeout_ms` limits each private classification or review task (default 15,000 ms).
+Each task shares that budget across model calls, read tools, and submission retries.
 Without `timeout_ms`, overall recall and recall wait default to 30,000 ms; each Forgetful HTTP
 request still defaults to 10,000 ms. An explicit `timeout_ms` overrides both, preserving existing
 configuration behavior. Timeout settings are positive integer milliseconds in the user settings

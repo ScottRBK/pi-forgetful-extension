@@ -733,8 +733,8 @@ Initial SLO candidates to validate:
 - warm planner/retrieval p50 below 700 ms;
 - warm planner/retrieval p95 below 1.5 seconds;
 - hard fail-open recall timeout of 30 seconds by default (configurable);
-- each classification/review request defaults to 5 seconds, independently configurable from the
-  overall deadline.
+- each private classification/review task defaults to 15 seconds, independently configurable from
+  the overall deadline; model calls, read tools, and submission retries share that task budget.
 
 The benchmark matrix covers every supported memory planner model, warm and cold service state,
 search false, search hit, search miss, two-query plans, and local versus remote service. Capture

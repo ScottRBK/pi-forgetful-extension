@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { EventEmitter, once } from "node:events";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
@@ -957,10 +957,12 @@ test("turning Forgetful off still completes while the log filesystem is stalled"
       await fixture.command("logging info");
       const directory = join(fixture.agentDir, "forgetful", "logs");
       const path = join(directory, (await readdir(directory))[0]!);
-      await rm(path);
+      const fifo = join(directory, "blocked-log.fifo");
       await new Promise<void>((resolve, reject) => {
-        execFile("mkfifo", [path], error => error ? reject(error) : resolve());
+        execFile("mkfifo", [fifo], error => error ? reject(error) : resolve());
       });
+      // Replace atomically: a background log write must not recreate the path in a deletion gap.
+      await rename(fifo, path);
       released = new Promise<string>((resolve, reject) => {
         setTimeout(() => readFile(path, "utf8").then(resolve, reject), 1_500);
       });
