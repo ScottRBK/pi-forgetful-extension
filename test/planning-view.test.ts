@@ -79,8 +79,8 @@ test("compact view bounds rows, uses supplied counts and exposes partial data",
     assert.match(screen, /3 active plans/);
     assert.match(screen, /4\/9 done.*2 cancelled/);
     assert.match(screen, /doing.*blocked.*DOING_BLOCKED/);
-    assert.match(screen, /\+1 more task/);
-    assert.match(screen, /\+1 more plan/);
+    assert.match(screen, /\+1 more task(?!s)/);
+    assert.match(screen, /\+1 more plan(?!s)/);
     assert.match(screen, /PARTIAL_FAILURE/);
     assert.doesNotMatch(screen, /OVERFLOW_TASK|PLAN_3|0\/0 done/);
     const lines = screen.split("\n");
@@ -151,6 +151,7 @@ test("rendering separates availability, empty, stale and sanitized error states"
       ["disabled", "Planning disabled on server"], ["unavailable", "Planning unavailable"],
       ["denied", "Planning access denied"], ["error", "Planning read failed"],
       ["not-ready", "Connection not configured"], ["empty", "No active plans"],
+      ["loading-tasks", "Loading tasks…"],
     ]) {
       await ui.text(`/view-state ${state}`);
       await ui.keys("Enter");
@@ -223,6 +224,71 @@ test("status exposes partial errors while the panel is hidden",
     const screen = await ui.until(/Planning panel: off/);
     assert.match(screen, /FIXTURE_TASK_READ_FAILED/);
     assert.match(screen, /last success: 2023-11-14/);
+    assert.match(screen, /view:\s+hidden/);
+  });
+
+test("details distinguish failed, empty and loading task lists, and status names the open view",
+  { skip: !enabled }, async (t) => {
+    // Arrange: a visible panel; PLAN_1 task reads fail and PLAN_3 has no tasks.
+    const ui = await terminal(t, "test/fixtures/planning-adapter.ts");
+    await ui.until(/ADAPTER_PROJECT/);
+    await ui.text("/view-status");
+    await ui.keys("Enter");
+    await ui.until(/Planning\s+panel:\s+on;\s+ready;\s+view:\s+visible/);
+    await ui.text("/view-reader empty-tasks");
+    await ui.keys("Enter");
+    await ui.text("/view-error");
+    await ui.keys("Enter");
+    await ui.until(/Partial.*FIXTURE_TASK_READ_FAILED/);
+
+    // Act/assert: a fresh failed read and an empty plan each explain the empty list.
+    await ui.keys("C-M-p");
+    await ui.until(/Forgetful \/ Plans/);
+    await ui.keys("C-M-t");
+    await ui.keys("Right");
+    await ui.until(/TASK_2_1/);
+    await ui.keys("Left");
+    assert.match(await ui.until(/Task data unavailable/), /Partial: FIXTURE_TASK_READ_FAILED/);
+    await ui.keys("Left");
+    await ui.until(/PLAN_3[\s\S]*No tasks/);
+    await ui.keys("Escape");
+    await ui.until(/Forgetful \/ Plans/, false);
+    await ui.text("/view-captured");
+    await ui.keys("Enter");
+    await ui.until(/CAPTURED Planning\s+panel:\s+on;\s+ready \(stale\);\s+view:\s+details/);
+
+    // Act/assert: a pending task read shows progress rather than an empty plan.
+    await ui.text("/view-reader slow-tasks");
+    await ui.keys("Enter");
+    await ui.keys("C-M-p");
+    await ui.until(/Forgetful \/ Plans/);
+    await ui.keys("Left");
+    await ui.until(/PLAN_3[\s\S]*Loading tasks…/);
+    await ui.keys("Escape");
+    await ui.until(/Forgetful \/ Plans/, false);
+
+    // Act/assert: a failed plan detail read is named, and goal/context view closes when the
+    // plan disappears, leaving a list that says there are no active plans.
+    await ui.text("/view-reader detail-error");
+    await ui.keys("Enter");
+    await ui.keys("C-M-p");
+    await ui.until(/Forgetful \/ Plans/);
+    await ui.keys("Left");
+    await ui.until(/Details unavailable: FIXTURE_DETAIL_FAILED/);
+    await ui.keys("g");
+    await ui.until(/Loading plan details…/);
+    await ui.keys("C-M-n");
+    await ui.until(/Forgetful \/ Plans[\s\S]*No active plans/);
+    await ui.keys("Escape");
+    await ui.until(/Forgetful \/ Plans/, false);
+
+    // Act/assert: the project picker says when no project is accessible.
+    await ui.text("/view-reader no-projects");
+    await ui.keys("Enter");
+    await ui.keys("C-M-p");
+    await ui.until(/Forgetful \/ Plans/);
+    await ui.keys("Tab");
+    await ui.until(/Choose project · 0 available[\s\S]*No accessible projects/);
   });
 
 test("panel off releases its overlay so Pi can change terminal mode",

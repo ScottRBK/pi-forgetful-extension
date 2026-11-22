@@ -211,6 +211,11 @@ test("real planning controls preserve drafts, preferences, prompt events and hid
   const requestCount = terminal.requests.length;
   await new Promise((done) => setTimeout(done, 10_300));
   assert.equal(terminal.requests.length, requestCount, "Hidden views must not poll");
+  await terminal.command("/forgetful status");
+  const planningStatus =
+    /not\s+configured;\s+Planning\s+panel:\s+off;\s+ready;\s+view:\s+hidden;/;
+  await until(terminal.pane, (screen) => planningStatus.test(screen),
+    "Status appends the planning view state");
 
   // Act: re-enable, then use a narrow terminal and restore enough room.
   await terminal.command("/forgetful plans on");

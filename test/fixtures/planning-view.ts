@@ -27,6 +27,7 @@ export default function fixture(pi: ExtensionAPI) {
     handler: async (arg) => {
     current = { ...state, plans: [], planTasks: {} };
     if (arg === "empty") current.availability = "ready";
+    else if (arg === "loading-tasks") current = { ...state, planTasks: {} };
     else if (arg === "stale") current = { ...state, stale: true,
       lastRefresh: 1700000000000, error: { kind: "transient", message: "OUTAGE" },
       planTasks: { 1: state.planTasks[1], 2: state.planTasks[1] } };

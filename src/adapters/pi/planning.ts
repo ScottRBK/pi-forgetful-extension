@@ -4,8 +4,10 @@ import {
   Container, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi,
   type Component, type OverlayHandle, type TUI,
 } from "@earendil-works/pi-tui";
-import type { PlanningState, PlanningWorkflow } from "../../application/ports/planning.ts";
-import type { PlanningTaskSummary } from "../../domain/planning.ts";
+import type {
+  PlanningPlanTasks, PlanningState, PlanningWorkflow,
+} from "../../application/ports/planning.ts";
+import type { PlanningPlanSummary, PlanningTaskSummary } from "../../domain/planning.ts";
 import { sanitizeText } from "../../privacy.ts";
 
 /** Reader text is already redacted; also protect alternate readers and UI diagnostics. */
@@ -44,10 +46,46 @@ function taskLabel(task: PlanningTaskSummary): string {
   return `${text(task.state)}${task.blocked ? " · blocked" : ""}`;
 }
 
+function plural(count: number, noun: string): string {
+  return count === 1 ? noun : `${noun}s`;
+}
+
+/** -1 for up or k, 1 for down or j, otherwise 0. */
+function verticalStep(data: string): number {
+  if (matchesKey(data, Key.down) || data === "j") return 1;
+  return matchesKey(data, Key.up) || data === "k" ? -1 : 0;
+}
+
+/** Explains why the details task list is empty. */
+function emptyTaskList(state: PlanningState, hasPlan: boolean, group?: PlanningPlanTasks): string {
+  if (!hasPlan) return state.availability === "ready" ? "No active plans" : "";
+  if (group?.error) return "Task data unavailable";
+  return group?.counts ? "No tasks" : "Loading tasks…";
+}
+
 function counts(state: PlanningState, id: number): string {
   const value = state.planTasks[id]?.counts;
   return value ? `${value.done}/${value.total} done · ${value.cancelled} cancelled` :
     "Counts unknown";
+}
+
+/** One plan in the compact panel: title, counts, then status or up to two active tasks. */
+function panelPlan(
+  state: PlanningState, plan: PlanningPlanSummary, width: number, theme: Theme,
+): string[] {
+  const data = state.planTasks[plan.id];
+  const more = Math.max(0, (data?.activeTasks.length ?? 0) - 2);
+  const suffix = more ? ` · +${more} more ${plural(more, "task")}` : "";
+  const title = truncateToWidth(text(plan.title), Math.max(1, width - 4 - suffix.length));
+  const block = [theme.bold(title + suffix), theme.fg("dim", counts(state, plan.id))];
+  if (data?.error) block.push(theme.fg("warning", `Partial: ${text(data.error.message)}`));
+  else if (!data?.counts) block.push(theme.fg("muted", "Loading tasks…"));
+  else if (!data.activeTasks.length) block.push(theme.fg("muted", "No doing or blocked tasks"));
+  else for (const task of data.activeTasks.slice(0, 2)) {
+    block.push(theme.fg(task.blocked ? "warning" : "accent",
+      `${taskLabel(task)} · ${text(task.title)}`));
+  }
+  return block;
 }
 
 /** Public rendering seam: business selection/counts arrive from the application unchanged. */
@@ -63,29 +101,20 @@ export function renderPlanningPanel(state: PlanningState, width: number, theme: 
   if (state.error) lines.push(theme.fg("error", text(state.error.message)));
   let shown = 0;
   for (const plan of state.plans.slice(0, 2)) {
-    const data = state.planTasks[plan.id];
-    const more = Math.max(0, (data?.activeTasks.length ?? 0) - 2);
-    const suffix = more ? ` · +${more} more task${more === 1 ? "" : "s"}` : "";
-    const title = truncateToWidth(text(plan.title), Math.max(1, width - 4 - suffix.length));
-    const block = [theme.bold(title + suffix), theme.fg("dim", counts(state, plan.id))];
-    if (data?.error) block.push(theme.fg("warning", `Partial: ${text(data.error.message)}`));
-    else if (!data?.counts) block.push(theme.fg("muted", "Loading tasks…"));
-    else if (!data.activeTasks.length) block.push(theme.fg("muted", "No doing or blocked tasks"));
-    else for (const task of data.activeTasks.slice(0, 2)) {
-      block.push(theme.fg(task.blocked ? "warning" : "accent",
-        `${taskLabel(task)} · ${text(task.title)}`));
-    }
+    const block = panelPlan(state, plan, width, theme);
     if (lines.length + block.length > 11) break;
     lines.push(...block);
     shown++;
   }
   if (!state.plans.length && state.availability === "ready") lines.push("No active plans");
   const extra = Math.max(0, state.plans.length - shown);
-  const overflow = extra ? `+${extra} more plan${extra === 1 ? "" : "s"} · ` : "";
+  const overflow = extra ? `+${extra} more ${plural(extra, "plan")} · ` : "";
   const hint = `${overflow}Ctrl+Alt+P details`;
   // Status/diagnostics take priority during outages; the browser retains full data.
   return box([...lines, theme.fg("dim", hint)], width, theme);
 }
+
+interface BrowserView { body: string[]; footer: string }
 
 /** Keyboard and scroll state only; all record selection belongs to the workflow. */
 class PlanBrowser implements Component {
@@ -101,7 +130,9 @@ class PlanBrowser implements Component {
     private readonly controller: PlanningWorkflow, private readonly close: () => void,
     private readonly run: (work: Promise<void>) => void) {}
 
-  invalidate(): void {}
+  invalidate(): void {
+    // Nothing is cached: every render reads the current workflow state.
+  }
 
   handleInput(data: string): void {
     const state = this.controller.state;
@@ -128,8 +159,7 @@ class PlanBrowser implements Component {
 
   private pickerInput(data: string, state: PlanningState): void {
     const index = Math.max(0, state.projects.findIndex((item) => item.id === this.projectId));
-    const step = matchesKey(data, Key.down) || data === "j" ? 1 :
-      matchesKey(data, Key.up) || data === "k" ? -1 : 0;
+    const step = verticalStep(data);
     this.projectId = state.projects[Math.max(0, Math.min(state.projects.length - 1,
       index + step))]?.id;
     if (matchesKey(data, Key.enter) && this.projectId !== undefined) {
@@ -211,6 +241,18 @@ class PlanBrowser implements Component {
       `${state.selectedTaskId}/${state.inspectingTask}/${this.planText}/${this.picker}`;
     if (identity !== this.identity) { this.identity = identity; this.scroll = 0; }
     if (!state.selectedPlanId) this.planText = false;
+    const top = this.header(state);
+    let view: BrowserView;
+    if (this.picker) view = this.pickerView(state, top, room);
+    else if (state.inspectingTask || this.planText) view = this.textView(state, top, room, inner);
+    else view = this.listView(state, top, room);
+    const footerLines = wrapTextWithAnsi(this.theme.fg("muted", view.footer), inner);
+    const budget = Math.max(0, room - Math.min(2, footerLines.length));
+    return box([...top, ...view.body].slice(0, budget).concat(footerLines.slice(0, room - budget)),
+      width, this.theme).slice(0, height);
+  }
+
+  private header(state: PlanningState): string[] {
     const project = state.projects.find((item) => item.id === state.selectedProjectId);
     const heading = this.theme.bold(this.theme.fg("accent", "Forgetful / Plans · read-only"));
     const top = [heading, this.theme.fg("muted", text(project?.name) || "No project selected")];
@@ -219,54 +261,59 @@ class PlanBrowser implements Component {
     if (state.error) top.push(this.theme.fg("error", text(state.error.message)));
     if (state.detailError) top.push(this.theme.fg("warning",
       `Details unavailable: ${text(state.detailError.message)}`));
-    let body: string[];
-    let footer: string;
+    return top;
+  }
+
+  /** Adds its heading to `top`; the list keeps the chosen project in view. */
+  private pickerView(state: PlanningState, top: string[], room: number): BrowserView {
+    top.push(this.theme.bold(`Choose project · ${state.projects.length} available`));
     this.pageSize = Math.max(1, room - top.length - 2);
-    if (this.picker) {
-      top.push(this.theme.bold(`Choose project · ${state.projects.length} available`));
-      this.pageSize = Math.max(1, room - top.length - 2);
-      const index = Math.max(0, state.projects.findIndex((item) => item.id === this.projectId));
-      const start = Math.max(0, index - this.pageSize + 1);
-      body = state.projects.slice(start, start + this.pageSize).map((item) =>
-        `${item.id === this.projectId ? "›" : " "} ${text(item.name)} · #${item.id}`);
-      if (!body.length) body = [state.loading ? "Loading projects…" : "No accessible projects"];
-      footer = `↑↓ choose · Enter select · Esc back · ${index + 1}/${state.projects.length}`;
-    } else if (state.inspectingTask || this.planText) {
-      const lines = state.inspectingTask ? this.taskText(state, inner) :
-        this.planLines(state, inner);
-      this.maxScroll = Math.max(0, lines.length - this.pageSize);
-      this.scroll = Math.min(this.scroll, this.maxScroll);
-      body = lines.slice(this.scroll, this.scroll + this.pageSize);
-      footer = `↑↓/PgUp/PgDn scroll · Esc back · ${this.scroll + 1}/${lines.length}`;
-    } else {
-      const plan = state.plans.find((item) => item.id === state.selectedPlanId);
-      const group = plan ? state.planTasks[plan.id] : undefined;
-      const tasks = group?.tasks ?? [];
-      if (plan) {
-        top.push(this.theme.bold(text(plan.title)), this.theme.fg("dim", counts(state, plan.id)));
-        if (group?.error) top.push(this.theme.fg("warning",
-          `Partial: ${text(group.error.message)}`));
-      }
-      this.pageSize = Math.max(1, room - top.length - 3);
-      const index = Math.max(0, tasks.findIndex((task) => task.id === state.selectedTaskId));
-      const start = Math.max(0, index - this.pageSize + 1);
-      body = tasks.slice(start, start + this.pageSize).map((task) => {
-        const line = `${task.id === state.selectedTaskId ? "›" : " "} ` +
-          `${taskLabel(task)} · ${text(task.priority)} · #${task.id} ${text(task.title)}`;
-        return task.id === state.selectedTaskId ? this.theme.bold(line) : line;
-      });
-      if (!body.length) body = [!plan ? state.availability === "ready" ? "No active plans" : "" :
-        group?.error ? "Task data unavailable" : group?.counts ? "No tasks" : "Loading tasks…"];
-      if (plan && group?.counts) body.push(this.theme.fg("dim",
-        `Plan ${state.plans.indexOf(plan) + 1}/` +
-        `${state.plans.length} · Task ${tasks.length ? index + 1 : 0}/${tasks.length}`));
-      footer = "←→ plans · ↑↓ tasks · Enter task · g goal/context · " +
-        "Tab project · r refresh · Esc close";
+    const index = Math.max(0, state.projects.findIndex((item) => item.id === this.projectId));
+    const start = Math.max(0, index - this.pageSize + 1);
+    const body = state.projects.slice(start, start + this.pageSize).map((item) =>
+      `${item.id === this.projectId ? "›" : " "} ${text(item.name)} · #${item.id}`);
+    if (!body.length) body.push(state.loading ? "Loading projects…" : "No accessible projects");
+    return { body,
+      footer: `↑↓ choose · Enter select · Esc back · ${index + 1}/${state.projects.length}` };
+  }
+
+  /** Scrollable task inspection, or the plan goal and context. */
+  private textView(
+    state: PlanningState, top: string[], room: number, inner: number,
+  ): BrowserView {
+    this.pageSize = Math.max(1, room - top.length - 2);
+    const lines = state.inspectingTask ? this.taskText(state, inner) :
+      this.planLines(state, inner);
+    this.maxScroll = Math.max(0, lines.length - this.pageSize);
+    this.scroll = Math.min(this.scroll, this.maxScroll);
+    return { body: lines.slice(this.scroll, this.scroll + this.pageSize),
+      footer: `↑↓/PgUp/PgDn scroll · Esc back · ${this.scroll + 1}/${lines.length}` };
+  }
+
+  /** Adds the selected plan to `top`; the task list keeps the selected task in view. */
+  private listView(state: PlanningState, top: string[], room: number): BrowserView {
+    const plan = state.plans.find((item) => item.id === state.selectedPlanId);
+    const group = plan ? state.planTasks[plan.id] : undefined;
+    const tasks = group?.tasks ?? [];
+    if (plan) {
+      top.push(this.theme.bold(text(plan.title)), this.theme.fg("dim", counts(state, plan.id)));
+      if (group?.error) top.push(this.theme.fg("warning",
+        `Partial: ${text(group.error.message)}`));
     }
-    const footerLines = wrapTextWithAnsi(this.theme.fg("muted", footer), inner);
-    const budget = Math.max(0, room - Math.min(2, footerLines.length));
-    return box([...top, ...body].slice(0, budget).concat(footerLines.slice(0, room - budget)),
-      width, this.theme).slice(0, height);
+    this.pageSize = Math.max(1, room - top.length - 3);
+    const index = Math.max(0, tasks.findIndex((task) => task.id === state.selectedTaskId));
+    const start = Math.max(0, index - this.pageSize + 1);
+    const body = tasks.slice(start, start + this.pageSize).map((task) => {
+      const line = `${task.id === state.selectedTaskId ? "›" : " "} ` +
+        `${taskLabel(task)} · ${text(task.priority)} · #${task.id} ${text(task.title)}`;
+      return task.id === state.selectedTaskId ? this.theme.bold(line) : line;
+    });
+    if (!body.length) body.push(emptyTaskList(state, plan !== undefined, group));
+    if (plan && group?.counts) body.push(this.theme.fg("dim",
+      `Plan ${state.plans.indexOf(plan) + 1}/` +
+      `${state.plans.length} · Task ${tasks.length ? index + 1 : 0}/${tasks.length}`));
+    return { body, footer: "←→ plans · ↑↓ tasks · Enter task · g goal/context · " +
+      "Tab project · r refresh · Esc close" };
   }
 }
 
@@ -453,13 +500,16 @@ export class PiPlanningView {
     const errors = [state.error, state.detailError,
       ...Object.values(state.planTasks).map((group) => group.error)]
       .flatMap((error) => error ? [text(error.message)] : []);
-    const display = this.browserOpen ? "details" : state.panelEnabled && this.visibility &&
-      state.enabled ? "visible" : "hidden";
     return `Planning panel: ${state.panelEnabled ? "on" : "off"}; ${state.availability}` +
-      `${state.stale ? " (stale)" : ""}; view: ${display}; ` +
+      `${state.stale ? " (stale)" : ""}; view: ${this.display(state)}; ` +
       `project: ${text(project?.name) || "none"}; ` +
       `last success: ${timestamp(state.lastRefresh)}` +
       (errors.length ? `; ${[...new Set(errors)].join(" | ")}` : "");
+  }
+
+  private display(state: PlanningState): string {
+    if (this.browserOpen) return "details";
+    return state.panelEnabled && this.visibility && state.enabled ? "visible" : "hidden";
   }
 
   dispose(): void {

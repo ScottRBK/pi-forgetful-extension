@@ -366,6 +366,56 @@ test("missing detail records close inspection without stopping visible summary r
     assert.equal(controller.state.availability, "ready");
   });
 
+test("failed reads keep, remove or clear plan data according to their error kind",
+  async (t) => {
+    // Arrange: details show the only plan with its six tasks.
+    const { controller, replies, handlers, clock } = await fixture(t);
+    await controller.openDetails();
+    assert.equal(controller.state.planTasks[7].tasks.length, 6);
+
+    // Act: a transient task-list failure.
+    handlers.set("/api/v1/tasks?plan_id=7", (res) => { res.statusCode = 503; res.end("busy"); });
+    await poll(controller, clock);
+
+    // Assert: the last tasks and counts stay, marked as partial.
+    assert.equal(controller.state.planTasks[7].tasks.length, 6);
+    assert.equal(controller.state.planTasks[7].counts?.total, 6);
+    assert.equal(controller.state.planTasks[7].error?.kind, "transient");
+    assert.equal(controller.state.stale, true);
+
+    // Act: the plan record itself is gone.
+    handlers.delete("/api/v1/tasks?plan_id=7");
+    replies.delete("/api/v1/plans/7");
+    await poll(controller, clock);
+
+    // Assert: details drop that plan and its tasks.
+    assert.deepEqual(controller.state.plans, []);
+    assert.equal(controller.state.selectedPlanId, undefined);
+    assert.equal(controller.state.planTasks[7], undefined);
+    assert.equal(controller.state.detailError?.kind, "missing");
+
+    // Act: a task-list read is denied.
+    replies.set("/api/v1/plans/7", { ...plan, goal: null, context: null });
+    handlers.set("/api/v1/tasks?plan_id=7", (res) => {
+      res.statusCode = 403; res.end("revoked");
+    });
+    await poll(controller, clock);
+
+    // Assert: denial stops the whole overview and clears account data.
+    assert.equal(controller.state.availability, "denied");
+    assert.deepEqual(controller.state.projects, []);
+    assert.equal(controller.state.planDetail, undefined);
+
+    // Act: a service without planning routes answers 404 to the project list.
+    handlers.clear();
+    replies.delete("/api/v1/projects");
+    await controller.refresh();
+
+    // Assert: this is reported as unavailable, not as a failed read.
+    assert.equal(controller.state.availability, "unavailable");
+    assert.equal(controller.state.error?.kind, "unavailable");
+  });
+
 test("exact mapping never treats terminal-normalized repository names as an exact match",
   async (t) => {
     const { controller, replies, requests } = await fixture(t);

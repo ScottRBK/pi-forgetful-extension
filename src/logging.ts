@@ -163,30 +163,7 @@ export class FileLogger implements DiagnosticLogger {
       timestamp: new Date().toISOString(), eventId: randomUUID(), level, event,
       sessionId: this.options.sessionId, data,
     })) as Record<string, unknown>;
-    let line = JSON.stringify(row) + "\n";
-    let trace: string[] | undefined;
-    if (level === "debug" && Buffer.byteLength(line) > this.maxEventBytes) {
-      trace = this.traceLines(row, line.slice(0, -1));
-      if (!trace) row.traceUnavailable = "trace_envelope_or_retention_limit";
-    }
-    if (!trace && Buffer.byteLength(line) > this.maxEventBytes) {
-      row.data = correlation(row.data);
-      row.truncated = true;
-      line = JSON.stringify(row) + "\n";
-      if (Buffer.byteLength(line) > this.maxEventBytes) {
-        delete row.data;
-        line = JSON.stringify(row) + "\n";
-      }
-      for (const field of ["event", "sessionId"]) {
-        if (Buffer.byteLength(line) <= this.maxEventBytes) break;
-        row[field] = "[truncated]";
-        line = JSON.stringify(row) + "\n";
-      }
-      if (Buffer.byteLength(line) > this.maxEventBytes) {
-        throw new Error("Log byte limit cannot fit an event envelope");
-      }
-    }
-    const lines = trace ?? [line];
+    const { lines, trace } = this.encode(level, row);
     const bytes = lines.reduce((total, part) => total + Buffer.byteLength(part), 0);
     const pending = level === "debug" ? this.debugPendingBytes : this.pendingBytes;
     const maximum = level === "debug" ? MAX_DEBUG_PENDING_BYTES : MAX_PENDING_BYTES;
@@ -201,33 +178,7 @@ export class FileLogger implements DiagnosticLogger {
     if (level === "debug") this.debugPendingBytes += bytes;
     else this.pendingBytes += bytes;
     const generation = this.generation;
-    this.pending = this.pending.then(async () => {
-      if (generation !== this.generation) return;
-      await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
-      if (generation !== this.generation) return;
-      // Only start a fresh file when otherwise this trace would evict its own first parts.
-      let prune = this.fileCount === 0;
-      if (trace && this.traceFileCount(lines, this.fileBytes) > this.maxFiles) {
-        await this.rotate();
-        prune = true;
-      }
-      for (const part of lines) {
-        if (generation !== this.generation) return;
-        const partBytes = Buffer.byteLength(part);
-        if (this.fileBytes + partBytes > this.maxFileBytes) {
-          await this.rotate();
-          prune = true;
-        }
-        if (generation !== this.generation) return;
-        await appendFile(this.filePath, part, { encoding: "utf8", mode: 0o600 });
-        this.fileBytes += partBytes;
-        this.fileCount = Math.max(1, this.fileCount);
-        if (prune) {
-          await pruneDirectory(this.options.directory, () => generation === this.generation);
-          prune = false;
-        }
-      }
-    }).catch(error => {
+    this.pending = this.pending.then(() => this.write(lines, trace, generation)).catch(error => {
       this.failed = true;
       this.generation++;
       this.warn(error);
@@ -235,6 +186,69 @@ export class FileLogger implements DiagnosticLogger {
       if (level === "debug") this.debugPendingBytes -= bytes;
       else this.pendingBytes -= bytes;
     });
+  }
+
+  /** One JSONL line, or every part of a complete trace for an oversized debug event. */
+  private encode(
+    level: "info" | "debug", row: Record<string, unknown>,
+  ): { lines: string[]; trace: boolean } {
+    const line = JSON.stringify(row) + "\n";
+    if (Buffer.byteLength(line) <= this.maxEventBytes) return { lines: [line], trace: false };
+    if (level === "debug") {
+      const trace = this.traceLines(row, line.slice(0, -1));
+      if (trace) return { lines: trace, trace: true };
+      row.traceUnavailable = "trace_envelope_or_retention_limit";
+    }
+    return { lines: [this.fitLine(row)], trace: false };
+  }
+
+  /** Reduces an oversized row to correlation fields, then to its envelope, within the limit. */
+  private fitLine(row: Record<string, unknown>): string {
+    row.data = correlation(row.data);
+    row.truncated = true;
+    let line = JSON.stringify(row) + "\n";
+    if (Buffer.byteLength(line) > this.maxEventBytes) {
+      delete row.data;
+      line = JSON.stringify(row) + "\n";
+    }
+    for (const field of ["event", "sessionId"]) {
+      if (Buffer.byteLength(line) <= this.maxEventBytes) break;
+      row[field] = "[truncated]";
+      line = JSON.stringify(row) + "\n";
+    }
+    if (Buffer.byteLength(line) > this.maxEventBytes) {
+      throw new Error("Log byte limit cannot fit an event envelope");
+    }
+    return line;
+  }
+
+  /** Appends the parts in order. A newer generation (logging turned off) stops the write. */
+  private async write(lines: string[], trace: boolean, generation: number): Promise<void> {
+    if (generation !== this.generation) return;
+    await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
+    if (generation !== this.generation) return;
+    // Only start a fresh file when otherwise this trace would evict its own first parts.
+    let prune = this.fileCount === 0;
+    if (trace && this.traceFileCount(lines, this.fileBytes) > this.maxFiles) {
+      await this.rotate();
+      prune = true;
+    }
+    for (const part of lines) {
+      if (generation !== this.generation) return;
+      const partBytes = Buffer.byteLength(part);
+      if (this.fileBytes + partBytes > this.maxFileBytes) {
+        await this.rotate();
+        prune = true;
+      }
+      if (generation !== this.generation) return;
+      await appendFile(this.filePath, part, { encoding: "utf8", mode: 0o600 });
+      this.fileBytes += partBytes;
+      this.fileCount = Math.max(1, this.fileCount);
+      if (prune) {
+        await pruneDirectory(this.options.directory, () => generation === this.generation);
+        prune = false;
+      }
+    }
   }
 
   private traceLines(row: Record<string, unknown>, payload: string): string[] | undefined {

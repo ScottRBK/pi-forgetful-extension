@@ -361,6 +361,52 @@ test("oversized Unicode events become marked valid JSONL within the exact byte l
   }
 });
 
+test("an event whose correlation fields alone are too large keeps its envelope", async t => {
+  // Arrange: seven 200-character correlation fields exceed the 600-byte event limit.
+  const directory = await workspace(t);
+  const logger = new FileLogger({ directory, sessionId: "s", level: "info", maxEventBytes: 600 });
+  const ids = Object.fromEntries(["jobId", "branchId", "candidateId", "taskId", "purpose",
+    "kind", "model"].map(key => [key, key[0].repeat(200)]));
+
+  // Act.
+  logger.emit("info", "large.ids", { ...ids, text: "body" });
+  await logger.flush();
+
+  // Assert: the data is dropped, while the event name and session stay readable.
+  const rows = await events(logger.filePath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].event, "large.ids");
+  assert.equal(rows[0].sessionId, "s");
+  assert.equal(rows[0].truncated, true);
+  assert.ok(!("data" in rows[0]));
+});
+
+test("a trace starts a fresh file when the current file would push out its first parts",
+  async t => {
+    // Arrange: the current file is half full before a trace that needs all three files.
+    const directory = await workspace(t);
+    const logger = new FileLogger({ directory, sessionId: "s", level: "debug",
+      maxEventBytes: 900, maxFileBytes: 10_000 });
+    for (let index = 0; index < 6; index++) {
+      logger.emit("info", "filler", { text: "f".repeat(600) });
+    }
+    const context = "x".repeat(18_000);
+
+    // Act.
+    logger.emit("debug", "model.request", { context });
+    await logger.flush();
+
+    // Assert: every trace part is still retained, so the record can be rebuilt.
+    const parts = (await Promise.all((await readdir(directory))
+      .map(name => events(join(directory, name))))).flat()
+      .filter(row => row.event === "diagnostic.trace_chunk");
+    assert.ok(parts.length > 0);
+    assert.equal(parts.length, parts[0].trace.total);
+    const restored = JSON.parse(parts.sort((a, b) => a.trace.index - b.trace.index)
+      .map(row => row.trace.chunk).join(""));
+    assert.equal(restored.data.context, context);
+  });
+
 test("rotation retains only the newest three files and respects UTF8 file byte limits", async t => {
   // Arrange.
   const directory = await workspace(t);

@@ -2970,42 +2970,52 @@ export function createForgetfulExtension(
       return "";
     };
 
-    const handleStatusCommand = async (
+    /** Status can inspect the repository link even before a model is configured. */
+    const refreshStatusProject = async (
       ctx: ExtensionContext,
       runtime: Runtime,
     ): Promise<void> => {
-      // Status can inspect the repository link even before a model is configured.
-      if (!runtime.context.project && runtime.client) {
-        const context = await discoverWorkContext(pi, ctx, runtime.branchId);
-        if (context.repoName) {
-          const enriched = await enrichRuntimeContext(
-            { ...context, projectDiscoveryPending: true }, runtime.client,
-            runtime.lifecycleController.signal,
-          );
-          if (isCurrentRuntime(runtime, ctx) && !enriched.projectDiscoveryPending) {
-            runtime.context = enriched;
-            await refreshQueueNotice(runtime, ctx);
-          }
-        }
+      if (runtime.context.project || !runtime.client) return;
+      const context = await discoverWorkContext(pi, ctx, runtime.branchId);
+      if (!context.repoName) return;
+      const enriched = await enrichRuntimeContext(
+        { ...context, projectDiscoveryPending: true }, runtime.client,
+        runtime.lifecycleController.signal,
+      );
+      if (isCurrentRuntime(runtime, ctx) && !enriched.projectDiscoveryPending) {
+        runtime.context = enriched;
+        await refreshQueueNotice(runtime, ctx);
       }
-      let uncertainText = "";
+    };
+
+    const uncertainSaveStatus = async (runtime: Runtime): Promise<string> => {
       try {
         const pending = await runtime.queue.listJobMetadata();
         const conflicts = await runtime.queue.pendingConflicts();
         const uncertain = [...pending, ...conflicts].filter((item) => item.uncertainWrite);
-        if (uncertain.length > 0)
-          uncertainText = `; uncertain saves ${uncertain.length} (automatic retry paused)`;
+        return uncertain.length > 0
+          ? `; uncertain saves ${uncertain.length} (automatic retry paused)`
+          : "";
       } catch (error) {
-        uncertainText = "; uncertain saves unavailable";
         runtime.logger.emit("debug", "status.queue_unavailable", {
           error: boundedErrorDiagnostic(error),
         });
+        return "; uncertain saves unavailable";
       }
+    };
+
+    const handleStatusCommand = async (
+      ctx: ExtensionContext,
+      runtime: Runtime,
+    ): Promise<void> => {
+      await refreshStatusProject(ctx, runtime);
+      const uncertainText = await uncertainSaveStatus(runtime);
       const conflictText = await pendingConflictStatus(ctx, runtime);
       const diagnosticText = await captureDiagnosticStatus(runtime);
       const recallText = runtime.lastRecall
         ? `; last recall ${recallActivitySummary(runtime.lastRecall)}`
         : "";
+      const planningText = runtime.planning ? `; ${runtime.planning.status()}` : "";
       notify(
         ctx,
         `Forgetful ${runtime.config.enabled ? "on" : "off"}; ` +
@@ -3018,8 +3028,7 @@ export function createForgetfulExtension(
               : "unresolved (run /forgetful project init)"
           }; ` +
           `model ${modelToString(runtime.config.model) ?? "not configured"}` +
-          `${recallText}${conflictText}${diagnosticText}${uncertainText}` +
-          `${runtime.planning ? `; ${runtime.planning.status()}` : ""}.`,
+          `${recallText}${conflictText}${diagnosticText}${uncertainText}${planningText}.`,
       );
       for (const warning of runtime.config.warnings.slice(0, 4))
         notify(ctx, warning, "warning");

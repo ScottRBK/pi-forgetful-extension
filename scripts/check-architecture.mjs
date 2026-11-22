@@ -24,12 +24,12 @@ if (result.error || result.status !== 0) {
 const graph = JSON.parse(result.stdout);
 // Match exact edges AND import kinds. Upstream baselines only match endpoints for direct edges.
 // In particular, an exception for a logger type must not also permit its runtime implementation.
+const importKinds = (item) =>
+  JSON.stringify(item.dependencyTypes.toSorted((left, right) => left.localeCompare(right)));
 const reviewed = (item) => exceptions.some((exception) =>
   item.type === "dependency" && exception.type === "dependency" &&
   item.rule.name === exception.rule.name && item.from === exception.from &&
-  item.to === exception.to &&
-  JSON.stringify([...item.dependencyTypes].sort()) ===
-    JSON.stringify([...exception.dependencyTypes].sort()));
+  item.to === exception.to && importKinds(item) === importKinds(exception));
 const errors = graph.summary.violations.filter((item) => item.rule.severity === "error");
 const violations = errors.filter((item) => !reviewed(item));
 const reviewedCount = errors.length - violations.length;

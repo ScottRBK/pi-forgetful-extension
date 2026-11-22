@@ -12,8 +12,8 @@ export const legacy = {
   local: ["queue", "source-inspection", "config", "logging"],
 };
 
-export const exact = (paths) => `^(?:${paths.map((path) =>
-  path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`;
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+export const exact = (paths) => `^(?:${paths.map(escapeRegExp).join("|")})$`;
 export const legacyPaths = (...roles) => roles.flatMap((role) =>
   legacy[role].map((name) => `src/${name}.ts`));
 export const legacyPattern = (...roles) => exact(legacyPaths(...roles));
@@ -28,5 +28,5 @@ export const productionRoles = {
   pi: "^src/adapters/pi/",
   forgetful: "^src/adapters/forgetful/",
   local: "^src/adapters/local/",
-  composition: "^(?:index\\.ts$|src/extension\\.ts$|src/bootstrap/)",
+  composition: String.raw`^(?:index\.ts$|src/extension\.ts$|src/bootstrap/)`,
 };
