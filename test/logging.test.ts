@@ -22,6 +22,150 @@ async function events(file: string) {
   return (await readFile(file, "utf8")).trim().split("\n").map(line => JSON.parse(line));
 }
 
+test("debug saves a complete large trace without exposing credentials", async t => {
+  // Arrange: both the start and tail must survive beyond a single JSONL event.
+  const directory = await workspace(t);
+  const logger = new FileLogger({ directory, sessionId: "trace-session", level: "debug" });
+  const evidence = `SOURCE START ${"🌍\\n\"".repeat(70_000)} SOURCE END`;
+
+  // Act.
+  logger.emit("debug", "capture.snapshot", {
+    jobId: "trace-job", branchId: "trace-branch", entries: [{ id: "source", text: evidence }],
+    password: "private-trace-password", headers: { authorization: "private-trace-header" },
+  });
+  await logger.flush();
+
+  // Assert: decode the documented JSONL trace format, not logger internals.
+  const text = await readFile(logger.filePath, "utf8");
+  const parts = await events(logger.filePath);
+  assert.ok(parts.length > 1);
+  assert.ok(parts.every(row => row.event === "diagnostic.trace_chunk"));
+  assert.ok(parts.every(row => row.sessionId === "trace-session"));
+  assert.ok(parts.every(row => row.data.jobId === "trace-job"));
+  assert.ok(parts.every(row => row.trace.version === 1));
+  assert.ok(parts.every(row => row.trace.total === parts.length));
+  assert.equal(new Set(parts.map(row => row.trace.id)).size, 1);
+  const payload = parts.sort((a, b) => a.trace.index - b.trace.index)
+    .map(row => row.trace.chunk).join("");
+  assert.equal(Buffer.byteLength(payload), parts[0].trace.bytes);
+  const restored = JSON.parse(payload);
+  assert.equal(restored.event, "capture.snapshot");
+  assert.equal(restored.data.entries[0].text, evidence);
+  assert.equal(restored.data.password, "[redacted]");
+  assert.ok(!("headers" in restored.data));
+  assert.doesNotMatch(text, /private-trace-password|private-trace-header/);
+  for (const line of text.trimEnd().split("\n")) {
+    assert.ok(Buffer.byteLength(line + "\n") <= 256 * 1024);
+  }
+});
+
+test("successive complete traces share retained files instead of evicting each other early",
+  async t => {
+    // Arrange: all four records fit within the existing three-file retention.
+    const directory = await workspace(t);
+    const logger = new FileLogger({ directory, sessionId: "s", level: "debug",
+      maxEventBytes: 900, maxFileBytes: 10_000 });
+
+    // Act.
+    for (let index = 0; index < 4; index++) {
+      logger.emit("debug", "model.request", { index, context: "x".repeat(1_500) });
+    }
+    await logger.flush();
+
+    // Assert at the retained JSONL boundary, including traces split across rotations.
+    const parts = (await Promise.all((await readdir(directory))
+      .map(name => events(join(directory, name))))).flat();
+    const groups = new Map<string, any[]>();
+    for (const part of parts) {
+      assert.equal(part.event, "diagnostic.trace_chunk");
+      const group = groups.get(part.trace.id) ?? [];
+      group.push(part);
+      groups.set(part.trace.id, group);
+    }
+    assert.equal(groups.size, 4);
+    const indices = [];
+    for (const group of groups.values()) {
+      assert.equal(group.length, group[0].trace.total);
+      const restored = JSON.parse(group.sort((a, b) => a.trace.index - b.trace.index)
+        .map(row => row.trace.chunk).join(""));
+      indices.push(restored.data.index);
+      assert.equal(restored.data.context.length, 1_500);
+    }
+    assert.deepEqual(indices.sort(), [0, 1, 2, 3]);
+  });
+
+test("new trace files and log directories are private to their owner", async t => {
+  // Arrange.
+  const directory = join(await workspace(t), "private-logs");
+  const logger = new FileLogger({ directory, sessionId: "s", level: "debug" });
+
+  // Act.
+  logger.emit("debug", "capture.snapshot", { entries: "private source evidence" });
+  await logger.flush();
+
+  // Assert: full conversations must not depend on the caller's default umask for privacy.
+  assert.equal((await stat(logger.filePath)).mode & 0o777, 0o600);
+  assert.equal((await stat(directory)).mode & 0o777, 0o700);
+});
+
+test("debug overflow leaves a gap notice without taking the info queue", async t => {
+  // Arrange: exceed the bounded debug queue in one synchronous burst.
+  const directory = await workspace(t);
+  const warnings: unknown[] = [];
+  const logger = new FileLogger({ directory, sessionId: "s", level: "debug",
+    onError: error => warnings.push(error) });
+
+  // Act.
+  for (let index = 0; index < 80; index++) {
+    logger.emit("debug", "model.request", { jobId: "burst-job", context: "x".repeat(220_000) });
+  }
+  logger.emit("info", "capture.completed", { jobId: "burst-job", status: "saved" });
+  await logger.flush();
+
+  // Assert: missing detail is explicit, and lifecycle outcomes still have their own queue.
+  const rows = (await Promise.all((await readdir(directory))
+    .map(name => events(join(directory, name))))).flat();
+  const dropped = rows.find(row => row.event === "diagnostic.dropped");
+  assert.equal(dropped.data.originalEvent, "model.request");
+  assert.equal(dropped.data.reason, "debug_pending_queue_full");
+  assert.equal(dropped.data.jobId, "burst-job");
+  assert.equal(rows.find(row => row.event === "capture.completed").data.status, "saved");
+  assert.equal(warnings.length, 1);
+});
+
+test("off discards every queued part of a large debug trace", async t => {
+  // Arrange.
+  const root = await workspace(t);
+  const logger = new FileLogger({ directory: join(root, "logs"), sessionId: "s", level: "debug" });
+
+  // Act.
+  logger.emit("debug", "model.request", { context: "x".repeat(600_000) });
+  logger.setLevel("off");
+  await logger.flush();
+
+  // Assert.
+  assert.deepEqual(await readdir(root), []);
+});
+
+test("a trace larger than retained capacity is explicitly incomplete, not partially accepted",
+  async t => {
+    // Arrange: envelopes fit, but the complete logical record cannot survive these tiny files.
+    const directory = await workspace(t);
+    const logger = new FileLogger({ directory, sessionId: "s", level: "debug",
+      maxEventBytes: 800, maxFileBytes: 1_000, maxFiles: 2 });
+
+    // Act.
+    logger.emit("debug", "model.request", { jobId: "too-large", context: "x".repeat(5_000) });
+    await logger.flush();
+
+    // Assert.
+    const [row] = await events(logger.filePath);
+    assert.equal(row.event, "model.request");
+    assert.equal(row.truncated, true);
+    assert.equal(row.traceUnavailable, "trace_envelope_or_retention_limit");
+    assert.equal(row.data.jobId, "too-large");
+  });
+
 test("off never creates the logging directory", async t => {
   // Arrange.
   const root = await workspace(t);
@@ -507,4 +651,24 @@ test("retired writers are pruned in the same process without deleting active log
   await last!.flush();
   assert.equal(await readFile(last!.filePath, "utf8"), before);
   await active.close();
+});
+
+test("repeated diagnostics keep independent event identities for trace-aware readers", async t => {
+  // Arrange: repeated real work must not look like duplicate imports, even on one clock tick.
+  const directory = await workspace(t);
+  const logger = new FileLogger({ directory, sessionId: "s", level: "debug" });
+
+  // Act.
+  logger.emit("debug", "model.tool_call", { jobId: "job", toolCall: { id: "reused" } });
+  logger.emit("debug", "model.tool_call", { jobId: "job", toolCall: { id: "reused" } });
+  await logger.flush();
+
+  // Assert at the saved JSONL boundary; source identities differ despite equal event/data.
+  const rows = await events(logger.filePath);
+  assert.equal(rows.length, 2);
+  assert.equal(new Set(rows.map(row => row.eventId)).size, 2);
+  for (const row of rows) {
+    assert.match(row.eventId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  }
 });

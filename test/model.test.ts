@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileLogger } from "../src/logging.ts";
@@ -11,6 +11,7 @@ import {
   type ModelRegistryPort,
 } from "../src/model.ts";
 import type { ModelSubmissionTool } from "../src/contracts.ts";
+import { logicalLogRows, savedLogText } from "./log-helpers.ts";
 
 const selectedModel = {
   provider: "fake",
@@ -18,6 +19,151 @@ const selectedModel = {
   contextWindow: 200_000,
   maxTokens: 16_384,
 } as unknown as Model<any>;
+
+test("model saved traces retain full context and submitted payload tails", async (t) => {
+  // Arrange.
+  const directory = await mkdtemp(join(tmpdir(), "model-full-log-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const logger = new FileLogger({ directory, sessionId: "full-session", level: "debug" });
+  const registry: ModelRegistryPort = {
+    find: () => selectedModel,
+    complete: async () => resultResponse({ ok: true,
+      detail: "r".repeat(300_000) + "RESPONSE_END" }),
+  };
+  const model = new PiMemoryModel(registry, selectedModel, { logger });
+
+  // Act.
+  await model.complete({ purpose: "capture", policy: "Full trace", submission: resultSubmission(),
+    input: "c".repeat(70_000) + "CONTEXT_END" });
+  await logger.flush();
+
+  // Assert at the saved boundary, using independent tail literals.
+  const text = await savedLogText(logger.filePath);
+  assert.match(text, /diagnostic.trace_chunk/);
+  const rows = logicalLogRows(text);
+  const context = rows.find(row => row.event === "model.request").data.context;
+  assert.match(context.messages[0].content, /CONTEXT_END$/);
+  const raw = rows.find(row => row.event === "model.response").data.response;
+  assert.match(raw.content[0].arguments.detail, /RESPONSE_END$/);
+  assert.match(rows.find(row => row.event === "model.parsed").data.result.detail, /RESPONSE_END$/);
+});
+
+test("saved diagnostics identify each private task without changing caller or provider input",
+  async (t) => {
+    // Arrange: all calls deliberately reuse the same request and correlation.
+    const directory = await mkdtemp(join(tmpdir(), "model-task-log-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const logger = new FileLogger({ directory, sessionId: "task-session", level: "debug" });
+    const contexts: unknown[] = [];
+    let calls = 0;
+    const registry: ModelRegistryPort = {
+      find: () => selectedModel,
+      complete: async (_model, context) => {
+        contexts.push(structuredClone(context));
+        if (!context.tools?.length) return response("Historical summary with source boundaries.");
+        return ++calls % 2 === 1 ? response("Please retry") : resultResponse();
+      },
+    };
+    const model = new PiMemoryModel(registry, selectedModel, { logger, contextLimitTokens: 8_000,
+      compactionSettings: { enabled: true, reserveTokens: 1_200, keepRecentTokens: 1_200 } });
+    const request = { purpose: "capture" as const, policy: "Policy", input: { fact: "Fact" },
+      conversation: Array.from({ length: 35 }, (_, index) => ({ id: `source-${index}`,
+        text: "Historical discussion. ".repeat(100) })),
+      onConversationCompacted: async () => {},
+      submission: resultSubmission(), diagnosticContext: {
+        jobId: "same-job", candidateId: "same-candidate", branchId: "same-branch",
+      } };
+    const original = { ...request.diagnosticContext };
+
+    // Act.
+    await model.prepareCapture(request);
+    await model.complete(request);
+    await model.prepareCapture(request);
+    await model.complete(request);
+    await logger.flush();
+
+    // Assert: each public task owns a UUID, including attempts and correction continuations.
+    const rows = logicalLogRows(await savedLogText(logger.filePath));
+    const starts = rows.filter(row => /model\.(started|preparation_started)$/.test(row.event));
+    const ids = starts.map(row => row.data.taskId);
+    assert.equal(new Set(ids).size, 4);
+    for (const id of ids) {
+      assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      assert.doesNotMatch(JSON.stringify(contexts), new RegExp(id));
+    }
+    let current: string | undefined;
+    for (const row of rows) {
+      if (starts.includes(row)) current = row.data.taskId;
+      assert.equal(row.data.taskId, current);
+      assert.equal(row.data.jobId, "same-job");
+    }
+    assert.deepEqual(request.diagnosticContext, original);
+    const attempts = rows.filter(row => row.event === "model.attempt");
+    assert.equal(attempts.filter(row => row.data.kind === "task").length, 4);
+    assert.ok(attempts.some(row => row.data.kind === "compaction"));
+  });
+
+for (const outcome of ["success", "error", "interrupted"] as const) {
+  test(`saved read-tool ${outcome} traces survive before the next provider call`, async (t) => {
+    // Arrange: a completed read is followed by preparation failure, or cancelled in flight.
+    const directory = await mkdtemp(join(tmpdir(), "model-tool-log-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const logger = new FileLogger({ directory, sessionId: "read-session", level: "debug" });
+    const controller = new AbortController();
+    let callSavedBeforeExecution = false;
+    const registry: ModelRegistryPort = {
+      find: () => selectedModel,
+      complete: async () => toolResponse([{ id: "read-17", name: "read_source",
+        arguments: { query: "Known query", password: "private-call-secret" } }]),
+    };
+    const model = new PiMemoryModel(registry, selectedModel, { logger });
+
+    // Act: no second provider request can incidentally save these tool results.
+    await assert.rejects(model.complete({ purpose: "capture", policy: "Read", input: {},
+      signal: controller.signal, submission: resultSubmission(),
+      readBatchContext: () => { throw new Error("Preparation stopped after read"); },
+      readTools: [{ name: "read_source", description: "Read source",
+        parameters: { type: "object", properties: { query: { type: "string" },
+          password: { type: "string" } }, required: ["query"] },
+        execute: async () => {
+          await logger.flush();
+          callSavedBeforeExecution = logicalLogRows(await savedLogText(logger.filePath))
+            .some(row => row.event === "model.tool_call" && row.data.toolCall.id === "read-17");
+          if (outcome === "interrupted") {
+            controller.abort();
+            throw new Error("Read interrupted");
+          }
+          if (outcome === "error") throw new Error("Original read failure: READ_ERROR_END");
+          return { source: "s".repeat(70_000) + "READ_RESULT_END" };
+        } }],
+    }));
+    await logger.flush();
+
+    // Assert: actual paired message fields, sanitized call, and no invented cancellation receipt.
+    const text = await savedLogText(logger.filePath);
+    const rows = logicalLogRows(text);
+    const call = rows.find(row => row.event === "model.tool_call");
+    assert.equal(callSavedBeforeExecution, true);
+    assert.ok(call, "invocation must be saved before execution");
+    assert.equal(call.data.toolCall.id, "read-17");
+    assert.equal(call.data.toolCall.name, "read_source");
+    assert.equal(call.data.toolCall.arguments.query, "Known query");
+    assert.doesNotMatch(text, /private-call-secret/);
+    const results = rows.filter(row => row.event === "model.tool_result");
+    assert.equal(results.length, outcome === "interrupted" ? 0 : 1);
+    if (outcome !== "interrupted") {
+      const result = results[0].data.result;
+      assert.equal(result.role, "toolResult");
+      assert.equal(result.toolCallId, "read-17");
+      assert.equal(result.toolName, "read_source");
+      assert.equal(result.isError, outcome === "error");
+      assert.match(result.content[0].text,
+        outcome === "error" ? /Original read failure: READ_ERROR_END/ : /READ_RESULT_END/);
+      assert.equal(results[0].data.taskId, call.data.taskId);
+    }
+    assert.equal(rows.filter(row => row.event === "model.request").length, 1);
+  });
+}
 
 for (const level of ["debug", "info", "off"] as const) {
   test(`model ${level} file records SDK attempts without credentials`, async (t) => {
@@ -30,7 +176,8 @@ for (const level of ["debug", "info", "off"] as const) {
       find: () => selectedModel,
       complete: async (_model, context) => {
         contexts.push(structuredClone(context));
-        return resultResponse({ ok: true, password: "private-response-secret" });
+        return resultResponse({ ok: true, password: "private-response-secret",
+          detail: "r".repeat(300_000) + "GATED_RESPONSE_END" });
       },
     };
     const model = new PiMemoryModel(registry, selectedModel, {
@@ -40,21 +187,22 @@ for (const level of ["debug", "info", "off"] as const) {
 
     // Act.
     await model.complete({
-      purpose: "capture", policy: "Capture policy", input: { text: "Capture this decision" },
+      purpose: "capture", policy: "Capture policy",
+      input: { text: "Capture this decision " + "c".repeat(70_000) + "GATED_CONTEXT_END" },
       diagnosticContext: { sessionId: "session-log", branchId: "branch-log", jobId: "job-log" },
       submission: resultSubmission(),
     });
     await logger.flush();
 
     // Assert at the real file boundary, including absence when disabled.
-    const text = await readFile(logger.filePath, "utf8").catch((error) => {
+    const text = await savedLogText(logger.filePath).catch((error) => {
       if (level === "off" && error.code === "ENOENT") return "";
       throw error;
     });
     assert.doesNotMatch(text, /private-response-secret|private-header-secret|transformHeaders/);
     assert.doesNotMatch(JSON.stringify(contexts), /job-log|branch-log|diagnosticContext/);
     if (level === "off") return assert.equal(text, "");
-    const events = text.trim().split("\n").map((line) => JSON.parse(line));
+    const events = logicalLogRows(text);
     const completed = events.find((entry) => entry.event === "model.completed");
     assert.equal(completed.data.purpose, "capture");
     assert.equal(completed.data.model, "fake/memory-model");
@@ -62,13 +210,14 @@ for (const level of ["debug", "info", "off"] as const) {
     assert.ok(completed.data.elapsedMs >= 0);
     if (level === "info") {
       assert.ok(events.every((entry) => entry.level === "info"));
-      assert.doesNotMatch(text, /Capture this decision|Capture policy/);
+      assert.doesNotMatch(text, /Capture this decision|Capture policy|GATED_RESPONSE_END/);
     } else {
       assert.deepEqual(events.find((entry) => entry.event === "model.request").data.context,
         contexts[0]);
       const raw = events.find((entry) => entry.event === "model.response");
       assert.match(JSON.stringify(raw.data.response), /submit_result/);
       assert.match(JSON.stringify(raw.data.response), /redacted/);
+      assert.match(raw.data.response.content[0].arguments.detail, /GATED_RESPONSE_END$/);
     }
   });
 }
@@ -167,7 +316,7 @@ test("model file retains rejected submissions and provider failure by attempt", 
   await logger.flush();
 
   // Assert: the corrected SDK context and original rejected output both survive in the file.
-  const text = await readFile(logger.filePath, "utf8");
+  const text = await savedLogText(logger.filePath);
   const events = text.trim().split("\n").map((line) => JSON.parse(line));
   const requests = events.filter((entry) => entry.event === "model.request");
   assert.equal(requests.length, 2);
@@ -186,30 +335,31 @@ test("model file retains rejected submissions and provider failure by attempt", 
   assert.doesNotMatch(JSON.stringify(info), /Unsupported claim|Provider offline|requires a source/);
 });
 
-test("large SDK output is accepted while diagnostic previews stay bounded", async (t) => {
+test("large SDK output is accepted and saved in full without emitter previews", async (t) => {
   // Arrange: model capacity, not diagnostic size, governs usable responses.
   const directory = await mkdtemp(join(tmpdir(), "model-large-log-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const logger = new FileLogger({ directory, sessionId: "session", level: "debug" });
   const model = new PiMemoryModel({ find: () => selectedModel,
     complete: async () => resultResponse({ ok: true, body: `oversized-raw-response ${
-      "x".repeat(200_000)}` }),
+      "x".repeat(200_000)} RAW_OUTPUT_END` }),
   }, selectedModel, { logger });
 
   // Act.
   const result = await model.complete({ purpose: "capture", policy: "policy", input: {},
     diagnosticContext: { jobId: "large-job" }, submission: resultSubmission() });
-  assert.deepEqual(result, { ok: true, body: `oversized-raw-response ${"x".repeat(200_000)}` });
+  assert.match((result as any).body, /^oversized-raw-response /);
+  assert.match((result as any).body, /RAW_OUTPUT_END$/);
   await logger.flush();
 
-  // Assert: logger truncation must not discard the job ID and all response detail.
-  const lines = (await readFile(logger.filePath, "utf8")).trim().split("\n");
-  const raw = lines.map((line) => JSON.parse(line))
+  // Assert: bounded saved rows retain the job ID and the complete response.
+  const lines = (await savedLogText(logger.filePath)).trim().split("\n");
+  const raw = logicalLogRows(lines.join("\n"))
     .find((entry) => entry.event === "model.response");
   assert.equal(raw.data?.jobId, "large-job");
-  assert.equal(raw.data.response.truncated, true);
-  assert.match(raw.data.response.preview, /oversized-raw-response/);
-  assert.ok(lines.every((line) => Buffer.byteLength(line + "\n") <= 64 * 1024));
+  assert.match(raw.data.response.content[0].arguments.body, /^oversized-raw-response /);
+  assert.match(raw.data.response.content[0].arguments.body, /RAW_OUTPUT_END$/);
+  assert.ok(lines.every((line) => Buffer.byteLength(line + "\n") <= 256 * 1024));
 });
 
 test("throwing diagnostic sink cannot change the model result", async (t) => {
@@ -235,7 +385,7 @@ test("throwing diagnostic sink cannot change the model result", async (t) => {
 
   // Assert.
   assert.deepEqual(result, { ok: true });
-  assert.match(await readFile(logger.filePath, "utf8"), /model.completed/);
+  assert.match(await savedLogText(logger.filePath), /model.completed/);
 });
 
 test("memory model sends a bounded request and accepts a submission tool call", async () => {

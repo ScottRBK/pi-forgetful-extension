@@ -282,25 +282,52 @@ Project settings cannot override the log directory. Omit `log_directory` to rest
 Restart Pi or use `/reload` after editing the setting. Existing project-local logs are not moved
 or deleted automatically; older running sessions keep their original log location until reloaded.
 Events include timestamps, levels, session IDs, and relevant branch, job, candidate, and memory IDs.
+Top-level `sessionId` identifies the writing runtime. When a resumed job belongs to an older
+conversation, `data.sessionId` identifies that source conversation. Readers should attribute the
+work to that source ID while keeping the runtime ID visible; they are not conflicting identities.
 Info records progress and outcomes without transcript or model payload bodies. Debug additionally
 records capture evidence snapshots, accepted/rejected candidates and their cited entries, overlap
 decisions, and model requests/responses before parsing or validation can discard them.
-Cited entries use short previews; active capture snapshots retain original source evidence.
-Large content fields may also use previews with their own `truncated` marker.
+Debug keeps complete cited entries, capture snapshots, candidates, decisions and model payloads
+within the retention and queue limits below. Large debug records use numbered trace parts rather
+than content previews. Older logs can still contain `truncated` preview fields; their missing
+content cannot be recovered. Install the updated extension code and reload existing Pi sessions
+to activate this format; changing the logging setting on older code is not enough.
 
 Capture debug events can contain the full active conversation, including earlier discussion.
-Model requests show the actual SDK context; transport/authentication options and
-headers are excluded. Debug logs can still contain private conversations and source code. Known
+Model requests show the SDK context passed to completion, after known-secret redaction. This is
+not a byte-for-byte replay of provider wire requests. Transport/authentication options and headers
+are excluded. Each logical event has an `eventId`: real repeated work remains distinct from
+imported copies even when timestamps and payloads match. A unique `taskId` links each private
+task's requests, responses, read-tool calls,
+read-tool results and validation failures. Tool results are saved as soon as they return, even if
+there is no later model request. An interrupted tool can have a call without a result; that is not
+proof of completion. Debug logs can still contain private conversations and source code. Known
 secrets are redacted, but this cannot detect every secret. Do not commit or share logs unreviewed.
 If you explicitly choose a log directory inside a repository, ensure Git ignores it.
 Older versions wrote logs to `<working-directory>/.pi/forgetful/logs/`; this repository ignores
 `.pi/`, but check other repositories for old logs before committing.
 
-Files rotate at 5 MiB, retaining the current file and two archives per writer. Individual events
-are limited to 256 KiB; oversized bodies are omitted with `truncated: true`, retaining correlation
-IDs when they fit. Pending writes are capped at 1 MiB; excess events are dropped with a warning.
-On initial writes and rotation, old files from closed local writers and exited processes are pruned
-toward 60 files or 100 MiB total. This is a soft limit: active or unknown writers are preserved.
+Files rotate at 5 MiB, retaining the current file and two archives per writer. JSONL lines remain
+limited to 256 KiB. An oversized debug record is split into `diagnostic.trace_chunk` lines. Each
+part has a `trace` object with `version: 1`, an `id`, zero-based `index`, `total`, original `event`,
+UTF-8 payload `bytes`, and a `chunk` string. Join all chunk strings in index order, then parse that
+JSON to recover the original redacted event. Readers must match part headers, reject conflicting
+parts and verify the complete part count and UTF-8 byte length before presenting a complete event.
+Parts can span rotated files; import all retained files. Missing parts mean incomplete evidence.
+
+A complete trace must fit the writer's retained files. If it cannot fit, or configured line limits
+cannot fit trace envelopes, a bounded `truncated: true` event with `traceUnavailable` is saved when
+possible. Other oversized info events also omit bodies and retain correlation IDs when they fit.
+Pending info writes remain capped at 1 MiB; debug has a separate 16 MiB queue. Excess events are
+dropped with a warning. A dropped debug event also produces a best-effort `diagnostic.dropped`
+notice in the info queue. Disk failure, cancellation, queue pressure and later rotation can still
+leave gaps: full trace logging is not an unlimited archive.
+
+New log files use owner-only permissions (`0600`); newly created log directories use `0700`.
+Existing files and directories are not changed. On initial writes and rotation, old files from
+closed local writers and exited processes are pruned toward 60 files or 100 MiB total. This is a
+soft limit: active or unknown writers are preserved.
 
 Logging errors produce one warning per writer and never stop memory work. A filesystem error
 stops that writer; fix the filesystem problem and run `/reload` to restart it. Switching logging off
@@ -310,10 +337,11 @@ operation may finish later. Closed writers become eligible for cleanup after the
 finishes.
 Abrupt process termination can lose the final events.
 
-To inspect rejected candidates with `jq` (if installed):
+To inspect rejected-candidate records and their raw trace parts with `jq` (if installed):
 
 ```bash
-jq 'select(.event == "capture.candidate_rejected")' ~/.pi/agent/forgetful/logs/*.jsonl*
+jq 'select(.event == "capture.candidate_rejected" or
+  .trace.event == "capture.candidate_rejected")' ~/.pi/agent/forgetful/logs/*.jsonl*
 ```
 
 ### Recall and capture feedback

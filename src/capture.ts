@@ -1377,19 +1377,6 @@ export class CaptureService {
     try {
       if (!this.logger) return;
       const safe = sanitizeValue(data) as Record<string, unknown>;
-      const keys = ["entries", "candidate", "outcome", "response", "decision"]
-        .filter((key) => safe[key] !== undefined);
-      const limit = Math.floor(60_000 / Math.max(1, keys.length));
-      // Bound content separately so truncation preserves correlation and exact rejection reasons.
-      for (const key of keys) {
-        const json = JSON.stringify(safe[key]);
-        if (Buffer.byteLength(json) <= limit) continue;
-        let preview = json;
-        do {
-          preview = preview.slice(0, Math.floor(preview.length * 0.75));
-        } while (Buffer.byteLength(JSON.stringify(preview)) > limit - 100);
-        safe[key] = { truncated: true, preview };
-      }
       this.logger.emit(level, `capture.${event}`, safe);
     } catch {
       // Diagnostics are optional and must never change capture or its durable checkpoints.
@@ -3020,9 +3007,7 @@ export class CaptureService {
           ...this.correlation(currentJob, candidateId), reason,
           entries: ids.map((id) => {
             const entry = currentJob.snapshot.entries.find((value) => value.id === id);
-            return entry
-              ? { ...entry, text: entry.text.slice(0, 256), truncated: entry.text.length > 256 }
-              : { id, missing: true };
+            return entry ? { ...entry } : { id, missing: true };
           }),
           candidate: raw,
         });

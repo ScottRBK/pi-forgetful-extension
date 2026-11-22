@@ -14,7 +14,7 @@ Mode: exclude.
 Saved detector version: 2.
 Test paths: `scripts/forgetful-test-server.py`, `test`.
 Keep paths: none.
-Calls removed by test filtering: 796. Type relationships removed: 194.
+Calls removed by test filtering: 801. Type relationships removed: 194.
 
 - `scripts/forgetful-test-server.py`: 4 source occurrences (test-path).
 - `test/async-recall-pi-integration.test.ts`: 16 source occurrences (test-path).
@@ -81,12 +81,13 @@ Calls removed by test filtering: 796. Type relationships removed: 194.
 - `test/live-context-quality.test.ts`: 16 source occurrences (test-path).
 - `test/live-memory-quality.test.ts`: 9 source occurrences (test-path).
 - `test/live-recall-submission.test.ts`: 17 source occurrences (test-path).
+- `test/log-helpers.ts`: 3 source occurrences (test-path).
 - `test/logging.test.ts`: 3 source occurrences (test-path).
 - `test/model-budget.test.ts`: 5 source occurrences (test-path).
 - `test/model-context.test.ts`: 21 source occurrences (test-path).
 - `test/model-read-tools.test.ts`: 8 source occurrences (test-path).
 - `test/model.test.ts`: 8 source occurrences (test-path).
-- `test/pi-integration.test.ts`: 8 source occurrences (test-path).
+- `test/pi-integration.test.ts`: 9 source occurrences (test-path).
 - `test/pi-tool-session.ts`: 6 source occurrences (test-path).
 - `test/planning-api.test.ts`: 3 source occurrences (test-path).
 - `test/planning-integration.test.ts`: 3 source occurrences (test-path).
@@ -2243,11 +2244,14 @@ classDiagram
         -fileBytes: unknown
         -fileCount: unknown
         -pendingBytes: unknown
+        -debugPendingBytes: unknown
         constructor(options: Type225) unknown
         -options: Type225
         setLevel(level: FileLogLevel) void
         emit(level: Type71, event: string, data: Type9) void
         -enqueue(level: Type71, event: string, data: Type9) void
+        -traceLines(row: Type9, payload: string) Type113
+        -traceFileCount(lines: string[], used: unknown) number
         -rotate() Promise~void~
         -warn(error: unknown) void
         close() Promise~void~
@@ -2260,6 +2264,7 @@ classDiagram
         pruneDirectory(directory: string, current: Type17) Promise~void~
         limit(value: Type75, fallback: number) number
         excludeCredentials(value: unknown) unknown
+        correlation(data: unknown) Type9
     }
     class c0214["src/memory-context.ts"] {
         <<module>>
@@ -3190,7 +3195,7 @@ classDiagram
     c0065 ..> c0060 : 2 relationships (see list)
     c0065 ..> c0061 : ensureModelCallAllowed() constructs CaptureProgress
     c0065 ..> c0063 : 6 relationships (see list)
-    c0065 ..> c0065 : 227 relationships (see list)
+    c0065 ..> c0065 : 215 relationships (see list)
     c0065 --> c0066 : field onActivity
     c0065 ..> c0066 : type in constructor
     c0065 ..> c0067 : 9 relationships (see list)
@@ -3222,6 +3227,7 @@ classDiagram
     c0065 ..> c0206 : 2 relationships (see list)
     c0065 --> c0210 : field logger
     c0065 ..> c0212 : 14 relationships (see list)
+    c0065 ..> c0213 : 12 relationships (see list)
     c0065 ..> c0214 : 4 relationships (see list)
     c0065 ..> c0218 : loadCandidates() calls prepareCapture()
     c0065 ..> c0228 : 23 relationships (see list)
@@ -3622,12 +3628,12 @@ classDiagram
     c0209 ..> c0205 : 2 relationships (see list)
     c0209 ..> c0207 : type in resourceSlots
     c0209 ..> c0209 : 6 relationships (see list)
-    c0212 ..> c0065 : flush() calls resolve()
+    c0212 ..> c0065 : 2 relationships (see list)
     c0212 ..|> c0210 : implements
     c0212 --> c0211 : 2 relationships (see list)
     c0212 ..> c0211 : 2 relationships (see list)
-    c0212 ..> c0212 : 6 relationships (see list)
-    c0212 ..> c0213 : 3 relationships (see list)
+    c0212 ..> c0212 : 9 relationships (see list)
+    c0212 ..> c0213 : 5 relationships (see list)
     c0212 ..> c0228 : enqueue() calls sanitizeValue()
     c0213 ..> c0011 : pruneDirectory() calls current()
     c0213 ..> c0213 : 2 relationships (see list)
@@ -3662,7 +3668,7 @@ classDiagram
     c0224 ..> c0117 : type in validateSubmission
     c0224 ..> c0206 : executeRead() calls execute()
     c0224 --> c0210 : field logger
-    c0224 ..> c0212 : 5 relationships (see list)
+    c0224 ..> c0212 : 6 relationships (see list)
     c0224 ..> c0218 : 3 relationships (see list)
     c0224 ..> c0220 : 2 relationships (see list)
     c0224 --> c0221 : field transformHeaders
@@ -4065,9 +4071,9 @@ classDiagram
 - c0207: `ResourceSlot` — `src/knowledge-write.ts`:115
 - c0208: `WriteClient` — `src/knowledge-write.ts`:18
 - c0209: `src/knowledge-write.ts` — `src/knowledge-write.ts`:1
-- c0210: `DiagnosticLogger` — `src/logging.ts`:83
-- c0211: `FileLogLevel` — `src/logging.ts`:81
-- c0212: `FileLogger` — `src/logging.ts`:97
+- c0210: `DiagnosticLogger` — `src/logging.ts`:95
+- c0211: `FileLogLevel` — `src/logging.ts`:93
+- c0212: `FileLogger` — `src/logging.ts`:110
 - c0213: `src/logging.ts` — `src/logging.ts`:1
 - c0214: `src/memory-context.ts` — `src/memory-context.ts`:1
 - c0215: `CompactedMemoryHistory` — `src/model-context.ts`:241
@@ -4076,12 +4082,12 @@ classDiagram
 - c0218: `MemoryTaskContext` — `src/model-context.ts`:248
 - c0219: `SummaryCompletion` — `src/model-context.ts`:25
 - c0220: `src/model-context.ts` — `src/model-context.ts`:1
-- c0221: `MemoryModelHeaderTransform` — `src/model.ts`:45
-- c0222: `ModelPickerContext` — `src/model.ts`:49
-- c0223: `ModelRegistryPort` — `src/model.ts`:36
-- c0224: `PiMemoryModel` — `src/model.ts`:319
-- c0225: `PiMemoryModelOptions` — `src/model.ts`:59
-- c0226: `RequestDeadline` — `src/model.ts`:240
+- c0221: `MemoryModelHeaderTransform` — `src/model.ts`:46
+- c0222: `ModelPickerContext` — `src/model.ts`:50
+- c0223: `ModelRegistryPort` — `src/model.ts`:37
+- c0224: `PiMemoryModel` — `src/model.ts`:320
+- c0225: `PiMemoryModelOptions` — `src/model.ts`:60
+- c0226: `RequestDeadline` — `src/model.ts`:241
 - c0227: `src/model.ts` — `src/model.ts`:1
 - c0228: `src/privacy.ts` — `src/privacy.ts`:1
 - c0229: `AgentProjectInitInput` — `src/project-init.ts`:8
@@ -4766,9 +4772,7 @@ classDiagram
 - c0065 ..> c0065: `checkpoint() calls checkpointBranches()`
 - c0065 ..> c0065: `checkpoint() calls enabled()`
 - c0065 ..> c0065: `checkpointBranch() calls runBranchWorker()`
-- c0065 ..> c0065: `checkpointOutcome() calls correlation()`
 - c0065 ..> c0065: `composeMerge() calls checkpointOutcome()`
-- c0065 ..> c0065: `composeMerge() calls correlation()`
 - c0065 ..> c0065: `composeMerge() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `composeMerge() calls ensureWriteAllowed()`
 - c0065 ..> c0065: `composeMerge() calls readMaintenanceTargets()`
@@ -4780,18 +4784,15 @@ classDiagram
 - c0065 ..> c0065: `correctCandidateFailures() calls reviewExecutionFailure()`
 - c0065 ..> c0065: `createMemory() calls assertWriteAllowedNow()`
 - c0065 ..> c0065: `createMemory() calls checkpointOutcome()`
-- c0065 ..> c0065: `createMemory() calls correlation()`
 - c0065 ..> c0065: `createMemory() calls ensureWriteAllowed()`
 - c0065 ..> c0065: `createResolutionReplacement() calls assertWriteAllowedNow()`
 - c0065 ..> c0065: `createResolutionReplacement() calls ensureWriteAllowed()`
 - c0065 ..> c0065: `decideOverlap() calls checkpointOutcome()`
-- c0065 ..> c0065: `decideOverlap() calls correlation()`
 - c0065 ..> c0065: `decideOverlap() calls enabled()`
 - c0065 ..> c0065: `decideOverlap() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `decideOverlap() calls existingNeighborhood()`
 - c0065 ..> c0065: `decideOverlap() calls policyFor()`
 - c0065 ..> c0065: `decideOverlap() calls validateDecision()`
-- c0065 ..> c0065: `decideOverlapBatch() calls correlation()`
 - c0065 ..> c0065: `decideOverlapBatch() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `decideOverlapBatch() calls policyFor()`
 - c0065 ..> c0065: `decideOverlapBatch() calls prepareOverlapBatch()`
@@ -4830,7 +4831,6 @@ classDiagram
 - c0065 ..> c0065: `finishSupersession() calls checkpointOutcome()`
 - c0065 ..> c0065: `linkResolutionEntity() calls assertWriteAllowedNow()`
 - c0065 ..> c0065: `linkResolutionEntity() calls ensureWriteAllowed()`
-- c0065 ..> c0065: `loadCandidates() calls correlation()`
 - c0065 ..> c0065: `loadCandidates() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `loadCandidates() calls evidenceReadTool()`
 - c0065 ..> c0065: `loadCandidates() calls policyFor()`
@@ -4858,7 +4858,6 @@ classDiagram
 - c0065 ..> c0065: `planConflictReplacement() calls ensureWriteAllowed()`
 - c0065 ..> c0065: `planConflictReplacement() calls readSavedMemory()`
 - c0065 ..> c0065: `planConflictReplacement() calls revisionResources()`
-- c0065 ..> c0065: `planLinkReviews() calls correlation()`
 - c0065 ..> c0065: `planLinkReviews() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `planLinkReviews() calls ensureWriteAllowed()`
 - c0065 ..> c0065: `preflightRetirement() calls confirmedRetirement()`
@@ -4873,7 +4872,6 @@ classDiagram
 - c0065 ..> c0065: `prepareOverlapBatch() calls loadOverlaps()`
 - c0065 ..> c0065: `prepareOverlapBatch() calls prepareDestination()`
 - c0065 ..> c0065: `previousSupersessionCompleted() calls ensureWriteAllowed()`
-- c0065 ..> c0065: `processBranchJob() calls correlation()`
 - c0065 ..> c0065: `processBranchJob() calls processJob()`
 - c0065 ..> c0065: `processBranchJob() calls recordBranchFailure()`
 - c0065 ..> c0065: `processCandidate() calls applyDecision()`
@@ -4910,10 +4908,8 @@ classDiagram
 - c0065 ..> c0065: `read() calls activity()`
 - c0065 ..> c0065: `read() calls readSignal()`
 - c0065 ..> c0065: `readMaintenanceTargets() calls ensureWriteAllowed()`
-- c0065 ..> c0065: `recordBranchFailure() calls correlation()`
 - c0065 ..> c0065: `recordCandidateFailure() calls candidateUncertainty()`
 - c0065 ..> c0065: `recordCandidateFailure() calls checkpointOutcome()`
-- c0065 ..> c0065: `recordCandidateFailure() calls correlation()`
 - c0065 ..> c0065: `recordCandidateFailure() calls isModelFailure()`
 - c0065 ..> c0065: `recordCandidateFailure() calls pauseCandidate()`
 - c0065 ..> c0065: `recordEscalation() calls checkpointOutcome()`
@@ -4935,7 +4931,6 @@ classDiagram
 - c0065 ..> c0065: `retireCandidate() calls preflightRetirement()`
 - c0065 ..> c0065: `reviewExecutionFailure() calls checkpointOutcome()`
 - c0065 ..> c0065: `reviewExecutionFailure() calls correctedCaptureOutcome()`
-- c0065 ..> c0065: `reviewExecutionFailure() calls correlation()`
 - c0065 ..> c0065: `reviewExecutionFailure() calls ensureModelCallAllowed()`
 - c0065 ..> c0065: `reviewLinks() calls executeLinkReviews()`
 - c0065 ..> c0065: `reviewLinks() calls planLinkReviews()`
@@ -4945,7 +4940,6 @@ classDiagram
 - c0065 ..> c0065: `runBranchWorker() calls processBranchJob()`
 - c0065 ..> c0065: `saveCorrectableFailure() calls candidateUncertainty()`
 - c0065 ..> c0065: `saveCorrectableFailure() calls checkpointOutcome()`
-- c0065 ..> c0065: `saveCorrectableFailure() calls correlation()`
 - c0065 ..> c0065: `saveCorrectableFailure() calls isModelFailure()`
 - c0065 ..> c0065: `skipCandidate() calls checkpointOutcome()`
 - c0065 ..> c0065: `skipCandidate() calls writeKnowledge()`
@@ -5226,6 +5220,18 @@ classDiagram
 - c0065 ..> c0212: `recordCandidateFailure() calls emit()`
 - c0065 ..> c0212: `runBranchWorker() calls emit()`
 - c0065 ..> c0212: `saveCorrectableFailure() calls emit()`
+- c0065 ..> c0213: `checkpointOutcome() calls correlation()`
+- c0065 ..> c0213: `composeMerge() calls correlation()`
+- c0065 ..> c0213: `createMemory() calls correlation()`
+- c0065 ..> c0213: `decideOverlap() calls correlation()`
+- c0065 ..> c0213: `decideOverlapBatch() calls correlation()`
+- c0065 ..> c0213: `loadCandidates() calls correlation()`
+- c0065 ..> c0213: `planLinkReviews() calls correlation()`
+- c0065 ..> c0213: `processBranchJob() calls correlation()`
+- c0065 ..> c0213: `recordBranchFailure() calls correlation()`
+- c0065 ..> c0213: `recordCandidateFailure() calls correlation()`
+- c0065 ..> c0213: `reviewExecutionFailure() calls correlation()`
+- c0065 ..> c0213: `saveCorrectableFailure() calls correlation()`
 - c0065 ..> c0214: `createMemory() calls replacementMemoryInput()`
 - c0065 ..> c0214: `createResolutionReplacement() calls replacementMemoryInput()`
 - c0065 ..> c0214: `planConflictReplacement() calls replacementMemoryInput()`
@@ -6767,6 +6773,7 @@ classDiagram
 - c0209 ..> c0209: `selectedIds() calls resourceSlots()`
 - c0209 ..> c0209: `selectedIds() calls stateId()`
 - c0209 ..> c0209: `stateWithNumber() calls positiveId()`
+- c0212 ..> c0065: `enqueue() calls enqueue()`
 - c0212 ..> c0065: `flush() calls resolve()`
 - c0212 ..|> c0210: `implements`
 - c0212 --> c0211: `field level`
@@ -6777,11 +6784,16 @@ classDiagram
 - c0212 ..> c0212: `emit() calls enqueue()`
 - c0212 ..> c0212: `emit() calls warn()`
 - c0212 ..> c0212: `enqueue() calls rotate()`
+- c0212 ..> c0212: `enqueue() calls traceFileCount()`
+- c0212 ..> c0212: `enqueue() calls traceLines()`
 - c0212 ..> c0212: `enqueue() calls warn()`
 - c0212 ..> c0212: `flush() calls warn()`
+- c0212 ..> c0212: `traceLines() calls traceFileCount()`
 - c0212 ..> c0213: `constructor() calls limit()`
+- c0212 ..> c0213: `enqueue() calls correlation()`
 - c0212 ..> c0213: `enqueue() calls excludeCredentials()`
 - c0212 ..> c0213: `enqueue() calls pruneDirectory()`
+- c0212 ..> c0213: `traceLines() calls correlation()`
 - c0212 ..> c0228: `enqueue() calls sanitizeValue()`
 - c0213 ..> c0011: `pruneDirectory() calls current()`
 - c0213 ..> c0213: `pruneDirectory() calls listLogFiles()`
@@ -6870,6 +6882,7 @@ classDiagram
 - c0224 ..> c0212: `completeAttempt() calls emit()`
 - c0224 ..> c0212: `completeRequest() calls emit()`
 - c0224 ..> c0212: `emit() calls emit()`
+- c0224 ..> c0212: `executeRead() calls emit()`
 - c0224 ..> c0212: `prepareCapture() calls emit()`
 - c0224 ..> c0218: `completeRequest() calls prepareCapture()`
 - c0224 ..> c0218: `completeRequest() constructs MemoryTaskContext`

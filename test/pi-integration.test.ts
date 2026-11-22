@@ -1132,18 +1132,23 @@ test(
         const marker = "Transient marker to skip: dune-lark-63";
         const captureCount = captureInputs.length;
         const beforeCreated = created.length;
+        const beforeNotifications = notifications.length;
         await session.prompt("/forgetful capture skip");
 
         // Act: skip one run, then carry out a normal decision in the same session.
         await session.prompt(marker);
         assert.equal(captureInputs.length, captureCount);
         await session.prompt("We confirmed local storage for this project.");
+        // HTTP creation precedes link review. Wait for completion before the next mode change.
+        const captureFinished = () => notifications.slice(beforeNotifications)
+          .some(({ message }) => /Forgetful capture(?:: | )saved 1 memory(?:\.|;)/.test(message));
         const deadline = Date.now() + 3000;
-        while (created.length < beforeCreated + 1 && Date.now() < deadline) {
+        while ((created.length < beforeCreated + 1 || !captureFinished()) && Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
 
         // Assert at the memory-model boundary: skipped text never returns as later evidence.
+        assert.ok(captureFinished(), "capture must finish before the next subtest changes mode");
         assert.equal(created.length, beforeCreated + 1);
         assert.ok(
           captureInputs

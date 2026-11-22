@@ -6,6 +6,7 @@ import { sanitizeValue } from "./privacy.ts";
 const DEFAULT_FILE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_EVENT_BYTES = 256 * 1024;
 const MAX_PENDING_BYTES = 1024 * 1024;
+const MAX_DEBUG_PENDING_BYTES = 16 * 1024 * 1024;
 const MAX_DIRECTORY_FILES = 60;
 const MAX_DIRECTORY_BYTES = 100 * 1024 * 1024;
 // Only files whose local writer has permanently closed and finished its I/O are retired.
@@ -78,6 +79,17 @@ function excludeCredentials(value: unknown): unknown {
   return value;
 }
 
+function correlation(data: unknown): Record<string, unknown> {
+  const detail = data as Record<string, unknown> | undefined;
+  return Object.fromEntries(
+    ["sessionId", "userEntryId", "jobId", "branchId", "candidateId", "taskId", "purpose",
+      "attempt", "call", "kind", "model"]
+      .filter(key => typeof detail?.[key] === "number" ||
+        (typeof detail?.[key] === "string" && detail[key].length <= 200))
+      .map(key => [key, detail![key]]),
+  );
+}
+
 export type FileLogLevel = "off" | "info" | "debug";
 
 export interface DiagnosticLogger {
@@ -87,8 +99,9 @@ export interface DiagnosticLogger {
 
 /**
  * JSONL diagnostics for the configured logs directory. Defaults: 5 MiB/file, 3 files/writer,
- * 256 KiB/event (including newline), and 1 MiB of pending encoded data. Overflow is dropped.
- * Oversized events retain bounded correlation IDs and set truncated:true; bodies are omitted.
+ * 256 KiB/line (including newline), 1 MiB pending info, and 16 MiB pending debug data.
+ * Large debug events use numbered trace parts; all parts must fit the writer's retention.
+ * Other oversized/unrecordable events retain correlation and truncated:true. Overflow is dropped.
  * Limits too small for the envelope drop the event. Invalid limits use the defaults.
  * Startup/rotation prunes closed local and exited-process logs toward 100 MiB/60 files.
  * Active/unknown writers are protected, so limits are soft. Unrelated files are never included.
@@ -108,6 +121,7 @@ export class FileLogger implements DiagnosticLogger {
   private fileBytes = 0;
   private fileCount = 0;
   private pendingBytes = 0;
+  private debugPendingBytes = 0;
 
   constructor(private readonly options: {
     directory: string;
@@ -146,17 +160,17 @@ export class FileLogger implements DiagnosticLogger {
 
   private enqueue(level: "info" | "debug", event: string, data?: Record<string, unknown>): void {
     const row = sanitizeValue(excludeCredentials({
-      timestamp: new Date().toISOString(), level, event, sessionId: this.options.sessionId, data,
+      timestamp: new Date().toISOString(), eventId: randomUUID(), level, event,
+      sessionId: this.options.sessionId, data,
     })) as Record<string, unknown>;
     let line = JSON.stringify(row) + "\n";
-    if (Buffer.byteLength(line) > this.maxEventBytes) {
-      const detail = row.data as Record<string, unknown> | undefined;
-      row.data = Object.fromEntries(
-        ["jobId", "branchId", "candidateId", "purpose", "attempt", "model"]
-          .filter(key => typeof detail?.[key] === "number" ||
-            (typeof detail?.[key] === "string" && detail[key].length <= 200))
-          .map(key => [key, detail![key]]),
-      );
+    let trace: string[] | undefined;
+    if (level === "debug" && Buffer.byteLength(line) > this.maxEventBytes) {
+      trace = this.traceLines(row, line.slice(0, -1));
+      if (!trace) row.traceUnavailable = "trace_envelope_or_retention_limit";
+    }
+    if (!trace && Buffer.byteLength(line) > this.maxEventBytes) {
+      row.data = correlation(row.data);
       row.truncated = true;
       line = JSON.stringify(row) + "\n";
       if (Buffer.byteLength(line) > this.maxEventBytes) {
@@ -172,32 +186,97 @@ export class FileLogger implements DiagnosticLogger {
         throw new Error("Log byte limit cannot fit an event envelope");
       }
     }
-    const bytes = Buffer.byteLength(line);
-    if (this.pendingBytes + bytes > MAX_PENDING_BYTES) {
+    const lines = trace ?? [line];
+    const bytes = lines.reduce((total, part) => total + Buffer.byteLength(part), 0);
+    const pending = level === "debug" ? this.debugPendingBytes : this.pendingBytes;
+    const maximum = level === "debug" ? MAX_DEBUG_PENDING_BYTES : MAX_PENDING_BYTES;
+    if (pending + bytes > maximum) {
       this.warn(new Error("Log pending queue is full; event dropped"));
+      if (level === "debug") this.enqueue("info", "diagnostic.dropped", {
+        ...correlation(row.data), originalEvent: row.event,
+        reason: "debug_pending_queue_full", bytes,
+      });
       return;
     }
-    this.pendingBytes += bytes;
+    if (level === "debug") this.debugPendingBytes += bytes;
+    else this.pendingBytes += bytes;
     const generation = this.generation;
     this.pending = this.pending.then(async () => {
       if (generation !== this.generation) return;
-      await mkdir(this.options.directory, { recursive: true });
+      await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
       if (generation !== this.generation) return;
-      const rotate = this.fileBytes + bytes > this.maxFileBytes;
-      const prune = this.fileCount === 0 || rotate;
-      if (rotate) await this.rotate();
-      if (generation !== this.generation) return;
-      await appendFile(this.filePath, line, "utf8");
-      this.fileBytes += bytes;
-      this.fileCount = Math.max(1, this.fileCount);
-      if (prune) await pruneDirectory(this.options.directory, () => generation === this.generation);
+      // Only start a fresh file when otherwise this trace would evict its own first parts.
+      let prune = this.fileCount === 0;
+      if (trace && this.traceFileCount(lines, this.fileBytes) > this.maxFiles) {
+        await this.rotate();
+        prune = true;
+      }
+      for (const part of lines) {
+        if (generation !== this.generation) return;
+        const partBytes = Buffer.byteLength(part);
+        if (this.fileBytes + partBytes > this.maxFileBytes) {
+          await this.rotate();
+          prune = true;
+        }
+        if (generation !== this.generation) return;
+        await appendFile(this.filePath, part, { encoding: "utf8", mode: 0o600 });
+        this.fileBytes += partBytes;
+        this.fileCount = Math.max(1, this.fileCount);
+        if (prune) {
+          await pruneDirectory(this.options.directory, () => generation === this.generation);
+          prune = false;
+        }
+      }
     }).catch(error => {
       this.failed = true;
       this.generation++;
       this.warn(error);
     }).finally(() => {
-      this.pendingBytes -= bytes;
+      if (level === "debug") this.debugPendingBytes -= bytes;
+      else this.pendingBytes -= bytes;
     });
+  }
+
+  private traceLines(row: Record<string, unknown>, payload: string): string[] | undefined {
+    const bytes = Buffer.byteLength(payload);
+    if (bytes > Math.min(MAX_DEBUG_PENDING_BYTES, this.maxFileBytes * this.maxFiles)) return;
+    const base = {
+      timestamp: row.timestamp, level: "debug", event: "diagnostic.trace_chunk",
+      sessionId: row.sessionId, data: correlation(row.data),
+    };
+    const trace = { version: 1, id: randomUUID(), index: Number.MAX_SAFE_INTEGER,
+      total: Number.MAX_SAFE_INTEGER, event: row.event, bytes, chunk: "" };
+    const envelopeBytes = Buffer.byteLength(JSON.stringify({ ...base, trace }) + "\n");
+    if (envelopeBytes >= this.maxEventBytes) return;
+    const chunks: string[] = [];
+    for (let offset = 0; offset < payload.length;) {
+      let length = Math.min(payload.length - offset, this.maxEventBytes - envelopeBytes);
+      let chunk = payload.slice(offset, offset + length);
+      while (Buffer.byteLength(JSON.stringify({ ...base, trace: { ...trace, chunk } }) + "\n")
+        > this.maxEventBytes) {
+        length = Math.floor(length * 0.75);
+        if (length === 0) return;
+        chunk = payload.slice(offset, offset + length);
+      }
+      chunks.push(chunk);
+      offset += length;
+    }
+    const lines = chunks.map((chunk, index) => JSON.stringify({ ...base,
+      trace: { ...trace, index, total: chunks.length, chunk } }) + "\n");
+    if (this.traceFileCount(lines) > this.maxFiles) return;
+    return lines;
+  }
+
+  private traceFileCount(lines: string[], used = 0): number {
+    let files = 0;
+    let containsTrace = false;
+    for (const line of lines) {
+      const size = Buffer.byteLength(line);
+      if (used + size > this.maxFileBytes) { used = 0; containsTrace = false; }
+      if (!containsTrace) { files++; containsTrace = true; }
+      used += size;
+    }
+    return files;
   }
 
   private async rotate(): Promise<void> {

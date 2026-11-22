@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FileLogger } from "../src/logging.ts";
+import { logicalLogRows } from "./log-helpers.ts";
 
 // These are the payload sizes already supported by capture/model, not whole session archives.
 test("default debug logging retains a normal 50KB capture snapshot", async t => {
@@ -25,7 +26,7 @@ test("default debug logging retains a normal 50KB capture snapshot", async t => 
   assert.equal(event.truncated, undefined);
 });
 
-test("oversized payload markers retain the IDs needed to investigate the event", async t => {
+test("oversized debug payload parts retain full content and investigation IDs", async t => {
   // Arrange.
   const directory = await mkdtemp(join(tmpdir(), "oversized-payload-log-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -40,11 +41,15 @@ test("oversized payload markers retain the IDs needed to investigate the event",
   });
   await logger.flush();
 
-  // Assert: bounded JSON remains useful even when its large body cannot fit.
+  // Assert: each bounded line retains correlation; the reconstructed body is complete.
   const text = await readFile(logger.filePath, "utf8");
-  const event = JSON.parse(text.trim());
-  assert.ok(Buffer.byteLength(text) <= 512);
-  assert.equal(event.truncated, true);
+  const physical = text.trim().split("\n").map(line => JSON.parse(line));
+  const [event] = logicalLogRows(text);
+  assert.ok(physical.length > 1);
+  assert.ok(text.trimEnd().split("\n").every(line => Buffer.byteLength(line + "\n") <= 512));
+  assert.ok(physical.every(row => row.data.jobId === "job-a"));
+  assert.equal(event.truncated, undefined);
+  assert.equal(event.data.response.length, 5_000);
   assert.equal(event.data?.jobId, "job-a");
   assert.equal(event.data?.branchId, "branch-a");
   assert.equal(event.data?.candidateId, "candidate-a");

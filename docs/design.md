@@ -785,13 +785,43 @@ Read-only operation allowlisting, local pagination and configured recall scope r
 Corrections remain subject to the attempt count and request deadline, without shortening payloads.
 
 Stored-record selection counts, trust and scope checks, secret redaction, transport safety, queue
-index capacity and diagnostic preview limits remain separate safeguards. Snapshot and historical
+index capacity and diagnostic retention limits remain separate safeguards. Snapshot and historical
 summary files do not share the index's 50 MiB limit. Raw unprocessed evidence remains private and
 durable until success or exhausted attempts. Successful summaries remain reusable; conflicts from
 successful jobs retain their source evidence. Failed jobs and their conflicts are removed entirely.
 Large input can still exceed provider capacity or the unchanged task deadline; neither failure
 permits silent clipping. Legacy truncated snapshots remain marked as incomplete, while deliberate
 compaction is labelled summarized rather than complete.
+
+### Full debug traces
+
+Debug diagnostics preserve complete redacted capture evidence, cited entries, candidates,
+decisions, SDK request contexts, provider responses and parsed submissions. They must not replace
+large fields with prefix previews before the file adapter can save them. Info remains body-free;
+logging off accepts no new events and cancels queued writes through the existing generation guard.
+Each logical event gets an `eventId` so identical real events on one clock tick are not confused
+with imported duplicates. Split parts retain that ID inside their reconstructed logical event.
+Each private model invocation has a fresh diagnostic-only `taskId`, stable across provider calls,
+compaction, read tools and submission corrections. It never enters model input. Read-tool calls
+and results are recorded immediately, not only as history in a later model request. Cancellation
+can leave a call without a result and must not manufacture a completion or consume a retry.
+
+The file adapter keeps 256 KiB JSONL lines and splits oversized debug events into versioned,
+numbered `diagnostic.trace_chunk` records after credential exclusion and redaction. Each part
+carries its session, timestamp, trace identity, original event name, index, total, original UTF-8
+byte length and a string fragment. Only a complete, consistent part set can reconstruct the
+original JSON event. Readers retain source provenance and mark missing, conflicting, malformed
+or legacy-truncated content as incomplete. Logged SDK context is not provider-wire replay.
+
+Rotation remains 5 MiB per file and three files per writer. A trace is accepted as one queue item
+only if its parts can fit that retention without evicting their own beginning. Parts share files
+normally; starting a new file is needed only to prevent self-eviction. Pending info and debug bytes
+are bounded separately at 1 MiB and 16 MiB. Debug overflow leaves a best-effort bounded gap notice
+in the info queue. Unrecordable traces retain a bounded truncation notice when possible. Later
+rotation, queue pressure, off, I/O failure and abrupt exit can still lose evidence. This is an
+inspection aid, not a permanent archive. New files/directories are owner-only; existing paths are
+not silently chmodded. Existing directory pruning, fail-open behavior and the 500 ms control and
+shutdown flush boundary stay in force.
 
 ## Transport
 

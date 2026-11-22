@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AssistantMessage,
   Context,
@@ -349,6 +350,8 @@ export class PiMemoryModel implements MemoryModelClient {
   }
 
   async complete(request: ModelRequest): Promise<unknown> {
+    const diagnosticContext = { ...request.diagnosticContext, taskId: randomUUID() };
+    request = { ...request, diagnosticContext };
     const started = performance.now();
     this.emit("info", "model.started", request);
     try {
@@ -370,6 +373,8 @@ export class PiMemoryModel implements MemoryModelClient {
   }
 
   async prepareCapture(request: ModelRequest): Promise<"ready" | "progress"> {
+    const diagnosticContext = { ...request.diagnosticContext, taskId: randomUUID() };
+    request = { ...request, diagnosticContext };
     if (request.purpose !== "capture") {
       throw new TypeError("Capture preparation requires a capture request");
     }
@@ -412,16 +417,6 @@ export class PiMemoryModel implements MemoryModelClient {
         model: this.version,
         ...data,
       }) as Record<string, unknown>;
-      // Keep correlation when the shared file logger's event limit would drop the whole payload.
-      for (const key of ["context", "response", "result", "input"]) {
-        const json = JSON.stringify(safe[key]);
-        if (!json || Buffer.byteLength(json) <= 60_000) continue;
-        let preview = json;
-        do {
-          preview = preview.slice(0, Math.floor(preview.length * 0.75));
-        } while (Buffer.byteLength(JSON.stringify(preview)) > 59_900);
-        safe[key] = { truncated: true, preview };
-      }
       this.logger.emit(level, event, safe);
     } catch {
       // Diagnostics must never change model execution or retry behaviour.
@@ -601,8 +596,10 @@ export class PiMemoryModel implements MemoryModelClient {
     request: ModelRequest,
     deadline: RequestDeadline,
   ): Promise<ToolResultMessage> {
+    let result: ToolResultMessage;
     try {
       if (deadline.controller.signal.aborted) throw new Error("Memory model request aborted");
+      this.emit("debug", "model.tool_call", request, { toolCall: call });
       validateToolCall([submissionTool(read)], call);
       // The SDK validator may coerce values. Only original arguments authorize execution.
       const schema = read.parameters as TSchema;
@@ -614,7 +611,7 @@ export class PiMemoryModel implements MemoryModelClient {
         deadline.callerAbort,
         deadline.timeout,
       ]);
-      return {
+      result = {
         role: "toolResult", toolCallId: call.id, toolName: call.name,
         content: value instanceof ModelEvidencePage ? evidencePageContent(value)
           : [textBlock(serializeInput(
@@ -625,8 +622,10 @@ export class PiMemoryModel implements MemoryModelClient {
       if (error instanceof ModelTaskPause || request.signal?.aborted || deadline.timedOut) {
         throw error;
       }
-      return errorToolResult(call, rejectionText(error));
+      result = errorToolResult(call, rejectionText(error));
     }
+    this.emit("debug", "model.tool_result", request, { result });
+    return result;
   }
 
   private validateSubmission(submission: ModelSubmissionTool, tool: Tool, call: ToolCall): unknown {
