@@ -755,14 +755,17 @@ explicit `timeout_ms` overrides both HTTP and overall recall, as before.
 
 ### Model capacity and record validation
 
-Private tasks prepare context using Pi compaction helpers and persisted Pi settings before the
-first request and between continuations. User setting `context_limit_tokens` defaults to 100000;
-the effective window is the smaller of this limit and the actual model window, counting policy,
-tools, messages and the permitted reply. Resolve the reply allowance before each provider call as
-the smaller of `model.maxTokens`, Pi's `reserveTokens` (default 16384), and the remaining window.
-Use the same allowance for context validation and the raw provider request. Never clip returned
-submissions into incomplete JSON. This does not change the main Pi session. With compaction
-disabled, shrink the reply allowance if input fits; reject input that leaves no room for a reply.
+Private tasks prepare context using Pi compaction helpers and persisted Pi settings before the first
+request and between continuations. Pi's `compaction.enabled` switch is not applied: it controls
+main-session auto-compaction, and a private task that cannot fit has no other way to proceed. Pi's
+`reserveTokens` and `keepRecentTokens` still apply. User setting `context_limit_tokens` defaults to
+100000; the effective window is the smaller of this limit and the actual model window, counting
+policy, tools, messages and the permitted reply. Resolve the reply allowance before each provider
+call as the smaller of `model.maxTokens`, Pi's `reserveTokens` (default 16384), and the remaining
+window. Use the same allowance for context validation and the raw provider request. Never clip
+returned submissions into incomplete JSON. This does not change the main Pi session. When no history
+remains to summarize, shrink the reply allowance if input fits; reject input that leaves no room for
+a reply.
 Current task instructions and tool schemas are preserved. Historical
 images use native blocks for capable models, including during summarization. Unsupported images
 or indivisible records that cannot fit fail explicitly; evidence is never silently clipped.

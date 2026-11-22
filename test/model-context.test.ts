@@ -150,10 +150,10 @@ test("callers without Pi settings still enforce the default 100000 token cap", a
   assert.ok(requests.at(-1)!.tools?.length);
 });
 
-test("disabled compaction caps output when the input still fits", async t => {
+test("a task without history caps output when the input still fits", async t => {
   // Arrange: message input fits; the selected model's full output allowance would not.
   const { model, requests } = await fixture(t, () => accepted, {
-    contextLimitTokens: 8_000, compactionSettings: { ...settings, enabled: false },
+    contextLimitTokens: 8_000, compactionSettings: settings,
   });
 
   // Act.
@@ -296,37 +296,43 @@ test("the larger selected model admits the same full history without a summary",
   assert.match(JSON.stringify(requests[0]), / END_17/);
 });
 
-test("Pi's reserve setting triggers compaction before the provider window is full", async (t) => {
-  // Arrange: this same history passes the disabled test, including its output allowance.
+for (const enabled of [true, false]) {
+  test(`Pi's reserve setting triggers compaction before the window is full (auto ${
+    enabled ? "on" : "off"})`, async (t) => {
+    // Arrange: this history fits the provider window, including its output allowance.
+    // Pi's auto-compaction switch must not change the private reserve threshold.
+    const { model, requests } = await fixture(t, (request) =>
+      request.tools?.length ? accepted : "Earlier source evidence.", {
+      compactionSettings: { ...settings, reserveTokens: 2_500, enabled },
+    }, "small");
+
+    // Act.
+    await model.complete({ purpose: "capture", policy: "Submit.", input: {},
+      conversation: longConversation().slice(0, 8), submission });
+
+    // Assert: Pi's reserve, not a fixed entry count or overflowing HTTP call, triggers summary.
+    assert.ok(requests.length > 1);
+    assert.equal(requests[0]!.tools?.length ?? 0, 0);
+    assert.equal(requests.at(-1)!.tools?.[0]?.function.name, "submit_result");
+  });
+}
+
+test("Pi's disabled auto-compaction still summarizes history that cannot fit", async (t) => {
+  // Arrange: Pi auto-compaction is off and the full history exceeds the small model window.
   const { model, requests } = await fixture(t, (request) =>
     request.tools?.length ? accepted : "Earlier source evidence.", {
-    compactionSettings: { ...settings, reserveTokens: 2_500 },
+    compactionSettings: { ...settings, enabled: false },
   }, "small");
 
   // Act.
-  await model.complete({ purpose: "capture", policy: "Submit.", input: {},
-    conversation: longConversation().slice(0, 8), submission });
+  const result = await model.complete({ purpose: "capture", policy: "Submit.", input: {},
+    conversation: longConversation(), submission });
 
-  // Assert: enabled Pi settings, not a fixed entry count or overflowing HTTP call, trigger summary.
+  // Assert: private summaries precede the task instead of a local context-window rejection.
+  assert.deepEqual(result, { answer: "Recorded." });
   assert.ok(requests.length > 1);
   assert.equal(requests[0]!.tools?.length ?? 0, 0);
   assert.equal(requests.at(-1)!.tools?.[0]?.function.name, "submit_result");
-});
-
-test("disabled compaction makes no summary above Pi's configured threshold", async (t) => {
-  // Arrange: history exceeds the configured threshold but still fits with the output allowance.
-  const { model, requests } = await fixture(t, () => accepted, {
-    compactionSettings: { ...settings, reserveTokens: 2_500, enabled: false },
-  }, "small");
-
-  // Act.
-  await model.complete({ purpose: "capture", policy: "Submit.", input: {},
-    conversation: longConversation().slice(0, 8), submission });
-
-  // Assert.
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0]!.tools?.[0]?.function.name, "submit_result");
-  assert.match(JSON.stringify(requests[0]), / END_7/);
 });
 
 test("read continuations compact complete outcomes and keep the task and correction budget", {

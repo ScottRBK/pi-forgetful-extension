@@ -33,7 +33,8 @@ The intended experience requires no memory commands during normal work:
   of context summarisation, and completed jobs retain only small outcome records;
 - capture can inspect sources read-only; recall can explore only stored Forgetful knowledge;
 - private tasks use a configurable 100k-token context limit, capped by the selected model window,
-  with Pi compaction settings, reply generation capped to the model/reserve/remaining budget,
+  with Pi reserve/recent compaction settings (compacting even when Pi auto-compaction is off),
+  reply generation capped to the model/reserve/remaining budget,
   validated submissions and bounded correction attempts;
 - successful summary cursors move forward per session/branch; inactive summary caches expire,
   and cache damage falls back to pinned history without masking original-source failures;

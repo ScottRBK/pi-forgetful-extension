@@ -74,7 +74,9 @@ function decision(context: Context) {
 }
 
 /** Real Pi lifecycle, model adapter and queue; only external provider/REST replies are scripted. */
-async function backlog(t: TestContext, interrupt: boolean, readOriginal = false) {
+async function backlog(
+  t: TestContext, interrupt: boolean, readOriginal = false, compactionEnabled = true,
+) {
   const root = await mkdtemp(join(tmpdir(), "pi-backlog-history-"));
   const agentDir = join(root, "agent");
   const discovery = gate();
@@ -131,7 +133,7 @@ async function backlog(t: TestContext, interrupt: boolean, readOriginal = false)
   // The private model loads settings separately: persist these, not just main-session overrides.
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     retry: { enabled: false },
-    compaction: { enabled: true, reserveTokens: 1200,
+    compaction: { enabled: compactionEnabled, reserveTokens: 1200,
       keepRecentTokens: readOriginal ? 6000 : 1200 },
   }));
 
@@ -390,6 +392,28 @@ for (const restart of [false, true]) {
         "Later prequeued tasks must not rebuild an already-completed historical summary");
     });
 }
+
+test("Pi's disabled auto-compaction still lets oversized private history capture complete",
+  { timeout: 30_000 }, async (t) => {
+    // Arrange: the saved Pi agent settings disable auto-compaction, as a Factory profile can.
+    // The shared history exceeds the private 10,000 token memory window.
+    const pi = await backlog(t, false, false, false);
+
+    // Act.
+    pi.ready();
+    const jobs = await until(() => pi.store.listJobs(),
+      (jobs) => jobs.length === 3 && jobs.every((job) => job.status === "complete"),
+      "Oversized private history must be summarized, not rejected, when auto-compaction is off");
+
+    // Assert: each turn succeeds on its first attempt after private summaries.
+    for (const [index, job] of jobs.entries()) {
+      assert.equal(job.attempts, 1);
+      const outcome = job.candidateOutcomes[`turn-${index + 1}`] as Record<string, unknown>;
+      assert.equal(outcome?.stage, "observed");
+    }
+    assert.ok(pi.calls.some((call) => call.kind === "summary" && call.status === "finished"));
+    assert.equal(pi.mainCalls, 3);
+  });
 
 test("reopened backlog can selectively read paged original evidence hidden by reused history",
   { timeout: 30_000 }, async (t) => {

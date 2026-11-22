@@ -197,9 +197,13 @@ function privateContextWindow(
   return Math.min(contextLimitTokens, model.contextWindow);
 }
 
+/**
+ * Pi's `enabled` switch controls main-session auto-compaction only. A private task that cannot
+ * fit has no other way to proceed, so it always compacts with Pi's reserve and recent settings.
+ */
 function compactionSettings(settings?: CompactionSettings): typeof DEFAULT_COMPACTION_SETTINGS {
   const resolved = {
-    enabled: settings?.enabled ?? DEFAULT_COMPACTION_SETTINGS.enabled,
+    enabled: true,
     reserveTokens: settings?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens,
     keepRecentTokens: settings?.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
   };
@@ -314,9 +318,6 @@ export class MemoryTaskContext {
     assertImageSupport(context, this.model);
     const settings = this.settings;
     this.originalHistory ??= new Set(context.messages.filter(message => message !== this.task));
-    if (!settings.enabled) {
-      return this.outputAllowance(context);
-    }
     const targetOutput = outputCeiling(this.model, settings);
     let size = contextTokens(context);
     let chunks = 0;

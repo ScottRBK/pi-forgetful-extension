@@ -713,15 +713,18 @@ including corrections and read continuations, the reply allowance is capped by t
 That same allowance is used for the context check and provider request. This caps generation;
 it does not cut returned JSON or change the main Pi session's context limit.
 Selected record and entry counts, timeouts, transport safety, queue-index capacity, and log bounds
-still apply. Background tasks use Pi's compaction helpers and persisted compaction settings.
+still apply. Background tasks use Pi's compaction helpers and its persisted `reserveTokens` and
+`keepRecentTokens` settings. Pi's `compaction.enabled` switch controls only main-session
+auto-compaction. When Pi auto-compaction is off, private tasks still summarize older history
+outside Pi's retained `keepRecentTokens` tail.
 The current task and tool instructions stay intact. Initial capture preparation uses separate,
 bounded summary slices before charging extraction's model-call allowance. Each slice retains the
 three-minute request timeout. Extraction, its read turns, further compaction and corrections still
 share one task deadline; recall keeps its existing shared deadline. An oversized indivisible record,
 empty/nonreducing summary or oversized task fails explicitly instead of being clipped or yielding
 forever.
-With compaction disabled, a fitting input can reduce the reply allowance. Input that leaves no
-room for a reply fails without sending a provider request.
+When no history remains to summarize, a fitting input can reduce the reply allowance. Input that
+still leaves no room for a reply fails without sending a provider request.
 Pi does not expose unsaved host compaction overrides to extensions. Native images require an
 image-capable memory model; unsupported images are not silently omitted.
 
