@@ -267,7 +267,9 @@ test("selected model compacts complete labelled evidence through Pi with auth an
     assert.equal(header["x-private-task"], "memory");
     assert.equal(header["x-opencode-session"], "context-session");
   }
-  assert.equal(requests[0]!.max_tokens ?? requests[0]!.max_completion_tokens, 750);
+  // Every summary keeps Pi's full reply allowance (0.8 x 1200 reserve), never the space left.
+  assert.ok(requests.slice(0, -1).every(request =>
+    (request.max_tokens ?? request.max_completion_tokens) === 960));
   assert.equal(task.max_tokens ?? task.max_completion_tokens, 1_000);
   const attempts = events.filter((entry) => entry.event === "model.attempt");
   assert.equal(attempts.length, requests.length);
@@ -904,6 +906,64 @@ test("capture preparation fails before summaries when the unsummarised task cann
   assert.equal(checkpoints, 0);
 });
 
+/** Prepare capture on the 8000 token model with one Pi reserve setting. */
+async function prepareNearWindow(t: TestContext, conversation: unknown[], reserveTokens: number) {
+  const views: CompactedConversation[] = [];
+  const { model, requests } = await fixture(t, () => "NEAR_WINDOW_SUMMARY", {
+    compactionSettings: { ...settings, reserveTokens },
+  }, "small");
+  const outcome = await model.prepareCapture({ purpose: "capture", policy: "Submit.",
+    input: "TASK", conversation, submission,
+    onConversationCompacted: async view => { views.push(view); } })
+    .catch((error: Error) => error);
+  const allowances = requests.map(request => request.max_tokens ?? request.max_completion_tokens);
+  return { outcome, requests, allowances, views };
+}
+
+test("capture summaries keep Pi's full reply allowance when old records nearly fill the window",
+  async t => {
+    // Arrange: 12 old records and 2 recent ones. The old records fit the 8000 token window
+    // alone, but not with Pi's full 960 token summary reply (0.8 x 1200 reserve).
+    const conversation = Array.from({ length: 14 }, (_, index) => ({
+      id: `record-${index}`,
+      text: `BEGIN_${index} ${"Evidence details. ".repeat(130)} END_${index}`,
+    }));
+
+    // Act: the control's 80 token reply (100 reserve) shows the old records fit alone.
+    const control = await prepareNearWindow(t, conversation, 100);
+    const actual = await prepareNearWindow(t, conversation, 1_200);
+
+    // Assert: only the full reply forces a split. Before the fix the reply was cut to 288.
+    assert.match(JSON.stringify(control.requests[0]), /BEGIN_11 /);
+    assert.deepEqual(actual.allowances, [960]);
+    assert.equal(actual.outcome, "ready");
+    assert.match(JSON.stringify(actual.requests[0]), /BEGIN_5 /);
+    assert.doesNotMatch(JSON.stringify(actual.requests[0]), /BEGIN_6 /);
+    assert.deepEqual(actual.views.map(view => view.summarizedThroughEntryId), ["record-5"]);
+  });
+
+test("one old record that fits only without Pi's summary reply fails before a provider call",
+  async t => {
+    // Arrange: one old record and a recent tail longer than Pi's 1200 keepRecentTokens.
+    // The old record fits the 8000 token window alone, but not with a 960 token reply.
+    const conversation = [{ id: "near-window", text: "Long source record. ".repeat(1_400) },
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: `recent-${index}`, text: "Recent evidence. ".repeat(110),
+      }))];
+
+    // Act: the control's 80 token reply (100 reserve) shows the old record fits alone.
+    const control = await prepareNearWindow(t, conversation, 100);
+    const actual = await prepareNearWindow(t, conversation, 1_200);
+
+    // Assert: the record is neither clipped nor sent with a reply cut to the space left.
+    assert.equal(control.requests.length, 1);
+    assert.ok(actual.outcome instanceof Error);
+    assert.match(String(actual.outcome.cause), /output allowance 960, context window 8000/);
+    assert.match(String(actual.outcome.cause), /No conversation record was clipped/);
+    assert.equal(actual.requests.length, 0);
+    assert.equal(actual.views.length, 0);
+  });
+
 test("interrupted cumulative chunks resume from the saved boundary after actual queue restart",
   async t => {
     // Arrange: original source history needs more than two summaries.
@@ -1004,9 +1064,10 @@ for (const interruption of ["timeout", "cancellation"] as const) {
 
 test("each preparation slice gets a bounded deadline independent of the next slice", async t => {
   // Arrange: two 120-second provider chunks exceed a single shared 180-second allowance.
+  // This history needs exactly two whole-record chunks.
   const arrived = [barrier(), barrier()];
   const blocked = [barrier(), barrier()];
-  let conversation: readonly unknown[] = longConversation();
+  let conversation: readonly unknown[] = longConversation().slice(0, 15);
   const { model, requests } = await fixture(t, async (_request, index) => {
     arrived[index - 1]!.release();
     await blocked[index - 1]!.promise;

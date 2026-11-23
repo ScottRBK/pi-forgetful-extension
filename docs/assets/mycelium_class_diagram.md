@@ -3721,7 +3721,7 @@ classDiagram
     c0224 ..> c0116 : type in evidencePageContent
     c0224 ..> c0220 : 2 relationships (see list)
     c0224 ..> c0221 : type in summarizeMemoryHistory
-    c0224 ..> c0224 : 18 relationships (see list)
+    c0224 ..> c0224 : 19 relationships (see list)
     c0224 ..> c0228 : summarizeMemoryHistory() calls complete()
     c0224 ..> c0232 : 2 relationships (see list)
     c0226 --> c0227 : field modelRegistry
@@ -6991,10 +6991,11 @@ classDiagram
 - c0224 ..> c0224: `resolvedOutputAllowance() calls assertFits()`
 - c0224 ..> c0224: `resolvedOutputAllowance() calls contextTokens()`
 - c0224 ..> c0224: `resolvedOutputAllowance() calls outputCeiling()`
+- c0224 ..> c0224: `summarizeMemoryHistory() calls assertFits()`
 - c0224 ..> c0224: `summarizeMemoryHistory() calls assertImageSupport()`
 - c0224 ..> c0224: `summarizeMemoryHistory() calls compactionSettings()`
+- c0224 ..> c0224: `summarizeMemoryHistory() calls outputCeiling()`
 - c0224 ..> c0224: `summarizeMemoryHistory() calls privateContextWindow()`
-- c0224 ..> c0224: `summarizeMemoryHistory() calls resolvedOutputAllowance()`
 - c0224 ..> c0224: `summarizeMemoryHistory() calls smallerSummaryBatch()`
 - c0224 ..> c0224: `summarizeMemoryHistory() calls summaryEvidence()`
 - c0224 ..> c0224: `summaryEvidence() calls evidenceMessage()`

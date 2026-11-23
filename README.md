@@ -712,6 +712,9 @@ including corrections and read continuations, the reply allowance is capped by t
 `maxTokens`, Pi's configured `reserveTokens` (default 16384), and the remaining context budget.
 That same allowance is used for the context check and provider request. This caps generation;
 it does not cut returned JSON or change the main Pi session's context limit.
+History summaries always keep Pi's full summary reply (80% of `reserveTokens`, capped by
+`maxTokens`). A batch of older records that cannot fit with that reply splits between whole
+records. Its reply is never cut to the space left, which could stop at the provider's length limit.
 Selected record and entry counts, timeouts, transport safety, queue-index capacity, and log bounds
 still apply. Background tasks use Pi's compaction helpers and its persisted `reserveTokens` and
 `keepRecentTokens` settings. Pi's `compaction.enabled` switch controls only main-session

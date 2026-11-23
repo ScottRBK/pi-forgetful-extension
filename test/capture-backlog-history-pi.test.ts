@@ -76,6 +76,7 @@ function decision(context: Context) {
 /** Real Pi lifecycle, model adapter and queue; only external provider/REST replies are scripted. */
 async function backlog(
   t: TestContext, interrupt: boolean, readOriginal = false, compactionEnabled = true,
+  prefixRepeat = 100,
 ) {
   const root = await mkdtemp(join(tmpdir(), "pi-backlog-history-"));
   const agentDir = join(root, "agent");
@@ -226,6 +227,9 @@ async function backlog(
                 // This prefix is disposable planning, not the distinct decisions in the raw tail.
                 message.content = [{ type: "text",
                   text: "SHARED_SUMMARY: earlier repository storage planning was discussed." }];
+                // These summaries need Pi's full reply allowance (0.8 x 1200 reserve). Like a
+                // real provider, a smaller allowance ends the reply at its length limit.
+                if ((options?.maxTokens ?? 0) < 960) message.stopReason = "length";
               } else if (name === "submit_recall_plan") {
                 message = { ...message, stopReason: "toolUse", content: [{ type: "toolCall",
                   id: "recall-plan", name, arguments: {
@@ -233,8 +237,8 @@ async function backlog(
                   } }] };
               } else assert.equal(model.id, "main", "Unexpected private provider request");
               if (call) call.status = "finished";
-              stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse",
-                message });
+              stream.push({ type: "done",
+                reason: message.stopReason as "stop" | "toolUse" | "length", message });
             }
           } catch (error) {
             t.diagnostic(`Controlled provider failed: ${String(error)}`);
@@ -273,7 +277,7 @@ async function backlog(
   const first = await startSession();
   await discovery.promise;
   for (let index = 0; index < 35; index++) {
-    const text = `RAW_SHARED_PREFIX_${index}: ${"Earlier storage planning. ".repeat(100)}`;
+    const text = `RAW_SHARED_PREFIX_${index}: ${"Earlier storage planning. ".repeat(prefixRepeat)}`;
     first.manager.appendMessage({ role: "user", timestamp: 1,
       content: readOriginal && index === 0 ? [
         { type: "text", text: `HIDDEN_ORIGINAL_POLICY: WAL provides crash recovery. ${text}` },
@@ -393,27 +397,34 @@ for (const restart of [false, true]) {
     });
 }
 
-test("Pi's disabled auto-compaction still lets oversized private history capture complete",
-  { timeout: 30_000 }, async (t) => {
-    // Arrange: the saved Pi agent settings disable auto-compaction, as a Factory profile can.
-    // The shared history exceeds the private 10,000 token memory window.
-    const pi = await backlog(t, false, false, false);
+for (const { history, prefixRepeat } of [
+  { history: "oversized private history", prefixRepeat: 100 },
+  // One halved batch of old records fits the window alone, but not with Pi's summary reply.
+  // A reply cut to the space left stopped at "length" and blocked the queue behind it.
+  { history: "a near-window summary batch", prefixRepeat: 110 },
+]) {
+  test(`Pi's disabled auto-compaction still lets ${history} capture complete`,
+    { timeout: 30_000 }, async (t) => {
+      // Arrange: the saved Pi agent settings disable auto-compaction, as a Factory profile can.
+      // The shared history exceeds the private 10,000 token memory window.
+      const pi = await backlog(t, false, false, false, prefixRepeat);
 
-    // Act.
-    pi.ready();
-    const jobs = await until(() => pi.store.listJobs(),
-      (jobs) => jobs.length === 3 && jobs.every((job) => job.status === "complete"),
-      "Oversized private history must be summarized, not rejected, when auto-compaction is off");
+      // Act.
+      pi.ready();
+      const jobs = await until(() => pi.store.listJobs(),
+        (jobs) => jobs.length === 3 && jobs.every((job) => job.status === "complete"),
+        `${history} must be summarized, not rejected, when auto-compaction is off`);
 
-    // Assert: each turn succeeds on its first attempt after private summaries.
-    for (const [index, job] of jobs.entries()) {
-      assert.equal(job.attempts, 1);
-      const outcome = job.candidateOutcomes[`turn-${index + 1}`] as Record<string, unknown>;
-      assert.equal(outcome?.stage, "observed");
-    }
-    assert.ok(pi.calls.some((call) => call.kind === "summary" && call.status === "finished"));
-    assert.equal(pi.mainCalls, 3);
-  });
+      // Assert: each turn succeeds on its first attempt after private summaries.
+      for (const [index, job] of jobs.entries()) {
+        assert.equal(job.attempts, 1);
+        const outcome = job.candidateOutcomes[`turn-${index + 1}`] as Record<string, unknown>;
+        assert.equal(outcome?.stage, "observed");
+      }
+      assert.ok(pi.calls.some((call) => call.kind === "summary" && call.status === "finished"));
+      assert.equal(pi.mainCalls, 3);
+    });
+}
 
 test("reopened backlog can selectively read paged original evidence hidden by reused history",
   { timeout: 30_000 }, async (t) => {

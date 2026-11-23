@@ -765,7 +765,9 @@ call as the smaller of `model.maxTokens`, Pi's `reserveTokens` (default 16384), 
 window. Use the same allowance for context validation and the raw provider request. Never clip
 returned submissions into incomplete JSON. This does not change the main Pi session. When no history
 remains to summarize, shrink the reply allowance if input fits; reject input that leaves no room for
-a reply.
+a reply. History summary requests are the exception: each keeps Pi's full summary reply (80% of
+`reserveTokens`, capped by `model.maxTokens`). A batch that cannot fit with it splits between whole
+records; a reply cut to the space left can stop at the provider's length limit.
 Current task instructions and tool schemas are preserved. Historical
 images use native blocks for capable models, including during summarization. Unsupported images
 or indivisible records that cannot fit fail explicitly; evidence is never silently clipped.

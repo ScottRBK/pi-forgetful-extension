@@ -436,10 +436,10 @@ async function summarizeMemoryHistory(
             role: "user", content: visuals, timestamp: Date.now(),
           });
           // Inspect Pi's actual summary prompt, including its own instructions and prior
-          // summary/images, before dispatch. Split between whole records if it cannot fit.
-          const maxTokens = resolvedOutputAllowance(
-            summaryContext, model, contextWindow, settings, options?.maxTokens,
-          );
+          // summary/images, before dispatch. Keep Pi's full reply allowance: a reply cut to
+          // the space left can stop at "length". Split between whole records if it cannot fit.
+          const maxTokens = outputCeiling(model, settings, options?.maxTokens);
+          assertFits(summaryContext, model, maxTokens, contextWindow);
           const response = await complete(summaryContext, { ...options, maxTokens });
           const stream = createAssistantMessageEventStream();
           stream.end(response);
