@@ -28,7 +28,7 @@ function snapshot(project: { id: number; name: string }): CaptureSnapshot {
   };
 }
 
-test("duplicate resource slots survive capture correction and queue restart without replay",
+test("duplicate resource slots survive immediate capture correction and a queue restart",
   realOptions, async (t) => {
     // Arrange: REST rejects the second guide after distinct entities and the first guide save.
     const baseUrl = await startForgetful(t);
@@ -84,6 +84,8 @@ test("duplicate resource slots survive capture correction and queue restart with
         response = { action: "create", entityMemoryKeys: ["system", "database"] };
       } else if (name === "submit_capture_correction") {
         correctionInput = request.input;
+        await request.readTools!.find((tool) => tool.name === "report_capture_execution_failure")!
+          .execute({}, new AbortController().signal);
         response = { candidate: corrected };
       } else if (name === "submit_capture_links") {
         response = { reviews: (request.input as { candidates: { candidateId: string }[] })
@@ -94,21 +96,22 @@ test("duplicate resource slots survive capture correction and queue restart with
     } };
     const capture = new CaptureService({ instanceId: "resource-identity", queue, client, model });
 
-    // Act: save partial progress, reconstruct the queue/service, then correct the failed slot.
+    // Act: the first pass corrects the failed slot; a new queue/service then resumes.
     const queued = await capture.enqueue(snapshot(project));
     await capture.checkpoint();
-    const partial = (await queue.getJob(queued.jobId))!.candidateOutcomes.fact as {
-      executionFailure?: string; memoryId: number; knowledgeState: KnowledgeWriteState;
-    };
-    assert.match(String(partial.executionFailure), /HTTP 400/);
-    assert.equal(partial.knowledgeState.entities.length, 3);
-    assert.equal(partial.knowledgeState.documents.length, 1);
-    assert.equal(partial.knowledgeState.pendingCreates?.length ?? 0, 0);
+    assert.equal((await queue.getJob(queued.jobId))!.status, "complete");
     const restarted = new DurableQueueStore({ directory, instanceId: "resource-identity" });
     await new CaptureService({ instanceId: "resource-identity", queue: restarted, client, model })
       .checkpoint();
 
     // Assert via REST: every requested create/attachment exists once; completed slots keep IDs.
+    const partial = (correctionInput as { outcome: {
+      executionFailure?: string; memoryId: number; knowledgeState: KnowledgeWriteState;
+    } }).outcome;
+    assert.match(String(partial.executionFailure), /HTTP 400/);
+    assert.equal(partial.knowledgeState.entities.length, 3);
+    assert.equal(partial.knowledgeState.documents.length, 1);
+    assert.equal(partial.knowledgeState.pendingCreates?.length ?? 0, 0);
     assert.equal((await restarted.getJob(queued.jobId))!.status, "complete");
     assert.match(JSON.stringify(correctionInput), /HTTP 400/);
     assert.match(JSON.stringify(correctionInput), /string_too_long/);

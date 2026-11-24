@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "check:architecture": "node scripts/check-architecture.mjs && npm run test:architecture",
     "test:architecture": "node --test test/architecture/*.test.mjs",
-    "check": "npm run check:architecture && npm run typecheck && npm test"
+    "check": "npm run check:architecture && npm run typecheck && npm test",
+    "check:real": "node scripts/check-real.mjs && npm run check"
   },
   "engines": { "node": ">=22.19.0" },
   "peerDependencies": {

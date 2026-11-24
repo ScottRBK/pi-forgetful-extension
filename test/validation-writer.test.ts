@@ -260,7 +260,7 @@ test("writer forwards proposed resource and link IDs to REST validation",
     }
   });
 
-test("CaptureService corrects REST resources after restart without repeating completed writes",
+test("CaptureService corrects REST resources once; a restart repeats no completed writes",
   realOptions, async (t) => {
     // Arrange: resource failure occurs after the memory and entity have been saved.
     const { client, project, plan } = await setup(t);
@@ -289,6 +289,8 @@ test("CaptureService corrects REST resources after restart without repeating com
       else if (name === "submit_capture_decision") response = { action: "create" };
       else if (name === "submit_capture_correction") {
         correctionInput = request.input;
+        await request.readTools!.find((tool) => tool.name === "report_capture_execution_failure")!
+          .execute({}, new AbortController().signal);
         response = { candidate: corrected };
       } else if (name === "submit_capture_links") {
         response = { reviews: (request.input as any).candidates.map((item: any) => ({
@@ -302,13 +304,10 @@ test("CaptureService corrects REST resources after restart without repeating com
     } };
     let capture = new CaptureService({ instanceId: "writer-validation", queue, client, model });
 
-    // Act: checkpoint the rejected fields, then resume from a new service and queue instance.
+    // Act: the first pass corrects the rejected fields; a new service and queue then resume.
     const queued = await capture.enqueue(snapshot(project));
     await capture.checkpoint();
-    const partial = (await queue.getJob(queued.jobId))!.candidateOutcomes.fact as any;
-    assert.match(partial.executionFailure, /HTTP 400/);
-    assert.equal(partial.knowledgeState.entities.length, 1);
-    assert.equal(partial.knowledgeState.pendingCreates?.length ?? 0, 0);
+    assert.equal((await queue.getJob(queued.jobId))!.status, "complete");
     const restarted = new DurableQueueStore({ directory, instanceId: "writer-validation" });
     capture = new CaptureService({
       instanceId: "writer-validation", queue: restarted, client, model,
@@ -316,6 +315,10 @@ test("CaptureService corrects REST resources after restart without repeating com
     await capture.checkpoint();
 
     // Assert: the model receives actual server details and prior receipts; only failed fields save.
+    const partial = (correctionInput as any).outcome;
+    assert.match(partial.executionFailure, /HTTP 400/);
+    assert.equal(partial.knowledgeState.entities.length, 1);
+    assert.equal(partial.knowledgeState.pendingCreates?.length ?? 0, 0);
     assert.match(JSON.stringify(correctionInput), /HTTP 400/);
     assert.match(JSON.stringify(correctionInput), /string_too_long/);
     assert.match(JSON.stringify(correctionInput), /title/);

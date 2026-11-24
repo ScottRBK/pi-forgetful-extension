@@ -1383,8 +1383,8 @@ Tests exercise these public boundaries:
    regular and fullscreen TUI modes; the original visual mock used fullscreen only.
    Inspect captured panes and verify cleanup; keep the user's running Pi session untouched.
    `test/background-ui-pi.test.ts` provides an existing opt-in terminal harness pattern.
-4. **Existing memory behaviour:** run `npm run check`, the targeted real REST suites with
-   `FORGETFUL_TEST_SOURCE` set, and opt-in terminal checks. Verify discovery changes preserve early
+4. **Existing memory behaviour:** run `npm run check:real` with `FORGETFUL_TEST_SOURCE` set,
+   and opt-in terminal checks. Verify discovery changes preserve early
    capture queueing, repository identity, trust, startup responsiveness and the sole main-agent
    tool `forgetful_recall_wait`. Use deterministic fixtures, not paid model calls.
 

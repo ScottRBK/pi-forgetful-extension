@@ -30,13 +30,16 @@ The tests exercise public behaviour using the real filesystem and Pi SDK, with p
 external model responses. Ordinary checks include real Pi restart tests for capture cleanup after
 three failed attempts, persisted summary reuse, session/branch isolation, and provider-boundary
 context-limit enforcement. No paid model calls are required for these regressions.
-Optional Forgetful integration tests run its actual REST routes and SQLite repositories against
-an in-memory database with fixed test embeddings:
+Forgetful integration tests run its actual REST routes and SQLite repositories against an
+in-memory database with fixed test embeddings. `npm run check` skips them. Run them with
+`check:real`, which fails when `FORGETFUL_TEST_SOURCE` is not set:
 
 ```bash
 FORGETFUL_TEST_SOURCE=/path/to/forgetful \
-  npm run check
+  npm run check:real
 ```
+
+Run `check:real` before committing changes to capture, project initialisation or REST handling.
 
 That checkout needs its development `.venv`, including its test dependencies. The integration test
 does not open the production database or write production memories. Deterministic tests verify the

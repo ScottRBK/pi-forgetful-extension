@@ -220,6 +220,8 @@ review ends unless the user asks to keep them.
 ## Status
 
 MVP implemented for Pi 1. Run `npm run check` for deterministic
-regression and real Pi SDK integration tests. Set `FORGETFUL_TEST_SOURCE` to a Forgetful checkout
-for isolated real REST tests. Real-model judgment and latency checks are separately opt-in.
+regression and real Pi SDK integration tests. It skips the isolated real REST tests. Before
+committing capture, project initialisation or REST changes, run `npm run check:real` with
+`FORGETFUL_TEST_SOURCE` set to a Forgetful checkout; it fails when that variable is not set.
+Real-model judgment and latency checks are separately opt-in.
 See [setup and controls](README.md).

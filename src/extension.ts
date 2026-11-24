@@ -26,7 +26,7 @@ import type {
   Scope,
   WorkContext,
 } from "./contracts.ts";
-import { ApiForgetfulClient } from "./http.ts";
+import { ApiForgetfulClient, ForgetfulHttpError } from "./http.ts";
 import { registerForegroundTool } from "./foreground-tools.ts";
 import { repositoryName } from "./repository.ts";
 import {
@@ -3330,8 +3330,8 @@ export function createForgetfulExtension(
       if (!context.repoName || context.repoName.length > 255) {
         notify(
           ctx,
-          "No supported Git origin remote found. Add an origin remote, then run " +
-            "/forgetful project init again.",
+          "No supported Git origin remote found. The origin must name owner/repo. " +
+            "Add or fix the origin remote, then run /forgetful project init again.",
           "error",
         );
         return;
@@ -3385,6 +3385,11 @@ export function createForgetfulExtension(
       } catch (error) {
         if (error instanceof ProjectInitError) {
           notify(ctx, error.message, "error");
+          return;
+        }
+        if (error instanceof ForgetfulHttpError) {
+          // Show what Forgetful said, so the human can correct the project details.
+          notify(ctx, `Project initialisation failed. ${errorMessage(error)}`, "error");
           return;
         }
         notify(
