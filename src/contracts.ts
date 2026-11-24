@@ -186,6 +186,19 @@ export interface MemoryCreateResult {
   autoLinkedMemoryIds?: number[];
 }
 
+/**
+ * Forgetful rejected the request, so a dispatched write did not apply. A 404 means the route or
+ * the target record does not exist. Other failures, including 5xx, leave the outcome unknown.
+ */
+export function rejectedHttpStatus(status: unknown): boolean {
+  return status === 400 || status === 404 || status === 422;
+}
+
+/** Forgetful's HTTP rejection of a dispatched write or a lookup. */
+export function rejectedHttpError(error: unknown): boolean {
+  return error instanceof Error && "status" in error && rejectedHttpStatus(error.status);
+}
+
 export interface ForgetfulClient {
   knowledge?: KnowledgeClient;
   getMemoryEntityIds?(id: number, signal?: AbortSignal): Promise<number[]>;

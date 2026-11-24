@@ -62,7 +62,7 @@ are outside this list.
 
 **C20. Mutation retry safety** (`src/capture.ts:1490-1530, 2627-2694`)
 `SKIP completed writes; block replay when a dispatched write's outcome is uncertain.`
-`ALLOW correction of definite HTTP 400/422 rejections using the actual Forgetful error.`
+`ALLOW correction of definite HTTP 400/404/422 rejections using the actual Forgetful error.`
 `KEEP completed receipts across correction/restart; do not retarget protected writes.`
 `A permission pause before dispatch can retry; it is not an uncertain write.`
 

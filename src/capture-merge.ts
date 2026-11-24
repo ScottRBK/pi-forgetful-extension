@@ -1,6 +1,8 @@
 import { errorMessage } from "./privacy.ts";
 import { CaptureSelectionError } from "./capture-feedback.ts";
-import type { ForgetfulClient, Memory, Scope } from "./contracts.ts";
+import {
+  type ForgetfulClient, type Memory, type Scope, rejectedHttpError,
+} from "./contracts.ts";
 
 export interface MergeConnections {
   memoryIds: number[];
@@ -146,8 +148,7 @@ export async function preserveMergeConnections(
         await save();
         throw error;
       }
-      const rejected = error instanceof Error && "status" in error &&
-        (error.status === 400 || error.status === 422);
+      const rejected = rejectedHttpError(error);
       plan.receipts[key] = { status: rejected ? "rejected" : "started", input, error: message };
       await save();
       if (!rejected) throw new MergeWriteUncertain(message, { cause: error });

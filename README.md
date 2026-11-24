@@ -616,7 +616,7 @@ feedback so the model can correct them;
 text-only replies and JSON strings inside arguments are not parsed as instructions. Private
 submission structure, eligible evidence IDs, action names and decision coverage remain validated.
 Forgetful owns stored-field requirements, types and lengths. These payloads reach REST unchanged.
-Definite HTTP 400/422 rejections and safe target-selection failures receive immediate correction
+Definite HTTP 400/404/422 rejections and safe target-selection failures receive immediate correction
 before a retry-pending warning, when the task budget permits. In a new correction task, the model
 must call `report_capture_execution_failure` to receive the saved instruction, original error and
 receipts as an error tool result, then submit `submit_capture_correction`. Connection failures use
@@ -628,7 +628,7 @@ Its progress survives task-budget yields and restarts. An exhausted cycle enters
 failure handling; a later eligible queue retry starts another bounded cycle under the existing
 three-failed-attempt limit. Server outages, rate limits, timeouts and connection failures instead
 keep the original diagnostic for normal queue retry, without extra model-correction calls.
-A missing-record lookup can be corrected; a failed dispatched write is not treated as a lookup.
+A 404 from a dispatched write is a definite rejection: no route or target record exists.
 These counters are separate from private submission attempts and read turns. Completed operations
 are retained, and uncertain writes cannot be retried automatically.
 Unknown model-selected projects can be corrected using the existing project list, never silently

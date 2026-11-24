@@ -335,17 +335,24 @@ test("CaptureService corrects REST resources after restart without repeating com
     assert.equal(memories.length, 2, "Only the setup memory and one captured memory exist");
   });
 
-test("HTTP 422 clears only a rejected create and returns its exact diagnostic for correction",
+const rejections = [
+  { status: 422,
+    diagnostic: '{"detail":[{"loc":["body","name"],"msg":"Required service field"}]}' },
+  { status: 404, diagnostic: "Not Found" },
+];
+
+for (const { status, diagnostic } of rejections) test(
+  `HTTP ${status} clears only a rejected create and returns its exact diagnostic for correction`,
   async (t) => {
-    // Arrange: use the real HTTP adapter with an external service returning a field rejection.
-    const diagnostic = '{"detail":[{"loc":["body","name"],"msg":"Required service field"}]}';
+    // Arrange: use the real HTTP adapter with an external service returning a rejection.
     const bodies: unknown[] = [];
     const server = createServer(async (request, response) => {
       let text = "";
       for await (const chunk of request) text += chunk;
       const body = JSON.parse(text);
       bodies.push(body);
-      response.writeHead(bodies.length === 1 ? 422 : 201, { "content-type": "application/json" });
+      response.writeHead(bodies.length === 1 ? status : 201,
+        { "content-type": "application/json" });
       response.end(bodies.length === 1 ? diagnostic : JSON.stringify({ ...body, id: 17 }));
     });
     t.after(() => new Promise<void>((resolve) => {
@@ -368,9 +375,9 @@ test("HTTP 422 clears only a rejected create and returns its exact diagnostic fo
     await assert.rejects(writer.execute(plan, {}, async (state) => { previous = state; }),
       (error) => {
         assert.ok(error instanceof ForgetfulHttpError);
-        assert.equal(error.status, 422);
+        assert.equal(error.status, status);
         assert.equal(error.responseBody, diagnostic);
-        assert.match(error.message, /Required service field/);
+        assert.ok(error.message.endsWith(`HTTP ${status}: ${diagnostic}`));
         return true;
       });
     assert.equal(previous.pendingCreates?.length ?? 0, 0);

@@ -1,8 +1,9 @@
 import { CaptureSelectionError } from "./capture-feedback.ts";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type {
-  ForgetfulClient, Memory, Document, CodeArtifact, Entity, Scope,
+import {
+  type ForgetfulClient, type Memory, type Document, type CodeArtifact, type Entity, type Scope,
+  rejectedHttpStatus,
 } from "./contracts.ts";
 import { hasSensitiveData, errorMessage } from "./privacy.ts";
 
@@ -254,7 +255,7 @@ async function executeConnection(
     .filter((result) => result.operation === operation && result.targetId === targetId);
   if (receipts.some((receipt) => receipt.status === "completed")) return;
   const uncertain = receipts.find((receipt) => receipt.status !== "failed" ||
-    (receipt.httpStatus !== 400 && receipt.httpStatus !== 422));
+    !rejectedHttpStatus(receipt.httpStatus));
   if (uncertain) throw new Error(uncertain.error ?? "Connection operation outcome is unknown");
   const started: ConnectionResult = { operation, targetId, status: "started" };
   const previousResults = review.executionResults ?? [];

@@ -1,4 +1,5 @@
 import { errorMessage } from "./privacy.ts";
+import { rejectedHttpError } from "./contracts.ts";
 import { createHash } from "node:crypto";
 import { inspect } from "node:util";
 
@@ -151,11 +152,6 @@ function positiveId(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-function rejectedCreate(error: unknown): boolean {
-  if (!(error instanceof Error) || !("status" in error)) return false;
-  return error.status === 400 || error.status === 422;
-}
-
 function stateWithNumber(
   values: KnowledgeWriteReceipt[],
   key: string,
@@ -281,7 +277,7 @@ export class KnowledgeWriter {
   private async recordCreateFailure(
     attempt: string, state: KnowledgeWriteState, save: KnowledgeWriteSave, error: unknown,
   ): Promise<void> {
-    if (rejectedCreate(error)) {
+    if (rejectedHttpError(error)) {
       // The service rejected this payload. Keep prior receipts and allow field correction.
       state.pendingCreates = state.pendingCreates!.filter((item) => item !== attempt);
       try { await save(); } catch {
@@ -289,7 +285,7 @@ export class KnowledgeWriter {
       }
     }
     // All other failures may have accepted the create and must remain pending.
-    if (!rejectedCreate(error)) {
+    if (!rejectedHttpError(error)) {
       try { await save(); } catch { /* Keep the original failure and pending receipt. */ }
     }
   }
@@ -517,7 +513,7 @@ export class KnowledgeWriter {
     } catch (error) {
       state.failure = { kind, key, occurrence: 0, input,
         error: error instanceof Error ? errorMessage(error) : inspect(error, { depth: 5 }) };
-      if (!dispatched || rejectedCreate(error))
+      if (!dispatched || rejectedHttpError(error))
         state.pendingCreates = state.pendingCreates.filter(item => item !== attempt);
       try { await save(); } catch { /* The durable pending receipt still prevents replay. */ }
       throw error;

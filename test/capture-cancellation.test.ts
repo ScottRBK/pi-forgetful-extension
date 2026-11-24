@@ -902,17 +902,22 @@ test("foreground write uncertainty cannot contaminate a concurrent worker's read
   });
 
 for (const operation of ["create", "supersede"] as const) {
-  for (const response of ["rejected", "accepted-500"] as const) {
+  for (const response of ["rejected", "rejected-404", "accepted-500"] as const) {
     test(`${operation} ${response} preserves the error and mutation replay safety`, async (t) => {
-      // Arrange: a definite rejection is correctable; a lost acceptance cannot be replayed.
+      // Arrange: a definite rejection (422, or a plain route 404) is correctable;
+      // a lost acceptance cannot be replayed.
+      const rejected = response !== "accepted-500";
       const f = await fixture(t);
       if (operation === "supersede") {
         f.stored.set(42, oldMemory);
         f.state.action = "supersede";
       }
       let requests = 0;
-      const body = response === "rejected" ? '{"detail":"Rejected write field"}'
-        : '{"detail":"Receipt failed after acceptance"}';
+      const body = response === "rejected-404" ? "Not Found"
+        : rejected ? '{"detail":"Rejected write field"}'
+          : '{"detail":"Receipt failed after acceptance"}';
+      const reported = response === "rejected-404" ? "HTTP 404: Not Found"
+        : "Rejected write field";
       f.state.rest = (path, init) => {
         if (!(operation === "create" ? path.endsWith("/memories") && init?.method === "POST"
           : init?.method === "DELETE")) return;
@@ -928,28 +933,29 @@ for (const operation of ["create", "supersede"] as const) {
             f.stored.set(42, { ...oldMemory, is_obsolete: true, superseded_by: 99 });
           }
         }
-        return Promise.resolve(new Response(body, { status: response === "rejected" ? 422 : 500 }));
+        return Promise.resolve(new Response(body, {
+          status: { rejected: 422, "rejected-404": 404, "accepted-500": 500 }[response] }));
       };
 
       // Act: persist the actual error, then restart through the durable queue.
       await f.run();
       const failed = await f.queue.getJob(f.jobId);
       if (response === "accepted-500") assert.ok(failed?.lastError?.includes(body));
-      else assert.ok(JSON.stringify(f.state.tasks).includes("Rejected write field"));
+      else assert.ok(JSON.stringify(f.state.tasks).includes(reported));
       const resumed = f.open();
       await resumed.run();
 
       // Assert: accepted side effects happen once; only a definite rejection can be corrected.
       const saved = await resumed.queue.getJob(f.jobId);
       assert.equal(f.state.creates, 1);
-      if (response === "rejected") {
+      if (rejected) {
         assert.equal(saved?.status, "complete", saved?.lastError);
         assert.equal(requests, 2);
         assert.equal(saved?.uncertainWrite, undefined);
         if (operation === "create")
           assert.ok(f.state.models.includes("submit_capture_correction"));
         else assert.equal(f.state.models.filter(name => name === "submit_capture_links").length, 2);
-        assert.ok(JSON.stringify(f.state.tasks).includes("Rejected write field"));
+        assert.ok(JSON.stringify(f.state.tasks).includes(reported));
       } else {
         assert.equal(requests, 1, "accepted mutation must never be replayed");
         assert.ok(saved?.uncertainWrite, "500 after acceptance must retain an uncertain receipt");

@@ -527,8 +527,8 @@ The capture service applies supersession in this order:
    error result, before `submit_capture_correction` can revise rejected fields. This is a new
    private task, not continuation of the original submitting conversation. Connection failures
    use their existing connection-review submission with the same reporting requirement.
-   HTTP 400/422 dispatched rejections allow correction; uncertain writes remain blocked across
-   restarts. A pre-dispatch missing-record read is distinct from a dispatched mutation failure.
+   HTTP 400/404/422 dispatched rejections allow correction; uncertain writes remain blocked across
+   restarts. A dispatched 404 means no route or target record exists, so nothing was written.
    Outages (5xx, rate limits, transport timeouts or refused connections) use normal queue retry,
    retaining their original diagnostic without asking the model to revise valid instructions.
    Classification uses status, error type and dispatch receipts, not error-message matching.

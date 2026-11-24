@@ -885,12 +885,13 @@ for (const kind of ["documents", "code-artifacts", "entities", "sensitive-docume
     });
 }
 
-test("legacy queued connection failures use report-gated connection review after restart",
+for (const status of [422, 404]) test(
+  `legacy queued connection HTTP ${status} uses report-gated connection review after restart`,
   async (t) => {
     // Arrange: a queue written before correction cycles, with an existing completed memory.
     const f = await fixture(t);
     f.stored.set(100, memory(100));
-    const error = 'Forgetful POST /memories/100/links returned HTTP 422: "Rejected edge"';
+    const error = `Forgetful POST /memories/100/links returned HTTP ${status}: "Rejected edge"`;
     const queued = await f.queue.enqueue(snapshot());
     await f.queue.checkpoint(queued.jobId, { extractedCandidates: [candidate],
       candidateOutcomes: { rule: { stage: "links-pending", action: "create", memoryId: 100,
@@ -899,7 +900,7 @@ test("legacy queued connection failures use report-gated connection review after
         linkReview: { status: "pending", memory: memory(100), memories: [memory(1)],
           decisions: [judgment(1, "add")],
           executionResults: [{ operation: "link", targetId: 1, status: "failed",
-            httpStatus: 422, error }], failures: [{ operation: "connections", error }] },
+            httpStatus: status, error }], failures: [{ operation: "connections", error }] },
       } } });
     f.state.review = input => {
       assert.equal(input.candidates[0].completedWrites.memoryId, 100);
@@ -1227,7 +1228,7 @@ for (const path of ["candidate", "resource", "connection", "merge", "retire"] as
 }
 
 for (const path of ["candidate", "resource", "connection", "merge", "retire"] as const) {
-  for (const fault of [503, 429, 404, "timeout", "network"] as const) {
+  for (const fault of [503, 429, "timeout", "network"] as const) {
     for (const budget of [1, 4]) {
       test(`${path} dispatched ${fault} remains unknown at budget ${budget}`, async (t) => {
         // Arrange: the mutation reaches the server; its response cannot establish rejection.
@@ -1284,7 +1285,7 @@ for (const path of ["candidate", "resource", "connection", "merge", "retire"] as
         await restarted.checkpoint();
         await restarted.checkpoint();
 
-        // Assert: no model correction and no replay, including dispatched HTTP 404.
+        // Assert: no model correction and no replay.
         assert.equal((await queue.getJob(queued.jobId))!.status, "paused");
         assert.equal((await queue.getJob(queued.jobId))!.uncertainWrite, pending.uncertainWrite);
         assert.deepEqual(f.modelCalls, calls);
@@ -1381,7 +1382,7 @@ for (const path of ["candidate", "connection"] as const) {
   }
 }
 
-for (const status of [404, 503, undefined]) {
+for (const status of [503, undefined]) {
   test(`legacy dispatched link status ${status} is blocked before model work`, async (t) => {
     // Arrange: older queues may retain a failed dispatched receipt without uncertainWrite.
     const f = await fixture(t);
@@ -1460,13 +1461,13 @@ test("connection correction waits through a refresh outage without extra model c
 });
 
 test("uncertain supersede DELETE retains a non-correctable connection cycle", async (t) => {
-  // Arrange: a missing mutation response cannot prove that retirement did not happen.
+  // Arrange: a 500 after dispatch cannot prove that retirement did not happen.
   const f = await fixture(t);
   f.state.decision = { action: "supersede", conflictingMemoryId: 1, oldClaim: "Retry once",
     newClaim: "Retry twice", sourceEntryIds: ["user"], reason: "Complete adopted change." };
   f.state.review = () => ({ reviews: [{ candidateId: "rule", decisions: [] }] });
   f.state.intercept = request => request.method === "DELETE" && request.path === "/memories/1"
-    ? { status: 404, body: { error: "Original missing mutation response" } } : undefined;
+    ? { status: 500, body: { error: "Original failed mutation response" } } : undefined;
   const queued = await f.service.enqueue(snapshot());
 
   // Act: inspect the durable state after dispatch, then attempt recovery twice.
@@ -1482,7 +1483,7 @@ test("uncertain supersede DELETE retains a non-correctable connection cycle", as
 
   // Assert: uncertainty blocks replay and must not advertise an available correction.
   assert.equal(pending.status, "paused");
-  assert.match(pending.uncertainWrite!, /Original missing mutation response/);
+  assert.match(pending.uncertainWrite!, /Original failed mutation response/);
   assert.equal(pending.supersession?.status, "started");
   assert.equal(f.requests.filter(r => r.method === "DELETE").length, 1);
   assert.equal(f.requests.length, requests);

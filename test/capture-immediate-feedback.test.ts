@@ -327,6 +327,63 @@ for (const maxModelCalls of [1, 4]) {
     });
 }
 
+// Bad IDs in the URL path, not the JSON body: Forgetful rejects each without a write.
+const rejectedEntityIds: Array<{ entityId: unknown; error: string }> = [
+  { entityId: "a/b.md", error: "Forgetful POST /api/v1/entities/a%2Fb.md/memories returned " +
+    "HTTP 404: Not Found" },
+  { entityId: 999_999, error: "Forgetful POST /api/v1/entities/999999/memories returned " +
+    'HTTP 404: {"error":"Entity 999999 not found"}' },
+  { entityId: "definition_of_done.md", error: "Forgetful POST " +
+    "/api/v1/entities/definition_of_done.md/memories returned HTTP 400: " +
+    `{"error":"Invalid value for 'entity_id': must be an integer"}` },
+];
+
+for (const { entityId, error } of rejectedEntityIds) {
+  test(`rejected preservation entity ${JSON.stringify(entityId)} is returned to the model`,
+    realOptions, async (t) => {
+      // Arrange: the model preserves a bad entity ID, then removes it after the failure report.
+      let targetId: number;
+      let reports = 0;
+      const f = await fixture(t, context => {
+        const name = task(context);
+        if (name === "submit_capture_candidates") return { name, arguments: {
+          candidates: [fact] } };
+        if (name === "submit_capture_decision") return { name, arguments: { action: "create" } };
+        assert.equal(name, "submit_capture_links");
+        if (context.tools!.some(tool => tool.name === "report_capture_execution_failure") &&
+            !context.messages.some(message => message.role === "toolResult")) {
+          reports++;
+          return { name: "report_capture_execution_failure", arguments: {} };
+        }
+        return { name, arguments: { reviews: [{ candidateId: fact.id,
+          decisions: [{ memoryId: targetId, action: "add", reason: "Related decision" }],
+          preservation: { documentIds: [], codeArtifactIds: [],
+            entityIds: reports === 0 ? [entityId] : [] },
+        }] } };
+      });
+      targetId = (await f.setup.create({ ...fact, title: "Related decision",
+        project_ids: [f.project.id] })).id;
+      const service = new CaptureService({ ...f, instanceId });
+
+      // Act.
+      const queued = await service.enqueue(f.snapshot);
+      const result = await service.checkpoint();
+
+      // Assert: the job completes after one correction, and the rejected link is not replayed.
+      assert.deepEqual(result.errors, []);
+      const job = (await f.queue.getJob(queued.jobId))!;
+      assert.equal(job.status, "complete", job.lastError);
+      assert.equal(job.uncertainWrite, undefined);
+      assert.equal(reports, 1);
+      assert.equal(f.posts.filter(post => post.path.startsWith("/api/v1/entities/")).length, 1);
+      const report = f.contexts.at(-1)!.messages.find(message =>
+        message.role === "toolResult" && message.toolName === "report_capture_execution_failure");
+      assert.ok(report?.role === "toolResult" && report.content[0].type === "text");
+      const [reported] = JSON.parse(report.content[0].text);
+      assert.equal(reported.failure.error, error, "the model must see Forgetful's own error");
+    });
+}
+
 test("maintenance merge correction requires the complete composition before another POST",
   realOptions, async (t) => {
     // Arrange: a maintenance item selects a merge, whose complete composition is rejected.

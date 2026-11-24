@@ -187,14 +187,15 @@ retain their structured details. Optional recall failures remain diagnostics, no
 Error visibility and permission to retry are separate decisions. For capture execution, classify
 failures using HTTP status, error type and dispatch receipts, never guesses from error wording:
 
-- Confirmed HTTP 400/422 rejections allow immediate, bounded model correction of the rejected
+- Confirmed HTTP 400/404/422 rejections allow immediate, bounded model correction of the rejected
   instruction. A 404 lookup before mutation, or an explicit local target-selection error, can
   likewise let the model correct its selection. Never silently choose a different destination.
 - HTTP 5xx, 429, transport timeouts and connection failures retain their original diagnostics for
   normal queue retry where safe. Do not spend extra correction-model calls on service outages.
 - A failed dispatched write may already have succeeded. Unless its rejection is definite under
   the existing receipt rules, keep it uncertain and blocked; never blindly replay it. A mutation
-  404 is not equivalent to a missing-record lookup. Completed writes are never replayed either.
+  404 is definite: Forgetful found no route or target record, so nothing was written. This
+  includes a plain `Not Found` for an ID that contains `/`. Completed writes are never replayed.
 - Permission loss and lifecycle cancellation pause work through their existing handling; they
   are not errors for the model to correct. Lifecycle cancellation consumes no correction attempt.
 

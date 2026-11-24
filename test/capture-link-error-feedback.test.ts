@@ -35,7 +35,7 @@ function submit(response: ServerResponse, id: number, name: string, args: unknow
 }
 
 
-test("dispatched link HTTP 404 stays unresolved through the real Pi SDK boundary", {
+test("dispatched link HTTP 404 is returned to the model through the real Pi SDK boundary", {
   timeout: 15_000,
 }, async (t) => {
   // Arrange: real capture, disk queue, HTTP client and Pi SDK; only remote endpoints are scripted.
@@ -65,7 +65,8 @@ test("dispatched link HTTP 404 stays unresolved through the real Pi SDK boundary
         tool.function.name === "report_capture_execution_failure") &&
         !input.messages.some(message => message.role === "tool");
       const name = reporting ? "report_capture_execution_failure"
-        : input.tools[0]?.function.name ?? "missing-tool";
+        : input.tools.find(tool => tool.function.name.startsWith("submit_"))?.function.name ??
+          "missing-tool";
       events.push(name);
       let args: unknown;
       if (name === "report_capture_execution_failure") args = {};
@@ -141,34 +142,32 @@ test("dispatched link HTTP 404 stays unresolved through the real Pi SDK boundary
   const expectedError = 'Forgetful DELETE /api/v1/memories/99/links/42 returned HTTP 404: ' +
     '{"error":"Link not found"}';
 
-  // Act: the dispatched mutation fails; another checkpoint cannot establish its outcome.
+  // Act: the dispatched mutation is rejected; a restart must not repeat it.
   const queued = await capture.enqueue(snapshot);
   assert.equal(queued.queued, true);
   const first = await capture.checkpoint();
   assert.deepEqual(first.errors, []);
-  assert.equal(providerRequests.length, 3);
   const reopened = new DurableQueueStore({ directory, instanceId });
   const restarted = new CaptureService({ queue: reopened, client: client(), model: model(),
     instanceId });
   const second = await restarted.checkpoint();
 
-  // Assert: no extra provider task, no lost diagnostic, and no mutation replay.
+  // Assert: the model sees Forgetful's own 404 and corrects; no pause and no replay.
   assert.deepEqual(unexpectedRequests, []);
   assert.deepEqual(second.errors, []);
   assert.deepEqual(events, ["submit_capture_candidates", "submit_capture_decision",
-    "submit_capture_links", "DELETE returned 404"]);
+    "submit_capture_links", "DELETE returned 404", "report_capture_execution_failure",
+    "submit_capture_links"]);
+  const report = providerRequests.at(-1)!.messages.find(message => message.role === "tool");
+  const [reported] = JSON.parse(report!.content);
+  assert.equal(reported.failure.error, expectedError, "the model must see Forgetful's own 404");
   const finished = await reopened.getJob(queued.jobId);
-  assert.equal(finished?.status, "paused");
-  assert.equal(finished?.uncertainWrite, expectedError);
-  assert.equal(finished?.attempts, 0);
-  assert.equal(finished?.callCount, 3);
+  assert.equal(finished?.status, "complete", finished?.lastError);
+  assert.equal(finished?.uncertainWrite, undefined);
   const outcome = finished?.candidateOutcomes.decision as {
     memoryId: number; linkReview: CaptureLinkReview;
   };
   assert.equal(outcome.memoryId, 99);
-  assert.deepEqual(outcome.linkReview.executionResults, [
-    { operation: "unlink", targetId: 42, status: "failed", error: expectedError, httpStatus: 404 },
-  ]);
   assert.deepEqual(mutations, ["POST /api/v1/memories", "DELETE /api/v1/memories/99/links/42"],
     "retry must not recreate the saved memory or repeat a deletion without a new instruction");
   assert.deepEqual((await client().get(99)).linked_memory_ids, []);

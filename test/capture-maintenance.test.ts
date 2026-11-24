@@ -466,6 +466,40 @@ for (const failure of ["preservation", "obsolete"] as const) {
     });
 }
 
+test("a merge preservation 404 is returned to correction, not left uncertain", realOptions,
+  async (t) => {
+    // Arrange: Forgetful rejects the inherited link with a plain route 404; nothing is written.
+    const { baseUrl, client: api, project, queue } = await fixture(t);
+    const old = await api.create({ ...fact, project_ids: [project.id] });
+    const lead = await api.create({ ...fact, project_ids: [project.id] });
+    await api.knowledge.linkMemories(old.id, [lead.id]);
+    let rejected = 0, correctionError = "";
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (!rejected && init?.method === "POST" && String(url).endsWith("/links")) {
+        rejected++;
+        return new Response("Not Found", { status: 404 });
+      }
+      return fetch(url, init);
+    } });
+    const model = mergeModel([old.id]);
+    const complete = model.complete;
+    model.complete = async (request) => {
+      if (request.submission.name === "submit_capture_correction")
+        correctionError = (request.input as any).outcome.executionFailure;
+      return complete(request);
+    };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    // Assert: the model sees the original 404, and the corrected merge completes.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.uncertainWrite, undefined);
+    assert.match(correctionError, /POST \S+\/links returned HTTP 404: Not Found/);
+    assert.equal(job.status, "complete", job.lastError);
+    assert.equal((await api.get(old.id)).is_obsolete, true);
+  });
+
 test("merge preserves connections added to a predecessor while preservation is running",
   realOptions, async (t) => {
     // Arrange: another client adds a connection after the first inherited edge is accepted.

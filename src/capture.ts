@@ -19,6 +19,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
   ModelEvidencePage, ModelReadErrorResult, ModelSubmissionError, ModelTaskPause,
+  rejectedHttpError, rejectedHttpStatus,
 } from "./contracts.ts";
 import type { DiagnosticLogger } from "./logging.ts";
 import {
@@ -1085,11 +1086,6 @@ function overlapCandidate(candidate: CaptureCandidate): Record<string, unknown> 
   return { ...candidate };
 }
 
-function definitelyRejected(error: unknown): boolean {
-  return error instanceof Error && "status" in error &&
-    (error.status === 400 || error.status === 422);
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return diagnosticErrorMessage(error);
   if (error === null || typeof error !== "object") return String(error);
@@ -1639,7 +1635,7 @@ export class CaptureService {
         ...record(started.candidateOutcomes[candidate.id]),
         // A guard pause precedes HTTP; only dispatched writes need uncertainty protection.
         creation: notDispatched ? undefined : {
-          status: definitelyRejected(error) ? "rejected" : "unknown", input,
+          status: rejectedHttpError(error) ? "rejected" : "unknown", input,
           error: errorMessage(error) },
       });
       throw error;
@@ -1767,7 +1763,7 @@ export class CaptureService {
       if (replacementId === undefined) await this.client.obsolete!(oldMemory.id, reason);
       else await this.client.supersede(oldMemory.id, replacementId, reason);
     } catch (error) {
-      if (definitelyRejected(error) || (error instanceof CapturePause &&
+      if (rejectedHttpError(error) || (error instanceof CapturePause &&
           !(error instanceof CaptureUncertainWrite))) {
         await this.recordSupersession({ ...receipt, status: "failed" });
       } else {
@@ -3276,7 +3272,7 @@ export class CaptureService {
     const review = outcome?.linkReview as CaptureLinkReview | undefined;
     const receipt = [...(review?.executionResults ?? []), ...(review?.previousResults ?? [])]
       .find(item => item.status === "started" || (item.status === "failed" &&
-        item.httpStatus !== 400 && item.httpStatus !== 422));
+        !rejectedHttpStatus(item.httpStatus)));
     return receipt ? new CaptureUncertainWrite(
       receipt.error ?? "Connection operation outcome is unknown") : undefined;
   }
@@ -3457,7 +3453,7 @@ export class CaptureService {
           receipt => receipt.status !== "completed"))) {
       const rejected = [...(legacyReview.executionResults ?? []),
         ...(legacyReview.previousResults ?? [])].some(receipt => receipt.status === "failed" &&
-          (receipt.httpStatus === 400 || receipt.httpStatus === 422));
+          rejectedHttpStatus(receipt.httpStatus));
       // Legacy text cannot distinguish an outage from bad selection. Re-read a saved plan;
       // only proven rejection permits correction without another guarded execution.
       current = await this.checkpointOutcome(current, candidateId, { ...outcome,
@@ -4643,7 +4639,7 @@ export class CaptureService {
       return result.id;
     } catch (error) {
       conflict.replacement = { ...conflict.replacement!,
-        creationAttempted: dispatched && !definitelyRejected(error),
+        creationAttempted: dispatched && !rejectedHttpError(error),
         creationError: errorMessage(error) };
       const uncertain = this.operations.getStore()?.uncertainWrite;
       await this.queue.updateConflict(conflict.id, { replacement: conflict.replacement,

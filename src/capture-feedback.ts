@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { ModelReadErrorResult, type ModelReadTool } from "./contracts.ts";
+import { ModelReadErrorResult, type ModelReadTool, rejectedHttpError } from "./contracts.ts";
 import { sanitizeValue } from "./privacy.ts";
 
 /** A reserved execution survives task-budget yields without spending another attempt. */
@@ -16,8 +16,7 @@ export class CaptureSelectionError extends Error {}
 
 /** Call only after dispatch receipts have ruled out an uncertain mutation. */
 export function correctableCaptureError(error: unknown): boolean {
-  return error instanceof CaptureSelectionError || (error instanceof Error && "status" in error &&
-    [400, 422, 404].includes(error.status as number));
+  return error instanceof CaptureSelectionError || rejectedHttpError(error);
 }
 
 export const initialCorrectionCycle = (): CaptureCorrectionCycle => ({
