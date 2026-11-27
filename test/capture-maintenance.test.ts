@@ -500,6 +500,81 @@ test("a merge preservation 404 is returned to correction, not left uncertain", r
     assert.equal((await api.get(old.id)).is_obsolete, true);
   });
 
+test("capture prompts state the field limits configured on the server", realOptions,
+  async (t) => {
+    // Arrange: the server allows 1000 content characters; the first merge text is over it.
+    const { client, project, queue } = await fixture(t,
+      { MEMORY_NUM_AUTO_LINK: "0", MEMORY_CONTENT_MAX_LENGTH: "1000" });
+    const old = await client.create({ ...fact, project_ids: [project.id] });
+    const policies = new Map<string, string>();
+    let composed = false;
+    const model = { async complete(request: ModelRequest) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
+      const name = request.submission.name;
+      policies.set(name, request.policy);
+      let response: unknown;
+      if (request.purpose === "capture") response = { candidates: [addition] };
+      else if (name === "submit_capture_decision")
+        response = { action: "merge", conflictingMemoryIds: [old.id], reason: "Add the guard." };
+      else if (name === "submit_capture_merge") {
+        response = composed ? combined : { ...combined, content: "x".repeat(1001) };
+        composed = true;
+      } else if (name === "submit_capture_correction") {
+        response = { candidate: { ...(request.input as any).candidate,
+          content: combined.content } };
+      } else assert.fail(`Unexpected semantic review: ${name}`);
+      request.submission.validate(response);
+      return response;
+    } };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    // Assert: each writing prompt states the server's limit, not a built-in number.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    for (const name of ["submit_capture_candidates", "submit_capture_merge",
+      "submit_capture_correction"]) {
+      const policy = policies.get(name) ?? "";
+      assert.match(policy, /memory: [^;]*content 1000\b/, name);
+      assert.doesNotMatch(policy, /\b2000\b/, name);
+    }
+  });
+
+test("capture prompts give no limits when the server does not publish them", realOptions,
+  async (t) => {
+    // Arrange: an older server's discovery document has no limits.
+    const { baseUrl, client: api, project, queue } = await fixture(t);
+    const old = await api.create({ ...fact, project_ids: [project.id] });
+    let discovery = 0;
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (!new URL(String(url)).pathname.endsWith("/.well-known")) return fetch(url, init);
+      discovery++;
+      return Response.json({ schema_version: 1, capabilities: { planning: false } });
+    } });
+    const policies: string[] = [];
+    const model = mergeModel([old.id]);
+    const complete = model.complete;
+    model.complete = async (request) => {
+      policies.push(request.policy);
+      return complete(request);
+    };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    // Assert: Forgetful still validates; the prompts state no numbers of their own.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    assert.ok(discovery > 0, "capture asks the server for its limits");
+    assert.ok(policies.length >= 3);
+    for (const policy of policies) {
+      assert.doesNotMatch(policy, /field limits/i);
+      assert.doesNotMatch(policy, /at most \d+ characters/);
+    }
+  });
+
 test("merge preserves connections added to a predecessor while preservation is running",
   realOptions, async (t) => {
     // Arrange: another client adds a connection after the first inherited edge is accepted.

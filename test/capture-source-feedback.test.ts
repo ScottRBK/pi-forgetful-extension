@@ -56,7 +56,10 @@ async function fixture(t: TestContext, options: {
     },
   }, { provider: "test", id: "memory" });
   const capture = new CaptureService({ queue, model, instanceId: "test",
-    client: new ApiForgetfulClient({ baseUrl: url }),
+    // The source server is not Forgetful: capture's limits read gets an older server's 404.
+    client: new ApiForgetfulClient({ baseUrl: url, fetchImpl: async (input, init) =>
+      new URL(String(input)).pathname.endsWith("/.well-known")
+        ? new Response("Not Found", { status: 404 }) : fetch(input, init) }),
     canReadNow: options.canReadNow, isEnabled: options.isEnabled });
   const snapshot: CaptureSnapshot = { id: "source", instanceId: "test", mode: "auto",
     scope: "project", policy: "", modelVersion: "test", finalEntryId: "user",

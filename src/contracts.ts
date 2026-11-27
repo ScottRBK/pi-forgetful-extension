@@ -199,8 +199,20 @@ export function rejectedHttpError(error: unknown): boolean {
   return error instanceof Error && "status" in error && rejectedHttpStatus(error.status);
 }
 
+/** One field's published bound: characters, list items, or decoded bytes. */
+export interface ForgetfulFieldBound {
+  max_length?: number;
+  max_items?: number;
+  max_decoded_bytes?: number;
+}
+
+/** Forgetful's published field limits by record type, for example `memory.content`. */
+export type ForgetfulFieldLimits = Record<string, Record<string, ForgetfulFieldBound>>;
+
 export interface ForgetfulClient {
   knowledge?: KnowledgeClient;
+  /** The server's published field limits; undefined when the server does not publish them. */
+  fieldLimits?(signal?: AbortSignal): Promise<ForgetfulFieldLimits | undefined>;
   getMemoryEntityIds?(id: number, signal?: AbortSignal): Promise<number[]>;
   search(request: SearchRequest, signal?: AbortSignal): Promise<Memory[]>;
   /** Query memory while retaining the server's grouped result and budget metadata. */

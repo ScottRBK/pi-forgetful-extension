@@ -1,5 +1,6 @@
 import type {
   ForgetfulClient,
+  ForgetfulFieldLimits,
   LinkedMemory,
   Memory,
   MemorySearchResult,
@@ -28,6 +29,34 @@ export interface ApiForgetfulClientOptions {
   timeoutMs?: number;
   maxResponseBytes?: number;
   fetchImpl?: typeof fetch;
+}
+
+const LIMIT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+const LIMIT_BOUNDS = ["max_length", "max_items", "max_decoded_bytes"] as const;
+
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+/** Keeps well-formed bounds only. Names reach model prompts, so they must be plain names. */
+export function parseFieldLimits(payload: unknown): ForgetfulFieldLimits | undefined {
+  const discovery = plainObject(payload);
+  const types = discovery?.schema_version === 1 ? plainObject(discovery.limits) : undefined;
+  const limits: ForgetfulFieldLimits = {};
+  for (const [type, fields] of Object.entries(types ?? {})) {
+    if (!LIMIT_NAME.test(type)) continue;
+    for (const [field, value] of Object.entries(plainObject(fields) ?? {})) {
+      const bound = plainObject(value);
+      if (!bound || !LIMIT_NAME.test(field)) continue;
+      const kept = Object.fromEntries(LIMIT_BOUNDS.flatMap((key) => {
+        const limit = bound[key];
+        return Number.isSafeInteger(limit) && (limit as number) > 0 ? [[key, limit]] : [];
+      }));
+      if (Object.keys(kept).length) (limits[type] ??= {})[field] = kept;
+    }
+  }
+  return Object.keys(limits).length ? limits : undefined;
 }
 
 export class ForgetfulHttpError extends Error {
@@ -456,6 +485,18 @@ export class ForgetfulHttpTransport {
     const url = new URL(this.baseUrl);
     url.pathname = url.pathname.replace(/\/api\/v1$/, "") + "/" + path.replace(/^\//, "");
     return this.request(url, "GET", undefined, signal, [200]);
+  }
+
+  /** Field limits from /.well-known; undefined when the server does not publish them. */
+  async fieldLimits(signal?: AbortSignal): Promise<ForgetfulFieldLimits | undefined> {
+    let payload: unknown;
+    try { payload = await this.getDeployment("/.well-known", signal); }
+    catch (error) {
+      if (error instanceof ForgetfulHttpError && (error.status === 404 || error.status === 405))
+        return undefined;
+      throw error;
+    }
+    return parseFieldLimits(payload);
   }
 
   protected endpoint(path: string): string {

@@ -108,6 +108,11 @@ test("dispatched link HTTP 404 is returned to the model through the real Pi SDK 
       response.end('{"error":"Link not found"}');
       return;
     }
+    if (request.method === "GET" && path === "/.well-known") {
+      response.statusCode = 404; // An older Forgetful publishes no field limits.
+      response.end("Not Found");
+      return;
+    }
     unexpectedRequests.push(`${request.method} ${path}`);
     response.statusCode = 500;
     response.end('{"error":"Unexpected fixture request"}');
