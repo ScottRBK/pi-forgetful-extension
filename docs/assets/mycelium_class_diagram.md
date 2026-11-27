@@ -14,7 +14,7 @@ Mode: exclude.
 Saved detector version: 2.
 Test paths: `scripts/forgetful-test-server.py`, `test`.
 Keep paths: none.
-Calls removed by test filtering: 806. Type relationships removed: 194.
+Calls removed by test filtering: 813. Type relationships removed: 194.
 
 - `scripts/forgetful-test-server.py`: 4 source occurrences (test-path).
 - `test/async-recall-pi-integration.test.ts`: 16 source occurrences (test-path).
@@ -29,6 +29,7 @@ Calls removed by test filtering: 806. Type relationships removed: 194.
 - `test/capture-drain-pi.test.ts`: 7 source occurrences (test-path).
 - `test/capture-error-diagnostic.test.ts`: 2 source occurrences (test-path).
 - `test/capture-execution.test.ts`: 4 source occurrences (test-path).
+- `test/capture-field-limits.test.ts`: 2 source occurrences (test-path).
 - `test/capture-gate-pi.test.ts`: 3 source occurrences (test-path).
 - `test/capture-history-model.test.ts`: 4 source occurrences (test-path).
 - `test/capture-history-restart-pi.test.ts`: 7 source occurrences (test-path).
@@ -70,6 +71,7 @@ Calls removed by test filtering: 806. Type relationships removed: 194.
 - `test/forgetful-integration.test.ts`: 3 source occurrences (test-path).
 - `test/full-conversation-pi.test.ts`: 2 source occurrences (test-path).
 - `test/http-validation.test.ts`: 2 source occurrences (test-path).
+- `test/http.test.ts`: 5 source occurrences (test-path).
 - `test/knowledge-capture.test.ts`: 21 source occurrences (test-path).
 - `test/knowledge-execution.test.ts`: 4 source occurrences (test-path).
 - `test/knowledge-exploration-errors.test.ts`: 6 source occurrences (test-path).
@@ -1820,10 +1822,10 @@ classDiagram
     class c0172["src/http-knowledge.ts"] {
         <<module>>
         object(value: unknown) Type9
-        text(value: unknown, max: number, empty: unknown, field: unknown) string
+        text(value: unknown, empty: unknown, field: unknown) string
         id(value: unknown) number
         ids(value: unknown) number[]
-        strings(value: unknown, max: unknown) string[]
+        strings(value: unknown) string[]
         records(value: unknown, key: string) unknown[]
         provenance(value: Type9) Provenance
         entityBody(input: Partial~EntityInput~, partial: unknown) Type9
@@ -4136,16 +4138,16 @@ classDiagram
 - c0167: `State` — `src/extension.ts`:433
 - c0168: `src/extension.ts` — `src/extension.ts`:1
 - c0169: `src/foreground-tools.ts` — `src/foreground-tools.ts`:1
-- c0170: `ApiKnowledgeClient` — `src/http-knowledge.ts`:199
+- c0170: `ApiKnowledgeClient` — `src/http-knowledge.ts`:197
 - c0171: `KnowledgeRequest` — `src/http-knowledge.ts`:9
 - c0172: `src/http-knowledge.ts` — `src/http-knowledge.ts`:1
-- c0173: `ApiForgetfulClient` — `src/http.ts`:639
-- c0174: `ApiForgetfulClientOptions` — `src/http.ts`:26
-- c0175: `ForgetfulAbortError` — `src/http.ts`:88
-- c0176: `ForgetfulHttpError` — `src/http.ts`:62
-- c0177: `ForgetfulHttpTransport` — `src/http.ts`:423
-- c0178: `ForgetfulSchemaError` — `src/http.ts`:74
-- c0179: `ForgetfulTimeoutError` — `src/http.ts`:81
+- c0173: `ApiForgetfulClient` — `src/http.ts`:605
+- c0174: `ApiForgetfulClientOptions` — `src/http.ts`:21
+- c0175: `ForgetfulAbortError` — `src/http.ts`:86
+- c0176: `ForgetfulHttpError` — `src/http.ts`:60
+- c0177: `ForgetfulHttpTransport` — `src/http.ts`:389
+- c0178: `ForgetfulSchemaError` — `src/http.ts`:72
+- c0179: `ForgetfulTimeoutError` — `src/http.ts`:79
 - c0180: `src/http.ts` — `src/http.ts`:1
 - c0181: `Attachments` — `src/knowledge-read.ts`:51
 - c0182: `ExpansionContext` — `src/knowledge-read.ts`:39
