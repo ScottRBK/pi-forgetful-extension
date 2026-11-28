@@ -60,6 +60,11 @@ async function startPi(t: TestContext, logging = false, verbosity = "warning") {
   const projects = { projects: [{ id: 7, name: "Capture drain",
     repo_name: "test/capture-drain" }], total: 1 };
   const server = createServer((request, response) => {
+    if (request.url === "/.well-known") {
+      response.statusCode = 404; // An older Forgetful publishes no field limits.
+      response.end("Not Found");
+      return;
+    }
     assert.equal(new URL(request.url!, "http://localhost").pathname, "/api/v1/projects");
     response.setHeader("content-type", "application/json");
     if (ready) response.end(JSON.stringify(projects));

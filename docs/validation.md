@@ -3,8 +3,10 @@
 Current capture and recall checks. Original rule IDs are kept for reference.
 `REQUIRE` means reject if false. Limits are defaults. These checks cannot prove truth or relevance.
 Forgetful validates stored fields and server-owned search fields; its errors return to the model
-for correction. Setup, HTTP response parsing, queue-file integrity and independent CLI/MCP access
-are outside this list.
+for correction. Capture prompts tell the model the field limits that Forgetful publishes at
+`/.well-known`, read at most once per capture pass; without published limits they state no
+numbers. HTTP response parsing checks shape, not Forgetful's field lengths or counts. Setup, HTTP
+response parsing, queue-file integrity and independent CLI/MCP access are outside this list.
 
 ## Both
 

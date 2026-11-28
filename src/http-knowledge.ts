@@ -18,10 +18,11 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown, max: number, empty = false, field = "knowledge text"): string {
-  if (typeof value !== "string" || (!empty && !value.trim()) || value.length > max) {
-    throw new ForgetfulSchemaError(`Forgetful ${field} must be a string containing ` +
-      `${empty ? 0 : 1}–${max} characters${empty ? "" : ", not whitespace only"}.`);
+/** Forgetful owns field lengths and counts; readback checks only the shape. */
+function text(value: unknown, empty = false, field = "knowledge text"): string {
+  if (typeof value !== "string" || (!empty && !value.trim())) {
+    throw new ForgetfulSchemaError(`Forgetful ${field} must be a string` +
+      `${empty ? "" : " that is not empty or whitespace only"}.`);
   }
   return value;
 }
@@ -34,16 +35,15 @@ function id(value: unknown): number {
 }
 
 function ids(value: unknown): number[] {
-  if (!Array.isArray(value) || value.length > 1000) {
-    throw new ForgetfulSchemaError("Forgetful knowledge IDs must be a bounded array");
+  if (!Array.isArray(value)) {
+    throw new ForgetfulSchemaError("Forgetful knowledge IDs must be an array");
   }
   return value.map(id);
 }
 
-function strings(value: unknown, max = 10): string[] {
-  if (!Array.isArray(value) || value.length > max ||
-      value.some((item) => typeof item !== "string")) {
-    throw new ForgetfulSchemaError("Forgetful knowledge strings must be a bounded array of text");
+function strings(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new ForgetfulSchemaError("Forgetful knowledge strings must be an array of text");
   }
   return [...value];
 }
@@ -59,14 +59,14 @@ function records(value: unknown, key: string): unknown[] {
 function provenance(value: Record<string, unknown>): Provenance {
   return {
     ...(value.source_repo == null ? {} : {
-      source_repo: text(value.source_repo, 200, false, "source_repo"),
+      source_repo: text(value.source_repo, false, "source_repo"),
     }),
-    ...(value.source_files == null ? {} : { source_files: strings(value.source_files, 100) }),
+    ...(value.source_files == null ? {} : { source_files: strings(value.source_files) }),
     ...(value.source_url == null ? {} : {
-      source_url: text(value.source_url, 2048, false, "source_url"),
+      source_url: text(value.source_url, false, "source_url"),
     }),
     ...(value.encoding_version == null ? {} : {
-      encoding_version: text(value.encoding_version, 50, false, "encoding_version"),
+      encoding_version: text(value.encoding_version, false, "encoding_version"),
     }),
   };
 }
@@ -76,7 +76,7 @@ const entityTypes = new Set(["Organization", "Individual", "Team", "Device", "Sy
 function entityBody(input: Partial<EntityInput>, partial = false): Record<string, unknown> {
   const value = object(input);
   const result: Record<string, unknown> = { ...provenance(value) };
-  if (!partial || value.name !== undefined) result.name = text(value.name, 200, false, "name");
+  if (!partial || value.name !== undefined) result.name = text(value.name, false, "name");
   if (!partial || value.entity_type !== undefined) {
     if (!entityTypes.has(value.entity_type as string)) {
       throw new ForgetfulSchemaError("Forgetful entity type is invalid");
@@ -84,11 +84,11 @@ function entityBody(input: Partial<EntityInput>, partial = false): Record<string
     result.entity_type = value.entity_type;
   }
   if (value.custom_type != null)
-    result.custom_type = text(value.custom_type, 100, false, "custom_type");
+    result.custom_type = text(value.custom_type, false, "custom_type");
   if (value.entity_type === "Other" && !result.custom_type) {
     throw new ForgetfulSchemaError("Other entities require custom_type");
   }
-  if (value.notes != null) result.notes = text(value.notes, 4000, true, "notes");
+  if (value.notes != null) result.notes = text(value.notes, true, "notes");
   for (const key of ["aka", "tags"] as const) {
     if (!partial || value[key] !== undefined) result[key] = strings(value[key] ?? []);
   }
@@ -108,7 +108,7 @@ function relationshipBody(input: EntityRelationshipInput): Record<string, unknow
     ...provenance(object(input)),
     source_entity_id: id(input.source_entity_id),
     target_entity_id: id(input.target_entity_id),
-    relationship_type: text(input.relationship_type, 100, false, "relationship_type"),
+    relationship_type: text(input.relationship_type, false, "relationship_type"),
   };
 }
 
@@ -132,18 +132,16 @@ function resourceBody(
 ): Record<string, unknown> {
   const value = object(input);
   const result: Record<string, unknown> = { ...provenance(value) };
-  const fields: [string, number][] = [["title", 500], ["description", 5000]];
-  if (code) fields.push(["code", 50_000], ["language", 100]);
-  else fields.push(["content", 100_000]);
-  for (const [key, max] of fields) {
-    if (!partial || value[key] !== undefined) result[key] = text(value[key], max, false, key);
+  const fields = ["title", "description", ...(code ? ["code", "language"] : ["content"])];
+  for (const key of fields) {
+    if (!partial || value[key] !== undefined) result[key] = text(value[key], false, key);
   }
   if (!partial || value.tags !== undefined) result.tags = strings(value.tags ?? []);
   if (value.project_id !== undefined) {
     result.project_id = value.project_id === null ? null : id(value.project_id);
   }
   if (!code && value.document_type != null) {
-    result.document_type = text(value.document_type, 100, false, "document_type");
+    result.document_type = text(value.document_type, false, "document_type");
   }
   return result;
 }
@@ -165,11 +163,11 @@ function artifact(value: unknown): CodeArtifact {
 function summary(value: unknown, code: boolean): DocumentSummary | CodeArtifactSummary {
   const item = object(value);
   const result = {
-    ...provenance(item), id: id(item.id), title: text(item.title, 500),
-    description: text(item.description, 5000), tags: strings(item.tags),
+    ...provenance(item), id: id(item.id), title: text(item.title),
+    description: text(item.description), tags: strings(item.tags),
     project_id: item.project_id == null ? null : id(item.project_id),
   };
-  return code ? { ...result, language: text(item.language, 100) } : result;
+  return code ? { ...result, language: text(item.language) } : result;
 }
 
 /** Keep caller-controlled IDs within one URL segment, including dot-only segments. */
@@ -189,8 +187,8 @@ function fileSummary(value: unknown): FileSummary {
     throw new ForgetfulSchemaError("Forgetful file size must be a non-negative integer");
   }
   return {
-    id: id(item.id), filename: text(item.filename, 500),
-    description: text(item.description, 5000), mime_type: text(item.mime_type, 255),
+    id: id(item.id), filename: text(item.filename),
+    description: text(item.description), mime_type: text(item.mime_type),
     size_bytes: Number(item.size_bytes), tags: strings(item.tags),
     project_id: item.project_id == null ? null : id(item.project_id),
   };
@@ -232,7 +230,7 @@ export class ApiKnowledgeClient implements KnowledgeClient {
       undefined, signal, [200]);
     return records(result, "memories").map((raw) => {
       const item = object(raw);
-      return { id: id(item.id), title: text(item.title, 200) };
+      return { id: id(item.id), title: text(item.title) };
     });
   }
 
@@ -340,7 +338,7 @@ export class ApiKnowledgeClient implements KnowledgeClient {
     const result = object(await this.request(`/files/${requestSegment(fileId)}`, "GET",
       undefined, signal, [200]));
     const summary = fileSummary(result);
-    const data = text(result.data, 14_000_000);
+    const data = text(result.data);
     const decoded = Buffer.from(data, "base64");
     if (decoded.toString("base64") !== data || decoded.length !== summary.size_bytes) {
       throw new ForgetfulSchemaError(

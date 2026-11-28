@@ -732,8 +732,12 @@ Pi does not expose unsaved host compaction overrides to extensions. Native image
 image-capable memory model; unsupported images are not silently omitted.
 
 The reviewed recall summary still has a 3,000-character limit. Stored records retain Forgetful's
-field limits. Oversized submitted fields are validation errors returned to the model for correction,
-not silently shortened. Increasing a model's allowance does not extend its request deadline.
+field limits. Capture prompts tell the model the limits that Forgetful publishes at `/.well-known`,
+read at most once per capture pass when a prompt needs them. The model can still exceed them; an
+older Forgetful without published limits gets no numbers. The extension does not apply its own
+field limits to requests or responses. Oversized submitted fields are validation errors returned
+to the model for correction, not silently shortened. Increasing a model's allowance does not
+extend its request deadline.
 
 Background requests use Pi's model registry for authentication and carry the current session ID,
 including the OpenCode session headers. Pi 0.85.1 does not expose the active session's provider

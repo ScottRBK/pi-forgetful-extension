@@ -1,5 +1,6 @@
 import type {
   ForgetfulClient,
+  ForgetfulFieldLimits,
   LinkedMemory,
   Memory,
   MemorySearchResult,
@@ -14,12 +15,7 @@ import { repositoryName } from "./repository.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
-const MEMORY_TITLE_MAX = 200;
-const MEMORY_CONTENT_MAX = 2_000;
-const MEMORY_CONTEXT_MAX = 500;
-const MEMORY_LIST_MAX = 10;
 const PROJECT_NAME_MAX = 500;
-const PROJECT_REPO_MAX = 255;
 const PROJECT_DESCRIPTION_MAX = 5_000;
 
 export interface ApiForgetfulClientOptions {
@@ -28,6 +24,37 @@ export interface ApiForgetfulClientOptions {
   timeoutMs?: number;
   maxResponseBytes?: number;
   fetchImpl?: typeof fetch;
+}
+
+const LIMIT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+const LIMIT_BOUNDS = ["max_length", "max_items", "max_decoded_bytes"] as const;
+
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+/**
+ * Keeps well-formed bounds only. Names reach model prompts, so they must be plain names.
+ * Null-prototype maps keep a server name such as "constructor" as data.
+ */
+export function parseFieldLimits(payload: unknown): ForgetfulFieldLimits | undefined {
+  const discovery = plainObject(payload);
+  const types = discovery?.schema_version === 1 ? plainObject(discovery.limits) : undefined;
+  const limits: ForgetfulFieldLimits = Object.create(null);
+  for (const [type, fields] of Object.entries(types ?? {})) {
+    if (!LIMIT_NAME.test(type)) continue;
+    for (const [field, value] of Object.entries(plainObject(fields) ?? {})) {
+      const bound = plainObject(value);
+      if (!bound || !LIMIT_NAME.test(field)) continue;
+      const kept = Object.fromEntries(LIMIT_BOUNDS.flatMap((key) => {
+        const limit = bound[key];
+        return Number.isSafeInteger(limit) && (limit as number) >= 0 ? [[key, limit]] : [];
+      }));
+      if (Object.keys(kept).length) (limits[type] ??= Object.create(null))[field] = kept;
+    }
+  }
+  return Object.keys(limits).length ? limits : undefined;
 }
 
 export class ForgetfulHttpError extends Error {
@@ -162,20 +189,6 @@ function parseMemory(value: unknown, where: string): Memory {
   const context = requiredString(value.context, `${where}.context`, true);
   const keywords = stringArray(value.keywords, `${where}.keywords`);
   const tags = stringArray(value.tags, `${where}.tags`);
-  if (
-    title.length > MEMORY_TITLE_MAX ||
-    content.length > MEMORY_CONTENT_MAX ||
-    context.length > MEMORY_CONTEXT_MAX
-  ) {
-    throw new ForgetfulSchemaError(
-      `${where} contains an overlong memory field`,
-    );
-  }
-  if (keywords.length > MEMORY_LIST_MAX || tags.length > MEMORY_LIST_MAX) {
-    throw new ForgetfulSchemaError(
-      `${where} contains too many keywords or tags`,
-    );
-  }
   const projectIds = integerArray(value.project_ids, `${where}.project_ids`);
   if (typeof value.is_obsolete !== "boolean") {
     throw new ForgetfulSchemaError(
@@ -218,32 +231,14 @@ function parseProject(value: unknown, where: string): Project {
     id: requiredInteger(value.id, `${where}.id`),
     name: requiredString(value.name, `${where}.name`),
   };
-  if (project.name.length > PROJECT_NAME_MAX) {
-    throw new ForgetfulSchemaError(
-      `Forgetful response field ${where}.name is too long`,
-    );
-  }
   if (value.repo_name !== undefined && value.repo_name !== null) {
     project.repo_name = optionalString(value.repo_name, `${where}.repo_name`);
-    if (project.repo_name && project.repo_name.length > PROJECT_REPO_MAX) {
-      throw new ForgetfulSchemaError(
-        `Forgetful response field ${where}.repo_name is too long`,
-      );
-    }
   }
   if (value.description !== undefined && value.description !== null) {
     project.description = optionalString(
       value.description,
       `${where}.description`,
     );
-    if (
-      project.description &&
-      project.description.length > PROJECT_DESCRIPTION_MAX
-    ) {
-      throw new ForgetfulSchemaError(
-        `Forgetful response field ${where}.description is too long`,
-      );
-    }
   }
   return project;
 }
@@ -456,6 +451,18 @@ export class ForgetfulHttpTransport {
     const url = new URL(this.baseUrl);
     url.pathname = url.pathname.replace(/\/api\/v1$/, "") + "/" + path.replace(/^\//, "");
     return this.request(url, "GET", undefined, signal, [200]);
+  }
+
+  /** Field limits from /.well-known; undefined when the server does not publish them. */
+  async fieldLimits(signal?: AbortSignal): Promise<ForgetfulFieldLimits | undefined> {
+    let payload: unknown;
+    try { payload = await this.getDeployment("/.well-known", signal); }
+    catch (error) {
+      if (error instanceof ForgetfulHttpError && (error.status === 404 || error.status === 405))
+        return undefined;
+      throw error;
+    }
+    return parseFieldLimits(payload);
   }
 
   protected endpoint(path: string): string {

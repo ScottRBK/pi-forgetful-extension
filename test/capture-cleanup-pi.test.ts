@@ -51,7 +51,10 @@ for (const failure of ["provider", "submission"] as const) {
       const unexpectedRequests: string[] = [];
       const server = createServer((request, response) => {
         response.setHeader("content-type", "application/json");
-        if (request.method === "GET" && request.url?.startsWith("/api/v1/projects")) {
+        if (request.method === "GET" && request.url === "/.well-known") {
+          response.statusCode = 404; // An older Forgetful publishes no field limits.
+          response.end("{}");
+        } else if (request.method === "GET" && request.url?.startsWith("/api/v1/projects")) {
           response.end(JSON.stringify({ projects: [
             { id: 7, name: "Cleanup test", repo_name: "test/capture-cleanup" },
           ], total: 1 }));

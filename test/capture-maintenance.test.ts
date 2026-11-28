@@ -500,6 +500,170 @@ test("a merge preservation 404 is returned to correction, not left uncertain", r
     assert.equal((await api.get(old.id)).is_obsolete, true);
   });
 
+test("capture prompts state the field limits configured on the server", realOptions,
+  async (t) => {
+    // Arrange: the server allows 1000 content characters; the first merge text is over it.
+    const { client, project, queue } = await fixture(t,
+      { MEMORY_NUM_AUTO_LINK: "0", MEMORY_CONTENT_MAX_LENGTH: "1000" });
+    const old = await client.create({ ...fact, project_ids: [project.id] });
+    const policies = new Map<string, string>();
+    let composed = false;
+    const model = { async complete(request: ModelRequest) {
+      await request.readTools?.find(tool => tool.name === "report_capture_execution_failure")
+        ?.execute({}, new AbortController().signal);
+      const name = request.submission.name;
+      policies.set(name, request.policy);
+      let response: unknown;
+      if (request.purpose === "capture") response = { candidates: [addition] };
+      else if (name === "submit_capture_decision")
+        response = { action: "merge", conflictingMemoryIds: [old.id], reason: "Add the guard." };
+      else if (name === "submit_capture_merge") {
+        response = composed ? combined : { ...combined, content: "x".repeat(1001) };
+        composed = true;
+      } else if (name === "submit_capture_correction") {
+        response = { candidate: { ...(request.input as any).candidate,
+          content: combined.content } };
+      } else assert.fail(`Unexpected semantic review: ${name}`);
+      request.submission.validate(response);
+      return response;
+    } };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    // Assert: each writing prompt states the server's limit, not a built-in number.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    for (const name of ["submit_capture_candidates", "submit_capture_merge",
+      "submit_capture_correction"]) {
+      const policy = policies.get(name) ?? "";
+      assert.match(policy, /memory: [^;]*content 1000\b/, name);
+      assert.doesNotMatch(policy, /\b2000\b/, name);
+    }
+  });
+
+test("capture prompts give no limits when the server does not publish them", realOptions,
+  async (t) => {
+    // Arrange: an older server's discovery document has no limits.
+    const { baseUrl, client: api, project, queue } = await fixture(t);
+    const old = await api.create({ ...fact, project_ids: [project.id] });
+    let discovery = 0;
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (!new URL(String(url)).pathname.endsWith("/.well-known")) return fetch(url, init);
+      discovery++;
+      return Response.json({ schema_version: 1, capabilities: { planning: false } });
+    } });
+    const policies: string[] = [];
+    const model = mergeModel([old.id]);
+    const complete = model.complete;
+    model.complete = async (request) => {
+      policies.push(request.policy);
+      return complete(request);
+    };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    // Assert: Forgetful still validates; the prompts state no numbers of their own.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(discovery, 1, "capture asks the server once per pass");
+    assert.ok(policies.length >= 3);
+    for (const policy of policies) {
+      assert.doesNotMatch(policy, /field limits/i);
+      assert.doesNotMatch(policy, /at most \d+ characters/);
+    }
+  });
+
+test("each capture pass states the limits the server publishes at that time", realOptions,
+  async (t) => {
+    // Arrange: the call budget ends pass 1 after extraction and the merge decision.
+    const { baseUrl, client: api, project, queue } = await fixture(t);
+    const old = await api.create({ ...fact, project_ids: [project.id] });
+    let discovery = 0;
+    const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+      if (!new URL(String(url)).pathname.endsWith("/.well-known")) return fetch(url, init);
+      discovery++;
+      const max_length = discovery === 1 ? 1500 : 1700;
+      return Response.json({ schema_version: 1, limits: { memory: { content: { max_length } } } });
+    } });
+    const policies = new Map<string, string>();
+    const model = mergeModel([old.id]);
+    const complete = model.complete;
+    model.complete = async (request) => {
+      policies.set(request.submission.name, request.policy);
+      return complete(request);
+    };
+    const service = new CaptureService({ client, queue, instanceId: "maintenance", model,
+      maxModelCalls: 2 });
+    // Act.
+    const queued = await service.enqueue(snapshot(project));
+    await service.checkpoint();
+    await service.checkpoint();
+    // Assert: pass 2 reads the limits again and states the new value.
+    const job = (await queue.getJob(queued.jobId))!;
+    assert.equal(job.status, "complete", job.lastError);
+    assert.equal(discovery, 2);
+    assert.match(policies.get("submit_capture_candidates") ?? "", /content 1500\b/);
+    assert.match(policies.get("submit_capture_merge") ?? "", /content 1700\b/);
+  });
+
+for (const { site, trigger, maxModelCalls, offAt } of [
+  { site: "submit_capture_candidates", trigger: "turned off", maxModelCalls: undefined, offAt: 1 },
+  { site: "submit_capture_candidates", trigger: "stopped", maxModelCalls: undefined, offAt: 1 },
+  { site: "submit_capture_merge", trigger: "turned off", maxModelCalls: 2, offAt: 2 },
+  { site: "submit_capture_correction", trigger: "turned off", maxModelCalls: 3, offAt: 2 },
+] as const) {
+  test(`capture ${trigger} while limits load calls no model for ${site}`, realOptions,
+    async (t) => {
+      // Arrange: earlier passes use the call budget so that this site reads the limits first.
+      const { baseUrl, client: api, project, queue } = await fixture(t);
+      const old = await api.create({ ...fact, project_ids: [project.id] });
+      let enabled = true;
+      let discovery = 0;
+      let service: CaptureService | undefined;
+      const client = new ApiForgetfulClient({ baseUrl, fetchImpl: async (url, init) => {
+        if (new URL(String(url)).pathname.endsWith("/.well-known") && ++discovery === offAt) {
+          if (trigger === "stopped") service!.stop();
+          else enabled = false;
+        }
+        return fetch(url, init);
+      } });
+      const late: string[] = [];
+      let composed = false;
+      const base = mergeModel([old.id], undefined, addition);
+      const model = {
+        // History summaries for extraction are model calls too.
+        async prepareCapture() {
+          if (discovery >= offAt) late.push("history summary");
+          return "ready" as const;
+        },
+        async complete(request: ModelRequest) {
+          if (discovery >= offAt) late.push(request.submission.name);
+          // The correction site needs a rejected first composition.
+          if (request.submission.name === "submit_capture_merge" && !composed &&
+              site === "submit_capture_correction") {
+            composed = true;
+            const response = { ...combined, content: "x".repeat(2001) };
+            request.submission.validate(response);
+            return response;
+          }
+          return base.complete(request);
+        },
+      };
+      service = new CaptureService({ client, queue, instanceId: "maintenance", model,
+        maxModelCalls, isEnabled: () => enabled });
+      const queued = await service.enqueue(snapshot(project));
+      // Act.
+      for (let pass = 1; pass <= offAt; pass++) await service.checkpoint();
+      // Assert: no model call after the change; the job waits for a later pass.
+      const job = (await queue.getJob(queued.jobId))!;
+      assert.equal(discovery, offAt);
+      assert.deepEqual(late, []);
+      assert.ok(["pending", "paused"].includes(job.status), `${job.status}: ${job.lastError}`);
+    });
+}
+
 test("merge preserves connections added to a predecessor while preservation is running",
   realOptions, async (t) => {
     // Arrange: another client adds a connection after the first inherited edge is accepted.

@@ -2,7 +2,7 @@
 export const legacy = {
   core: ["contracts", "policies", "repository", "concurrency", "privacy", "memory-context"],
   application: [
-    "recall", "capture", "capture-feedback", "capture-links", "capture-merge",
+    "recall", "capture", "capture-feedback", "capture-limits", "capture-links", "capture-merge",
     "knowledge-read", "knowledge-write", "knowledge-tools",
   ],
   pi: [

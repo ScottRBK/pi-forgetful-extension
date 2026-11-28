@@ -263,8 +263,8 @@ REST/settings cannot reach Pi or the application workflow. New core cannot impor
 | Legacy role | Files under `src/` (`.ts` omitted) |
 | --- | --- |
 | Core | `contracts`, `policies`, `repository`, `concurrency`, `privacy`, `memory-context` |
-| Application | `recall`, `capture`, `capture-feedback`, `capture-links`, `capture-merge` |
-| Application, continued | `knowledge-read`, `knowledge-write`, `knowledge-tools` |
+| Application | `recall`, `capture`, `capture-feedback`, `capture-limits`, `capture-links` |
+| Application, continued | `capture-merge`, `knowledge-read`, `knowledge-write`, `knowledge-tools` |
 | Pi/model | `activity`, `foreground-tools`, `setup`, `model`, `model-context` |
 | Pi/core mixtures | `snapshot`, `project-init` |
 | REST | `http`, `http-knowledge` |

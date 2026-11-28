@@ -427,3 +427,80 @@ describe("memory graph validation", () => {
     await assert.rejects(oversized.getMemoryEntityIds(87), /size limit/);
   });
 });
+
+describe("field limit discovery", () => {
+  function discoveryClient(limits: unknown) {
+    return new ApiForgetfulClient({ baseUrl: "http://localhost/api/v1",
+      fetchImpl: async () => Response.json({ schema_version: 1, limits }) });
+  }
+
+  it("keeps a type named constructor as data, not as the shared Object", async () => {
+    // Arrange: a server-supplied type name that is also a built-in object property.
+    const client = discoveryClient({ constructor: { probe_field: { max_length: 5 } } });
+
+    // Act.
+    let limits;
+    try {
+      limits = await client.fieldLimits();
+    } finally {
+      const polluted = Object.hasOwn(Object, "probe_field");
+      delete (Object as unknown as Record<string, unknown>).probe_field;
+      // Assert: the shared Object constructor is untouched.
+      assert.equal(polluted, false);
+    }
+    assert.deepEqual(limits?.["constructor"]?.["probe_field"], { max_length: 5 });
+  });
+
+  it("keeps a published zero bound", async () => {
+    // Arrange / Act: zero tags allowed means only an empty list is valid.
+    const limits = await discoveryClient({ memory: { tags: { max_items: 0 } } }).fieldLimits();
+
+    // Assert.
+    assert.deepEqual(limits?.memory?.tags, { max_items: 0 });
+  });
+});
+
+describe("readback of server-sized fields", () => {
+  // A server can raise its limits; readback must accept what the server stored.
+  const long = (size: number) => "x".repeat(size);
+  const strings = (count: number) => Array.from({ length: count }, (_, i) => `item-${i}`);
+  const ids = (count: number) => Array.from({ length: count }, (_, i) => i + 1);
+  const provenance = { source_repo: long(300), source_files: strings(150),
+    source_url: `https://example.com/${long(3000)}`, encoding_version: long(80) };
+  const big = { ...memory, title: long(300), content: long(3200), context: long(800),
+    keywords: strings(12), tags: strings(12), linked_memory_ids: ids(1200), ...provenance };
+  const entity = { id: 4, name: long(300), entity_type: "Other", custom_type: long(150),
+    notes: long(5000), aka: strings(12), tags: strings(12), project_ids: ids(1200), ...provenance };
+  const resource = { id: 5, title: long(600), description: long(6000), tags: strings(12),
+    project_id: 3, ...provenance };
+  const cases: [string, (client: ApiForgetfulClient) => Promise<unknown>, unknown][] = [
+    ["memory", (client) => client.get(7), big],
+    ["projects", (client) => client.listProjects(), { projects: [{ id: 3, name: long(600),
+      repo_name: long(300), description: long(6000) }] }],
+    ["entity", (client) => client.knowledge.getEntity(4), entity],
+    ["entity memories", (client) => client.knowledge.getEntityMemories(4),
+      { memories: [{ id: 7, title: long(300) }] }],
+    ["relationships", (client) => client.knowledge.getRelationships(4), { relationships: [{
+      id: 6, source_entity_id: 4, target_entity_id: 8, relationship_type: long(150) }] }],
+    ["document", (client) => client.knowledge.getDocument(5), { ...resource,
+      content: long(120_000), document_type: long(150) }],
+    ["documents", (client) => client.knowledge.listDocuments(), { documents: [resource] }],
+    ["code artifact", (client) => client.knowledge.getCodeArtifact(5), { ...resource,
+      code: long(60_000), language: long(150) }],
+    ["code artifacts", (client) => client.knowledge.listCodeArtifacts(),
+      { code_artifacts: [{ ...resource, language: long(150) }] }],
+    ["files", (client) => client.knowledge.listFiles(), { files: [{ id: 9,
+      filename: long(600), description: long(6000), mime_type: long(300), size_bytes: 0,
+      tags: strings(12), project_id: null }] }],
+  ];
+  for (const [name, read, payload] of cases) {
+    it(`accepts a ${name} response with fields over the old built-in limits`, async () => {
+      // Arrange.
+      const client = new ApiForgetfulClient({ baseUrl: "http://localhost/api/v1",
+        fetchImpl: async () => Response.json(payload) });
+
+      // Act / Assert: no extension-side length or count limit rejects stored data.
+      await assert.doesNotReject(read(client));
+    });
+  }
+});
