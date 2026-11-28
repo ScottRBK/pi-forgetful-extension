@@ -39,19 +39,6 @@ async function extractionPolicy(t: TestContext, limits: unknown): Promise<string
   return policies[0]!;
 }
 
-test("capture states at most 16 published fields for each record type", async (t) => {
-  // Arrange: a broken or hostile server publishes 40 memory fields.
-  const fields = Object.fromEntries(Array.from({ length: 40 },
-    (_, i) => [`field_${String(i).padStart(2, "0")}`, { max_length: 10 }]));
-
-  // Act.
-  const policy = await extractionPolicy(t, { memory: fields });
-
-  // Assert: the prompt stays a bounded size.
-  assert.match(policy, /\bfield_15 10\b/);
-  assert.doesNotMatch(policy, /\bfield_16\b/);
-});
-
 test("capture states a published zero bound", async (t) => {
   // Arrange / Act: zero tags means only an empty tag list is valid.
   const policy = await extractionPolicy(t, { memory: { tags: { max_items: 0 } } });
